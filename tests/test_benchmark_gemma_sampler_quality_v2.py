@@ -609,6 +609,42 @@ def test_execution_phase_selection_requires_two_temps_or_three_tuples() -> None:
         execution._source_language_name({"language": "unknown"})
 
 
+def _router_runtime_contract(*, gemma_context_size: str) -> SimpleNamespace:
+    model = SimpleNamespace(
+        model_sha256="a" * 64,
+        ready_manifest_sha256="b" * 64,
+        runtime_options={"LLAMA_CTX_SIZE": gemma_context_size},
+    )
+    return SimpleNamespace(
+        effective_environment={},
+        fingerprint="router-fingerprint",
+        image_ref=protocol.PINNED_LLAMA_CPP_IMAGE,
+        image_id="sha256:image",
+        repo_digest="ghcr.io/ggml-org/llama.cpp@sha256:image",
+        binary_version="llama.cpp b10133",
+        command_sha256="c" * 64,
+        preset_sha256="d" * 64,
+        ocr_model=model,
+        gemma_model=model,
+    )
+
+
+def test_runtime_contract_uses_router_gemma_model_context_not_container_environment() -> None:
+    contract = _router_runtime_contract(gemma_context_size="4096")
+    contract.effective_environment = {"LLAMA_CTX_SIZE": "8192"}
+
+    payload = execution._assert_runtime_contract(SimpleNamespace(contract=contract))
+
+    assert payload["effective_context_size"] == "4096"
+
+
+def test_runtime_contract_rejects_router_gemma_model_context_drift() -> None:
+    contract = _router_runtime_contract(gemma_context_size="8192")
+
+    with pytest.raises(execution.ExecutionError, match="Gemma model context size"):
+        execution._assert_runtime_contract(SimpleNamespace(contract=contract))
+
+
 def test_rank_report_never_serializes_missing_usage_as_nonstandard_infinity() -> None:
     ranked = judgment.rank_sampler_results(
         [
