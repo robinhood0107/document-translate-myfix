@@ -86,7 +86,8 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 - Compose file: `/paddleocr_vl_docker_files/docker-compose.yaml`
 - Inference backend: pinned llama.cpp with the official PaddleOCR-VL 1.6
   GGUF and multimodal projector
-- Layout frontend: pinned PaddleX/PaddleOCR image
+- Request path: detector crop -> direct llama.cpp `OCR:` request. The managed
+  crop route does not start a PaddleX layout pipeline or a vLLM process.
 - Runtime/model references:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
@@ -108,10 +109,9 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 The app then starts the managed runtime automatically when PaddleOCR VL is
 needed. It mounts the prepared model volume read-only, reuses only exact
-stopped containers, and force-recreates stale containers. After an OCR stage,
-llama.cpp unloads the model after five idle seconds while the lightweight
-containers remain available; failure to confirm unload falls back to a normal
-`stop`. The automatic path never uses `down`.
+stopped containers, and force-recreates stale containers. The application
+ends the OCR stage explicitly before releasing the model; failure to confirm
+release falls back to a normal `stop`. The automatic path never uses `down`.
 
 The stage-batched folder workflow can also reuse exact crop results from the
 persistent OCR cache configured under `Settings > PaddleOCR VL Settings`.
@@ -141,12 +141,13 @@ mode, and `1,605,632` projector pixel budget. The crop route keeps its original
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
 - Translator: `Custom Local Server(Gemma)` after the Gemma volume is prepared
 
-Project stage checkpoints are available as a default-off preview under
-`Settings > Project`. Save the `.ctpr` file before using its cache management
-actions. The adjacent `.ctpr.cache` folder is disposable and is never required
-to open the project. When valid, it restores detection, raw OCR, inpaint masks
-and cleaned artifacts, and render outputs. Translation content stays in the
-project file and is accepted only when its sidecar signature matches.
+Project stage checkpoints are enabled once by the validated migration under
+`Settings > Project`, while later user choices are preserved. Save the `.ctpr`
+file before using its cache management actions. The adjacent `.ctpr.cache`
+folder is disposable and is never required to open the project. When valid, it
+restores detection, raw OCR, inpaint masks and cleaned artifacts, and render
+outputs. Translation content stays in the project file and is accepted only
+when its sidecar signature matches.
 
 Routing summary:
 

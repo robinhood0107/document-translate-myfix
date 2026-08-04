@@ -3,6 +3,10 @@
 이 문서는 이 저장소의 Git 규칙, 브랜치 정책, CI/CD 흐름, 번역 반영 규칙의 단일 기준 문서다.
 사람과 에이전트 모두 이 문서를 먼저 읽고 작업해야 하며, 이 문서와 다른 문서가 충돌하면 이 문서를 우선한다.
 
+`AGENTS.md`는 Codex가 읽는 짧은 작업 진입점이고, `CLAUDE.md`는
+Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘은 이
+문서의 요약만 담으며 독자적인 정책을 만들지 않는다.
+
 ## 1. 기본 원칙
 
 - `main`과 `develop`은 보호 브랜치다.
@@ -20,6 +24,7 @@
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
 - 현재 공식 Windows 개발 PC에서는 공통 Python 검사와 빠른 단위 테스트를 가능한 한 `.venv-win`, `.venv-win-cuda13` 양쪽에서 실행한다. CUDA 버전에 종속된 실행·패키징 검사는 해당 환경에서 따로 수행하고 결과를 구분해 기록한다.
 - 같은 checkout에서 두 Windows 환경의 Python 검사를 동시에 실행하지 않는다. `__pycache__` 파일 잠금 충돌을 피하도록 `.venv-win` 검사 후 `.venv-win-cuda13` 검사를 순차 실행하고, 필요하면 Python `-B` 옵션을 사용한다.
+- repository workflow, artifact handling, validation, branch, release, 또는 agent policy를 바꾸면 `AGENTS.md`, `CLAUDE.md`, `rules.md`를 같은 커밋과 PR에서 함께 갱신한다. 이 동기화는 local pre-commit hook과 PR CI가 검사한다. 기계적으로 강제할 수 있는 규칙이면 validator, hook, CI workflow, GitHub ruleset도 같은 PR에서 갱신한다.
 
 ## 2. 브랜치 모델
 
@@ -59,7 +64,7 @@
 - benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 만든다.
 - 공식 점수 범위가 파이프라인 일부일 경우, 실행 범위와 점수 범위를 문서에 분리해 명시한다.
 - Windows benchmark family는 가능하면 `pipeline + suite`, `CUDA12 + CUDA13` BAT 쌍을 함께 제공한다.
-- raw 결과는 repo 밖 local validation log에 남긴다. `banchmark_result_log/`, `docs/assets/benchmarking/`, 이미지/아카이브/로그 산출물은 Git에 올리지 않는다.
+- raw 결과는 checkout 밖 intake validation log 또는 ignored `banchmark_result_log/` private archive에 남긴다. `banchmark_result_log/`, `docs/assets/benchmarking/`, 이미지/아카이브/로그 산출물은 Git에 올리지 않는다.
 - benchmark family는 최소한 아래 문서 세트를 함께 가진다.
   - workflow
   - usage
@@ -68,6 +73,15 @@
   - generated/latest report
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
 - `benchmarking/lab`도 실제 샘플 이미지, 테스트 결과 이미지, OCR/번역 로그, 작품명, 사용자 로컬 경로를 보관하는 장소로 쓰지 않는다.
+
+### Gemma sampler 번역 품질 판정 불변조건
+
+- Gemma sampler benchmark의 순위는 **추출·정규화한 번역문 품질만**으로 정한다. 정답과 글자가 다르다는 사실, 응답 envelope, 또는 strict parser 통과 여부만으로 품질 감점을 주지 않는다.
+- 원문과 필요한 문맥에 비추어 의미, 화자·대상·행동·관계·숫자·정체성, 부정·질문/선언·동의/강제, 검열·삭제·이름 마스킹, 그리고 한국어 문장을 실제로 훼손하는 혼합 token/외국어 잔재를 판정한다. 이 항목의 변형은 품질 오류다.
+- 의미를 보존한 존댓말·말투·어순·구두점·일반 동의어·의성어 차이는 통과시킨다. 자연스러움은 이들 의미 판정 다음의 순위 기준이다.
+- 알려진 channel frame의 대소문자 변형과 그 안의 thought 본문은 `translation` 값 안에 있어도 먼저 제거한다. choice 수·index·finish reason·JSON 여분 key·앞뒤 wrapper·후행 텍스트는 private 진단만 남기고 순위에는 쓰지 않는다.
+- 번역문을 하나도 추출할 수 없거나 서로 다른 번역문을 둘 이상 추출하면 `UNJUDGED`로 남기고 자동 승자를 막는다. 비어 있는 번역문 또는 정규화 뒤에도 남은 실제 혼합 token 손상만 자동 catastrophic이다.
+- 완료된 raw 응답은 수정하지 않는다. 판정 계약이 바뀌면 raw envelope에서 새 quality view를 메모리로 다시 만들어 재사용하며, 그 이유만으로 GPU 재실행을 요구하지 않는다.
 
 ## 2-1-1. 민감 산출물 / 원본명 금지 규칙
 
@@ -82,6 +96,40 @@
 
 테스트에는 `example_source_chapter`, `example source chapter v01 c01 (E)`, `C:\ExampleWorkspace\...`, `<validation-log-root>`, `<benchmark-log-root>` 같은 중립 fixture만 사용한다.
 이 규칙은 `scripts/validate_repo_policy.py`가 커밋, push, CI에서 검사한다.
+
+## 2-1-2. 로컬 검증 아카이브와 metadata 보존 이동
+
+- Git 제외 로컬 검증 아카이브의 canonical root는 저장소 루트의
+  `banchmark_result_log/`다. 이 legacy spelling은 호환성을 위해 유지한다.
+  올바른 철자의 `benchmark_result_log/`도 ignore 및 tracked-path 거부
+  대상으로 두어 우회 경로로 사용하지 않는다.
+- 이 아카이브에는 원문·실제 작품명·사용자 경로·raw OCR/번역 응답·검수표·이미지·mask·render·cache·모델·runtime log 등 private evidence를 보관한다. Git에 추적하거나 PR 본문·공개 문서에서 구체 경로를 인용하지 않는다.
+- 외부 validation 자료를 통합할 때는 먼저 private manifest를 만든다.
+  manifest에는 source identifier, relative path, 기능/PR 분류, size,
+  creation/modified/access time, attributes, reparse target, move 또는 제외
+  사유, post-move verification 결과를 기록한다.
+- 같은 Windows volume 안에서는 copy-then-delete 대신 metadata를 보존하는
+  atomic move만 사용한다. move 뒤에는 length, creation time, modified time,
+  attributes, hash가 필요한 문서의 hash, 그리고 link target을 source
+  manifest와 대조한다.
+- large raster media, source archives, model weights, active project outputs,
+  reparse points, SQLite DB와 WAL/SHM sidecar도 삭제하거나 public `docs/`에
+  남기지 않는다. private archive로 옮길 때는 독립 파일로 쪼개지 말고,
+  live writer가 없고 atomic unit이 확인된 경우에만 통째로 이동한다. reparse
+  point는 link provenance를 manifest로 보존하고 필요하면 legacy junction으로
+  해석을 유지한다.
+- 아카이브는 최소한 `gemma-translation`, `paddle-ocr`, `mangalmm-coo`,
+  `inpaint-mask-render`, `cache-checkpoint`, `runtime-release`,
+  `project-output`, `pr-governance`, `cross-cutting`처럼 기능/PR 단위로
+  크게 분류한다. 출처별 상대 경로도 보존하여 동명 실행 결과를 합치지 않는다.
+- 새 debug/benchmark script가 기본 private output을 만들 때는 managed
+  artifact harness를 사용하고, 분류 category를 명시한다. harness는
+  canonical ignored root 아래에서만 run manifest를 만들며, 이 manifest
+  contract는 빠른 unit test와 CI에서 검증한다. 사용자가 명시한 output
+  directory는 자동 archive 대상이 아닌 local override로 유지한다.
+- 민감 여부가 불명확하면 public `docs/`가 아니라 이 private archive에
+  둔다. `.gitignore`는 편의 장치일 뿐 보안 경계가 아니므로, tracked-path
+  validator와 PR redaction 검사를 계속 통과해야 한다.
 
 ## 2-2. 성능개선/버그수정 감사 문서 규칙
 
@@ -314,7 +362,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 ## 10-1. Main 문서 승격 정책
 
 - `main`에는 운영 필수 문서만 허용한다.
-  - 루트: `AGENTS.md`, `README.md`, `README_ko.md`, `rules.md`
+  - 루트: `AGENTS.md`, `CLAUDE.md`, `README.md`, `README_ko.md`, `rules.md`
   - GitHub 운영: `.github/PULL_REQUEST_TEMPLATE.md`
   - 설치/운영: `docs/setup/quickstart*.md`
   - 제품 구조: `docs/architecture/codebase-map-ko.md`

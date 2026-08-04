@@ -4,7 +4,7 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-The fork's product release version is `1.3.0`. Upstream `2.7.1` is recorded
+The fork's product release version is `1.4.0`. Upstream `2.7.1` is recorded
 separately as the latest selective-backport lineage and is not this fork's
 product version.
 
@@ -255,11 +255,12 @@ also provides a managed exact persistent OCR cache. It stores raw OCR results
 and diagnostics, never crop images, and is disabled automatically for custom
 endpoints.
 
-`Settings > Project` also contains a preview, default-off project checkpoint
-store. Detection geometry, raw PaddleOCR-VL results, lossless cleaned images,
-final masks, and encoded render outputs can be restored before their runtimes
-start. Translation text remains owned by the `.ctpr`; the sidecar stores only
-its validated stage signature, so a full project hit skips detector, Paddle,
+`Settings > Project` also contains a validated project checkpoint store. A
+one-time migration enables it once while preserving any later user choice.
+Detection geometry, raw PaddleOCR-VL results, lossless cleaned images, final
+masks, and encoded render outputs can be restored before their runtimes start.
+Translation text remains owned by the `.ctpr`; the sidecar stores only its
+validated stage signature, so a full project hit skips detector, Paddle,
 Gemma, inpainter, and renderer inference. Current OCR and translation
 dictionary rules are still applied exactly once, and changing a dictionary
 invalidates only its consumed result and downstream stages. Reusable manifests
@@ -290,7 +291,6 @@ Tracked compose/runtime images used by the repo:
 - Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - PaddleOCR VL inference: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
-- PaddleOCR VL layout frontend: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## Reference Setup Docs
 

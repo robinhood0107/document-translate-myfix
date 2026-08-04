@@ -23,6 +23,8 @@ FORBIDDEN_TRACKED_PREFIXES = (
     ".idea/",
     "build/",
     "banchmark_result_log/",
+    "benchmark_result_log/",
+    ".gstack/",
     "docs/assets/benchmarking/",
     "fonts/",
     "testmodel/",
@@ -32,6 +34,8 @@ FORBIDDEN_TRACKED_NAMES = {
 }
 FORBIDDEN_TRACKED_PATTERNS = (
     re.compile(r"(?i)^.+\.(ttf|otf|woff|woff2|ttc|fon)$"),
+    re.compile(r"(?i)(^|/)\.env(?:\.(?!example$).+)?$"),
+    re.compile(r"(?i)^.+\.(key|pem|p12|pfx|crt|cer)$"),
     re.compile(r"(?i)(^|/)(result_|log_)[^/]+/"),
 )
 ALLOWED_MEDIA_PREFIXES = (
@@ -79,6 +83,7 @@ CONTENT_TEXT_NAMES = {
     ".gitignore",
     ".gitattributes",
     "AGENTS.md",
+    "CLAUDE.md",
     "Dockerfile",
     "LICENSE",
     "README.md",
