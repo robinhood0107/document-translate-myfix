@@ -947,7 +947,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             "paddleocr_vl_spotting": "PaddleOCR VL Spotting",
             "paddleocr-vl-spotting": "PaddleOCR VL Spotting",
             "hunyuanocr": "HunyuanOCR",
-            "mangalmm": "MangaLMM",
+            "mangalmm": self.tr("MangaLMM (Experimental, Slow)"),
         }
 
         self.cancel_auto_close()
