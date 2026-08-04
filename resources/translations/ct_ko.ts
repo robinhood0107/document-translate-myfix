@@ -836,14 +836,14 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds
-- Temperature: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
+- Temperature: 0.5
+- Top K / Top P / Min P: 32 / 1.0 / 0.0</source>
         <translation>기본 제공 Gemma 런타임의 승격 기본값:
 - 청크 크기: 6
 - 최대 완료 토큰: 512
 - 요청 타임아웃: 180초
-- 온도: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</translation>
+- 온도: 0.5
+- Top K / Top P / Min P: 32 / 1.0 / 0.0</translation>
     </message>
 </context>
 <context>
@@ -3465,6 +3465,10 @@ Restart now?</source>
 </context>
 <context>
     <name>StageBatchedProcessor</name>
+    <message>
+        <source>Managed runtime GPU release was not confirmed.</source>
+        <translation>관리형 런타임의 GPU 메모리 해제가 확인되지 않았습니다.</translation>
+    </message>
     <message>
         <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
         <translation>인페인터 VRAM 해제가 확인되지 않아 Gemma를 시작하지 못했습니다.</translation>

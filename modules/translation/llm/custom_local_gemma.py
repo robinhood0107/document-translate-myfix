@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
 from textwrap import dedent
@@ -37,9 +38,9 @@ DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26B-IQ4_NL.gguf"
 DEFAULT_GEMMA_CHUNK_SIZE = 6
 DEFAULT_GEMMA_MAX_COMPLETION_TOKENS = 512
 DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC = 180
-DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 0.7
-DEFAULT_GEMMA_TRANSLATION_TOP_K = 64
-DEFAULT_GEMMA_TRANSLATION_TOP_P = 0.95
+DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 0.5
+DEFAULT_GEMMA_TRANSLATION_TOP_K = 32
+DEFAULT_GEMMA_TRANSLATION_TOP_P = 1.0
 DEFAULT_GEMMA_TRANSLATION_MIN_P = 0.0
 DEFAULT_GEMMA_RESPONSE_FORMAT_MODE = "json_schema"
 DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
@@ -182,6 +183,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.request_retry_backoff_seconds = DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS
         self._runtime_ensure_callback: Callable[[], None] | None = None
         self._runtime_identity_provider: Callable[[], dict[str, Any] | None] | None = None
+        self._runtime_inference_lease_factory: Callable[[], Any] | None = None
         self._runtime_identity_snapshot: dict[str, Any] | None = None
         self._runtime_identity_snapshot_at = 0.0
         self._translation_memory_store: TranslationMemoryStore | None = None
@@ -256,9 +258,15 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         *,
         ensure_runtime: Callable[[], None] | None,
         runtime_identity_provider: Callable[[], dict[str, Any] | None] | None,
+        inference_lease_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._runtime_ensure_callback = ensure_runtime
         self._runtime_identity_provider = runtime_identity_provider
+        self._runtime_inference_lease_factory = inference_lease_factory
+
+    def _runtime_inference_lease(self) -> Any:
+        factory = self._runtime_inference_lease_factory
+        return factory() if callable(factory) else nullcontext()
 
     def configure_translation_memory(
         self,
@@ -1635,12 +1643,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             for attempt_index in range(max(1, int(self.request_retry_total_attempts))):
                 self._current_benchmark_stats["gemma_http_attempt_count"] += 1
                 try:
-                    response = requests.post(
-                        f"{self.api_base_url}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                        timeout=self.timeout,
-                    )
+                    with self._runtime_inference_lease():
+                        response = requests.post(
+                            f"{self.api_base_url}/chat/completions",
+                            headers=headers,
+                            json=payload,
+                            timeout=self.timeout,
+                        )
                     if self._is_context_capacity_response(response):
                         raise GemmaLocalServerContextCapacityError(
                             "Gemma local server rejected the request because it exceeded "

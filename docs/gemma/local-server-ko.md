@@ -83,9 +83,9 @@ docker compose `
 
 ## 현재 활성 요청값
 
-- `temperature=0.7`
-- `top_k=64`
-- `top_p=0.95`
+- `temperature=0.5`
+- `top_k=32`
+- `top_p=1.0`
 - `min_p=0.0`
 - `Chunk Size=6`
 - `Max Completion Tokens=512`
@@ -124,3 +124,6 @@ batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같�
 - Pull policy: `missing`
 
 벤치마크 preset, raw 결과, 보고서, 차트는 제품 브랜치가 아니라 `benchmarking/lab` 또는 Git 밖의 검증 로그 폴더에서 관리합니다.
+
+현재 모델·요청·runtime 후보의 최종 품질/속도 판정 기록과 sampler 캠페인 결과도
+`benchmarking/lab`의 벤치마크 문서 세트에서 관리합니다.

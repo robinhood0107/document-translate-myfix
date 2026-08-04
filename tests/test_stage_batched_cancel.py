@@ -21,6 +21,7 @@ from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.utils.textblock import TextBlock
+from pipeline.runtime_resource_arbiter import RuntimeLeaseConflictError
 from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 from modules.utils.exceptions import OperationCancelledError
 
@@ -1105,6 +1106,23 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(shutdown_ocr.call_count, 2)
         shutdown_gemma.assert_called_once_with()
 
+    def test_cleanup_uses_actual_paddle_service_key(self) -> None:
+        processor = self._processor(cancelled=False)
+        ocr_manager = LocalOCRRuntimeManager()
+        processor.main_page.local_ocr_runtime_manager = ocr_manager
+
+        arbiter = processor._runtime_resource_arbiter()
+        with arbiter.model_start(arbiter.token("paddleocr_vl")):
+            pass
+
+        with mock.patch.object(ocr_manager, "shutdown") as shutdown_ocr:
+            processor._shutdown_managed_runtimes(
+                ocr_service="paddleocr_vl",
+            )
+
+        shutdown_ocr.assert_called_once_with()
+        self.assertIsNone(arbiter.snapshot().active_model)
+
     def test_batch_ocr_stage_ceiling_skips_later_stages(self) -> None:
         processor = self._processor(cancelled=False)
         processor.main_page.image_files = ["page.png"]
@@ -1120,9 +1138,16 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._ensure_stage_policy = mock.Mock(return_value={"primary_ocr_engine": "PaddleOCR VL"})
         processor._raise_if_cancelled = mock.Mock()
         processor._shutdown_managed_runtimes = mock.Mock()
-        processor._start_ocr_prewarm = mock.Mock()
-        processor._detect_all = mock.Mock()
-        processor._ocr_all = mock.Mock()
+        stage_order: list[str] = []
+        processor._start_ocr_prewarm = mock.Mock(
+            side_effect=lambda _policy: stage_order.append("ocr_prewarm")
+        )
+        processor._detect_all = mock.Mock(
+            side_effect=lambda _pages, _policy: stage_order.append("detect")
+        )
+        processor._ocr_all = mock.Mock(
+            side_effect=lambda _pages, _policy: stage_order.append("ocr")
+        )
         processor._complete_ocr_stage_ceiling = mock.Mock()
         processor._inpaint_all = mock.Mock()
         processor._translate_all = mock.Mock()
@@ -1149,6 +1174,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
             total_images=1,
             stage_ceiling="ocr",
         )
+        self.assertEqual(stage_order, ["detect", "ocr_prewarm", "ocr"])
 
     def test_complete_ocr_stage_ceiling_marks_only_successful_pages_done(self) -> None:
         processor = self._processor(cancelled=False)
@@ -1245,6 +1271,190 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         self.assertEqual(shutdown.call_count, 2)
 
+    def test_handoff_without_release_api_records_stopped_state(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor._record_runtime_transition = mock.Mock()
+        processor._record_runtime_performance = mock.Mock()
+        processor._sample_performance_resources = mock.Mock()
+        manager = SimpleNamespace(shutdown=mock.Mock())
+
+        processor._shutdown_runtime_with_retry(
+            "OCR",
+            manager,
+            context="test handoff",
+            raise_on_failure=True,
+            release_for_handoff=True,
+            service="paddleocr_vl",
+        )
+
+        manager.shutdown.assert_called_once_with()
+        self.assertEqual(
+            processor._record_runtime_transition.call_args_list[-1].kwargs[
+                "to_state"
+            ],
+            "stopped",
+        )
+
+    def test_handoff_stop_report_records_stopped_state(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor._record_runtime_transition = mock.Mock()
+        processor._record_runtime_performance = mock.Mock()
+        processor._sample_performance_resources = mock.Mock()
+        manager = SimpleNamespace(
+            release_for_handoff=mock.Mock(
+                return_value={"runtime_state": "stopped"}
+            )
+        )
+
+        processor._shutdown_runtime_with_retry(
+            "OCR",
+            manager,
+            context="test handoff",
+            raise_on_failure=True,
+            release_for_handoff=True,
+            service="paddleocr_vl",
+        )
+
+        self.assertEqual(
+            processor._record_runtime_transition.call_args_list[-1].kwargs[
+                "to_state"
+            ],
+            "stopped",
+        )
+
+    def test_unobserved_managed_runtime_release_keeps_gpu_lease(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor._record_runtime_transition = mock.Mock()
+        processor._record_runtime_performance = mock.Mock()
+        processor._sample_performance_resources = mock.Mock()
+        manager = SimpleNamespace(
+            shutdown=mock.Mock(
+                return_value={
+                    "runtime_state": "stopped",
+                    "gpu_release_expected": True,
+                }
+            )
+        )
+        metrics = {"driver": {"available": True}}
+        failed_gate = {
+            "required": True,
+            "observed": False,
+            "status": "timeout",
+            "elapsed_sec": 0.0,
+        }
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.query_cuda_handoff_metrics",
+            return_value=metrics,
+        ), mock.patch(
+            "pipeline.stage_batched_processor.wait_for_global_vram_release",
+            return_value=failed_gate,
+        ), self.assertLogs(
+            "pipeline.stage_batched_processor",
+            level="WARNING",
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            "GPU release was not confirmed",
+        ):
+            processor._shutdown_runtime_with_retry(
+                "Gemma",
+                manager,
+                context="test release gate",
+                raise_on_failure=True,
+                service="gemma",
+            )
+
+        self.assertEqual(manager.shutdown.call_count, 2)
+        snapshot = processor._runtime_resource_arbiter().snapshot()
+        self.assertEqual(snapshot.active_model, "gemma")
+        self.assertEqual(snapshot.states["gemma"], "release_failed")
+        with self.assertRaises(RuntimeLeaseConflictError):
+            with processor._runtime_resource_arbiter().model_start(
+                processor._runtime_resource_arbiter().token("ocr")
+            ):
+                pass
+
+    def test_observed_managed_runtime_release_returns_gpu_lease(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor._record_runtime_transition = mock.Mock()
+        processor._record_runtime_performance = mock.Mock()
+        processor._sample_performance_resources = mock.Mock()
+        manager = SimpleNamespace(
+            shutdown=mock.Mock(
+                return_value={
+                    "runtime_state": "stopped",
+                    "gpu_release_expected": True,
+                }
+            )
+        )
+        observed_gate = {
+            "required": True,
+            "observed": True,
+            "status": "observed",
+            "elapsed_sec": 0.01,
+        }
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.query_cuda_handoff_metrics",
+            return_value={"driver": {"available": True}},
+        ), mock.patch(
+            "pipeline.stage_batched_processor.wait_for_global_vram_release",
+            return_value=observed_gate,
+        ):
+            processor._shutdown_runtime_with_retry(
+                "Gemma",
+                manager,
+                context="test release gate",
+                raise_on_failure=True,
+                service="gemma",
+            )
+
+        snapshot = processor._runtime_resource_arbiter().snapshot()
+        self.assertIsNone(snapshot.active_model)
+        self.assertEqual(snapshot.states["gemma"], "stopped")
+
+    def test_cancelled_start_with_unobserved_cleanup_keeps_gpu_lease(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor._record_runtime_transition = mock.Mock()
+        processor._record_runtime_performance = mock.Mock()
+        processor._sample_performance_resources = mock.Mock()
+        manager = SimpleNamespace(
+            shutdown=mock.Mock(
+                return_value={
+                    "runtime_state": "stopped",
+                    "gpu_release_expected": True,
+                }
+            )
+        )
+        arbiter = processor._runtime_resource_arbiter()
+        token = arbiter.token("gemma")
+        failed_gate = {
+            "required": True,
+            "observed": False,
+            "status": "timeout",
+            "elapsed_sec": 0.0,
+        }
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.query_cuda_handoff_metrics",
+            return_value={"driver": {"available": True}},
+        ), mock.patch(
+            "pipeline.stage_batched_processor.wait_for_global_vram_release",
+            return_value=failed_gate,
+        ), self.assertRaisesRegex(RuntimeError, "GPU release was not confirmed"):
+            with arbiter.model_start(
+                token,
+                stale_cleanup=lambda: processor._managed_runtime_stale_cleanup(
+                    "gemma",
+                    manager,
+                ),
+            ):
+                arbiter.cancel_generation()
+
+        snapshot = arbiter.snapshot()
+        self.assertEqual(snapshot.active_model, "gemma")
+        self.assertEqual(snapshot.states["gemma"], "release_failed")
+
     def test_prewarm_shutdown_waits_and_cancels_queued_late_start(self) -> None:
         processor = self._processor(cancelled=False)
         processor._prewarm_cancel_event = threading.Event()
@@ -1302,12 +1512,19 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
         started = threading.Event()
         release = threading.Event()
+        cleanup_calls: list[str] = []
 
         def prewarm() -> None:
             started.set()
             release.wait(timeout=5.0)
 
-        processor._start_prewarm("gemma", "Gemma", "gemma", prewarm)
+        processor._start_prewarm(
+            "gemma",
+            "Gemma",
+            "gemma",
+            prewarm,
+            stale_cleanup=lambda: cleanup_calls.append("cleanup"),
+        )
         self.assertTrue(started.wait(timeout=2.0))
         shutdown_thread = threading.Thread(target=processor._shutdown_prewarm_executor)
         shutdown_thread.start()
@@ -1319,6 +1536,10 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         self.assertFalse(shutdown_thread.is_alive())
         self.assertEqual(progress_statuses, ["starting"])
+        self.assertEqual(cleanup_calls, ["cleanup"])
+        self.assertIsNone(
+            processor._runtime_resource_arbiter().snapshot().active_model
+        )
 
     def test_all_hit_folder_skips_gemma_prewarm_and_readiness_wait(self) -> None:
         processor = self._processor(cancelled=False)
