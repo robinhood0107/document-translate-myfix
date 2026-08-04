@@ -34,6 +34,10 @@ from modules.ocr.managed_backend_policy import (
     is_retired_vllm_backend,
 )
 from modules.translation.llm.custom_local_gemma import (
+    DEFAULT_GEMMA_TRANSLATION_MIN_P,
+    DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
+    DEFAULT_GEMMA_TRANSLATION_TOP_K,
+    DEFAULT_GEMMA_TRANSLATION_TOP_P,
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
     RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
 )
@@ -114,6 +118,16 @@ MANGALMM_LEGACY_DEFAULT_MAX_COMPLETION_TOKENS = 256
 PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION = 1
 PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY = (
     "paddleocr_vl/direct_transport_migration_version"
+)
+GEMMA_SAMPLER_MIGRATION_VERSION = 2
+GEMMA_SAMPLER_MIGRATION_VERSION_KEY = (
+    "gemma_local_server/sampler_migration_version"
+)
+GEMMA_SAMPLER_KEYS = (
+    ("gemma_local_server/temperature", DEFAULT_GEMMA_TRANSLATION_TEMPERATURE),
+    ("gemma_local_server/top_k", DEFAULT_GEMMA_TRANSLATION_TOP_K),
+    ("gemma_local_server/top_p", DEFAULT_GEMMA_TRANSLATION_TOP_P),
+    ("gemma_local_server/min_p", DEFAULT_GEMMA_TRANSLATION_MIN_P),
 )
 PADDLE_SERVER_URL_KEY = "paddleocr_vl/server_url"
 PADDLE_LEGACY_RELAY_SERVER_URL = (
@@ -364,6 +378,58 @@ def migrate_paddle_crop_direct_transport(settings: QSettings) -> bool:
     settings.setValue(
         PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY,
         PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION,
+    )
+    settings.sync()
+    return changed
+
+
+def migrate_gemma_sampler_defaults(settings: QSettings) -> bool:
+    """Overwrite the four Gemma sampler values with the promoted tuple exactly once.
+
+    The promoted tuple comes from the all-478 sampler campaign, which measured
+    fewer censorship, masking, and consent failures than the retired values.
+    Version 1 installs are re-migrated on purpose; user edits made after the
+    marker is written are preserved because the marker blocks a second pass.
+    """
+
+    try:
+        current_version = int(
+            settings.value(
+                GEMMA_SAMPLER_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= GEMMA_SAMPLER_MIGRATION_VERSION:
+        return False
+
+    changed = False
+    for key, promoted in GEMMA_SAMPLER_KEYS:
+        previous = settings.value(key, None)
+        settings.setValue(key, promoted)
+        if previous is None:
+            continue
+        try:
+            if float(previous) != float(promoted):
+                changed = True
+        except (TypeError, ValueError):
+            changed = True
+    if changed:
+        logger.warning(
+            "Migrated Gemma sampler settings to the promoted translation tuple "
+            "(temperature %s, top_k %s, top_p %s, min_p %s).",
+            DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
+            DEFAULT_GEMMA_TRANSLATION_TOP_K,
+            DEFAULT_GEMMA_TRANSLATION_TOP_P,
+            DEFAULT_GEMMA_TRANSLATION_MIN_P,
+        )
+
+    settings.setValue(
+        GEMMA_SAMPLER_MIGRATION_VERSION_KEY,
+        GEMMA_SAMPLER_MIGRATION_VERSION,
     )
     settings.sync()
     return changed
@@ -1184,6 +1250,7 @@ class SettingsPage(QtWidgets.QWidget):
         migrate_project_checkpoint_default(settings)
         migrate_mangalmm_full_page_contract(settings)
         migrate_paddle_crop_direct_transport(settings)
+        migrate_gemma_sampler_defaults(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)

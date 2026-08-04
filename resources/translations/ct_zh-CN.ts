@@ -831,8 +831,8 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds
-- Temperature: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
+- Temperature: 0.5
+- Top K / Top P / Min P: 32 / 1.0 / 0.0</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3439,6 +3439,10 @@ Restart now?</source>
 </context>
 <context>
     <name>StageBatchedProcessor</name>
+    <message>
+        <source>Managed runtime GPU release was not confirmed.</source>
+        <translation>无法确认受管运行时已释放 GPU 显存。</translation>
+    </message>
     <message>
         <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
         <translation>由于未确认图像修复模型已释放显存，无法启动 Gemma。</translation>
