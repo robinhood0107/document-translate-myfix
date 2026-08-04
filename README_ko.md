@@ -4,7 +4,7 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
-현재 포크의 제품 릴리스 버전은 `1.3.0`입니다. upstream `2.7.1`은
+현재 포크의 제품 릴리스 버전은 `1.4.0`입니다. upstream `2.7.1`은
 마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
 같은 의미로 사용하지 않습니다.
 
