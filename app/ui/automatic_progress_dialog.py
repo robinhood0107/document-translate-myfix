@@ -6,7 +6,11 @@ from app.ui.dayu_widgets.label import MLabel
 from app.ui.dayu_widgets.progress_bar import MProgressBar
 
 
-def _display_service_name(service: str) -> str:
+def _display_service_name(
+    service: str,
+    *,
+    mangalmm_label: str = "MangaLMM (Experimental, Slow)",
+) -> str:
     service_key = str(service or "").strip().lower()
     return {
         "batch": "Automatic",
@@ -16,7 +20,7 @@ def _display_service_name(service: str) -> str:
         "paddleocr_vl_spotting": "PaddleOCR VL Spotting",
         "paddleocr-vl-spotting": "PaddleOCR VL Spotting",
         "hunyuanocr": "HunyuanOCR",
-        "mangalmm": "MangaLMM",
+        "mangalmm": mangalmm_label,
     }.get(service_key, str(service or "-"))
 
 
@@ -168,12 +172,22 @@ class AutomaticProgressDialog(QtWidgets.QDialog):
             if phase == "gemma_startup":
                 self.service_value.setText("Gemma")
             elif phase == "ocr_startup":
-                self.service_value.setText(_display_service_name(service))
+                self.service_value.setText(
+                    _display_service_name(
+                        service,
+                        mangalmm_label=self.tr("MangaLMM (Experimental, Slow)"),
+                    )
+                )
         elif phase == "pipeline":
             self.title_label.setText(self.tr("자동번역 진행 중"))
             self.progress_bar.setRange(0, 1000)
             self.progress_bar.setValue(int(progress_percent * 10))
-            self.service_value.setText(_display_service_name(service or "batch"))
+            self.service_value.setText(
+                _display_service_name(
+                    service or "batch",
+                    mangalmm_label=self.tr("MangaLMM (Experimental, Slow)"),
+                )
+            )
         elif phase == "done":
             self.progress_bar.setRange(0, 1000)
             self.progress_bar.setValue(1000)
