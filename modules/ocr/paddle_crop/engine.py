@@ -10,6 +10,7 @@ import threading
 import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -174,9 +175,22 @@ class PaddleOCRVLEngine(OCREngine):
         self._supports_max_new_tokens = True
         self.cancel_checker: Callable[[], bool] | None = None
         self._request_telemetry_context = threading.local()
+        self._inference_lease_factory: Callable[[], Any] | None = None
 
     def set_cancel_checker(self, cancel_checker: Callable[[], bool] | None) -> None:
         self.cancel_checker = cancel_checker
+
+    def set_inference_lease_factory(
+        self,
+        factory: Callable[[], Any] | None,
+    ) -> None:
+        """Install the Router request lease used only for managed pair traffic."""
+
+        self._inference_lease_factory = factory
+
+    def _inference_lease(self) -> Any:
+        factory = self._inference_lease_factory
+        return factory() if callable(factory) else nullcontext()
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_paddleocr_vl_settings()
@@ -1237,11 +1251,12 @@ class PaddleOCRVLEngine(OCREngine):
             request_started_at = time.perf_counter()
             self._add_request_metric(record, "http_attempt_count", 1)
             try:
-                response = requests.post(
-                    self.server_url,
-                    json=payload,
-                    timeout=self.REQUEST_TIMEOUT_SECONDS,
-                )
+                with self._inference_lease():
+                    response = requests.post(
+                        self.server_url,
+                        json=payload,
+                        timeout=self.REQUEST_TIMEOUT_SECONDS,
+                    )
             except requests.exceptions.RequestException as exc:
                 self._add_request_metric(
                     record,
@@ -1284,11 +1299,12 @@ class PaddleOCRVLEngine(OCREngine):
                 request_started_at = time.perf_counter()
                 self._add_request_metric(record, "http_attempt_count", 1)
                 try:
-                    legacy_response = requests.post(
-                        self.server_url,
-                        json=legacy_payload,
-                        timeout=self.REQUEST_TIMEOUT_SECONDS,
-                    )
+                    with self._inference_lease():
+                        legacy_response = requests.post(
+                            self.server_url,
+                            json=legacy_payload,
+                            timeout=self.REQUEST_TIMEOUT_SECONDS,
+                        )
                 except requests.exceptions.RequestException as exc:
                     self._add_request_metric(
                         record,

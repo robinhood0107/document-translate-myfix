@@ -86,6 +86,15 @@ class OCRProcessor:
         setter = getattr(engine, "set_cancel_checker", None)
         if callable(setter):
             setter(getattr(self.main_page, "is_current_task_cancelled", None))
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        lease_setter = getattr(engine, "set_inference_lease_factory", None)
+        if isinstance(runtime_manager, LocalOCRRuntimeManager) and callable(lease_setter):
+            lease_setter(
+                lambda: runtime_manager.router_inference_lease(
+                    self.ocr_key,
+                    self.settings,
+                )
+            )
         self.last_engine_name = engine.__class__.__name__
         logger.info(
             "ocr self-check: selected_mode=%s resolved_key=%s resolved_engine=%s source_lang=%s device=%s blocks=%d",

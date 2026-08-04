@@ -4,7 +4,7 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
-현재 포크의 제품 릴리스 버전은 `1.3.0`입니다. upstream `2.7.1`은
+현재 포크의 제품 릴리스 버전은 `1.4.0`입니다. upstream `2.7.1`은
 마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
 같은 의미로 사용하지 않습니다.
 
@@ -253,14 +253,14 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 적용 전 OCR 결과와 진단만 저장하며, 사용자 지정 endpoint에서는 자동으로
 비활성화됩니다.
 
-`Settings > Project`에는 기본값이 꺼진 미리보기 단계의 프로젝트 checkpoint
-기능도 있습니다. 감지 좌표, 사전 적용 전 PaddleOCR-VL 결과, lossless
-인페인트 결과·final mask, 인코딩된 렌더 출력을 각 runtime 시작 전에 복원할
-수 있습니다. 번역문은 `.ctpr`에만 두고 sidecar에는 검증용 stage 서명만
-기록하므로 project all-hit에서는 detector, Paddle, Gemma, inpainter, renderer
-추론을 모두 건너뜁니다. 현재 OCR·번역 사전은 hit와 miss 모두 정확히 한 번
-적용하고, 사전 변경 시 소비 결과와 downstream stage만 무효화합니다. 재사용
-가능한 stage manifest와 content-addressed artifact는
+`Settings > Project`에는 검증된 프로젝트 checkpoint 기능도 있습니다. one-time
+migration이 한 번 활성화한 뒤에는 이후 사용자의 선택을 그대로 보존합니다. 감지 좌표,
+사전 적용 전 PaddleOCR-VL 결과, lossless 인페인트 결과·final mask, 인코딩된 렌더
+출력을 각 runtime 시작 전에 복원할 수 있습니다. 번역문은 `.ctpr`에만 두고
+sidecar에는 검증용 stage 서명만 기록하므로 project all-hit에서는 detector, Paddle,
+Gemma, inpainter, renderer 추론을 모두 건너뜁니다. 현재 OCR·번역 사전은 hit와
+miss 모두 정확히 한 번 적용하고, 사전 변경 시 소비 결과와 downstream stage만
+무효화합니다. 재사용 가능한 stage manifest와 content-addressed artifact는
 `.ctpr` 옆 `<project>.ctpr.cache` 폴더에 저장합니다. cache가 없거나 잠겼거나
 손상돼도 프로젝트 열기와 처리는 계속되며 해당 stage를 다시 계산합니다.
 
@@ -286,7 +286,6 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 - Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - PaddleOCR VL 추론: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
-- PaddleOCR VL layout 프런트: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## 참고 설치 문서
 

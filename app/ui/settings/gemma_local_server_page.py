@@ -131,8 +131,8 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
                 "- Chunk Size: 6\n"
                 "- Max Completion Tokens: 512\n"
                 "- Request Timeout: 180 seconds\n"
-                "- Temperature: 0.7\n"
-                "- Top K / Top P / Min P: 64 / 0.95 / 0.0"
+                "- Temperature: 0.5\n"
+                "- Top K / Top P / Min P: 32 / 1.0 / 0.0"
             )
         ).secondary()
         tip.setWordWrap(True)
