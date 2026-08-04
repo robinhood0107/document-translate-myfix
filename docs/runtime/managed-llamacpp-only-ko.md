@@ -10,6 +10,9 @@ Comic Translate가 직접 시작하는 관리형 로컬 추론은 모두 llama.c
 | PaddleOCR-VL crop 인식 | llama.cpp direct `OCR:` |
 | PaddleOCR-VL full-page Spotting | llama.cpp |
 
+MangaLMM full-page는 기본 OCR이 아니다. 사용자 화면에서는
+`MangaLMM(실험용, 느림)`으로 표시해 비교·연구용 선택지임을 분명히 한다.
+
 사용자가 URL을 직접 바꾼 custom/unmanaged endpoint는 이 정책의 대상이 아니다.
 앱은 해당 URL을 그대로 사용하며 Docker runtime을 시작하거나 backend를 추정하지
 않는다.

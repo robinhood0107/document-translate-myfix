@@ -151,6 +151,7 @@ class SettingsPageUI(QtWidgets.QWidget):
                 "paddleocr_vl_spotting"
             ),
             self.tr("HunyuanOCR"): "hunyuanocr",
+            self.tr("MangaLMM (Experimental, Slow)"): "mangalmm",
             self.tr("MangaLMM"): "mangalmm",
 
             # Workflow mode mappings
@@ -440,7 +441,10 @@ class SettingsPageUI(QtWidgets.QWidget):
                 "avatar": MPixmap(".svg"),
             },
             {"title": self.tr("HunyuanOCR Settings"), "avatar": MPixmap(".svg")},
-            {"title": self.tr("MangaLMM Settings"), "avatar": MPixmap(".svg")},
+            {
+                "title": self.tr("MangaLMM (Experimental, Slow) Settings"),
+                "avatar": MPixmap(".svg"),
+            },
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},

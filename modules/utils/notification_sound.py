@@ -60,6 +60,9 @@ TR_LEGACY_WORKFLOW = QtCore.QT_TRANSLATE_NOOP(
 TR_OPTIMAL_OCR = QtCore.QT_TRANSLATE_NOOP(
     "NotificationSound", "Optimal (HunyuanOCR / PaddleOCR VL)"
 )
+TR_MANGALMM_EXPERIMENTAL = QtCore.QT_TRANSLATE_NOOP(
+    "NotificationSound", "MangaLMM (Experimental, Slow)"
+)
 TR_COMIC_TRANSLATE = QtCore.QT_TRANSLATE_NOOP("NotificationSound", "Comic Translate")
 TR_STATUS = QtCore.QT_TRANSLATE_NOOP("NotificationSound", "Status")
 TR_RUN = QtCore.QT_TRANSLATE_NOOP("NotificationSound", "Run")
@@ -260,7 +263,7 @@ def _current_tool_summary() -> dict[str, str]:
         "paddleocr_vl": "PaddleOCR VL",
         "paddleocr_vl_spotting": "PaddleOCR VL Spotting",
         "hunyuanocr": "HunyuanOCR",
-        "mangalmm": "MangaLMM",
+        "mangalmm": _tr(TR_MANGALMM_EXPERIMENTAL),
     }.get(ocr, ocr or _tr(TR_OPTIMAL_OCR))
     return {
         "workflow": _format_tool_name(workflow_label, _tr(TR_STAGE_BATCHED_WORKFLOW)),

@@ -250,6 +250,10 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.mangalmm_ocr_max_pixels_spinbox.setValue(1500000)
         page.ui.mangalmm_ocr_max_long_side_spinbox.setValue(1408)
         page._set_ocr_mode("mangalmm")
+        self.assertEqual(
+            page.get_ocr_mode_label(),
+            "MangaLMM (Experimental, Slow)",
+        )
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
@@ -286,7 +290,7 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
             "PaddleOCR VL Settings",
             "PaddleOCR VL Spotting Settings",
             "HunyuanOCR Settings",
-            "MangaLMM Settings",
+            "MangaLMM (Experimental, Slow) Settings",
             "Gemma Local Server Settings",
         ]
         expected_indices = [2, 3, 4, 5, 6]
