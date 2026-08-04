@@ -17,3 +17,9 @@ class AutomaticProgressDialogTests(unittest.TestCase):
             _display_service_name("paddleocr_vl"),
             "PaddleOCR VL",
         )
+
+    def test_mangalmm_is_marked_experimental_and_slow(self) -> None:
+        self.assertEqual(
+            _display_service_name("mangalmm"),
+            "MangaLMM (Experimental, Slow)",
+        )
