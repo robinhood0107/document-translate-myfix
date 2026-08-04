@@ -110,6 +110,13 @@ from modules.utils.export_paths import (
     resolve_export_directory,
 )
 from modules.utils.exceptions import OperationCancelledError
+from modules.utils.gpu_handoff import (
+    DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO,
+    DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB,
+    DEFAULT_VRAM_RELEASE_EXPECTED_RATIO,
+    wait_for_global_vram_release,
+)
+from modules.utils.gpu_metrics import query_cuda_handoff_metrics
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.inpaint_composite import (
@@ -141,6 +148,10 @@ from modules.utils.translator_utils import (
 )
 
 from .batch_processor import BatchProcessor
+from .runtime_resource_arbiter import (
+    RuntimeModelState,
+    RuntimeResourceArbiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +228,12 @@ class StageBatchedProcessor(BatchProcessor):
         self._prewarm_executor: ThreadPoolExecutor | None = None
         self._prewarm_jobs: dict[str, Future] = {}
         self._prewarm_cancel_event = threading.Event()
+        self._runtime_resource_arbiter_instance = RuntimeResourceArbiter()
+        self._inpainter_runtime_lease_held = False
+        self._runtime_gpu_start_baselines: dict[str, dict[str, Any]] = {}
+        self._runtime_gpu_release_required: set[str] = set()
+        self._runtime_progress_lock = threading.RLock()
+        self._runtime_progress_started: dict[tuple[str, str], float] = {}
         self._paddleocr_cache_store: OCRPersistentResultCache | None = None
         self._paddleocr_cache_identity: dict[str, Any] | None = None
         self._project_checkpoint_store = None
@@ -243,8 +260,125 @@ class StageBatchedProcessor(BatchProcessor):
 
     def _ensure_prewarm_executor(self) -> ThreadPoolExecutor:
         if self._prewarm_executor is None:
-            self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
+            self._prewarm_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="ct-runtime-command",
+            )
         return self._prewarm_executor
+
+    def _runtime_resource_arbiter(self) -> RuntimeResourceArbiter:
+        arbiter = getattr(
+            self,
+            "_runtime_resource_arbiter_instance",
+            None,
+        )
+        if not isinstance(arbiter, RuntimeResourceArbiter):
+            arbiter = RuntimeResourceArbiter()
+            self._runtime_resource_arbiter_instance = arbiter
+        return arbiter
+
+    def _runtime_gpu_baselines(self) -> dict[str, dict[str, Any]]:
+        baselines = getattr(self, "_runtime_gpu_start_baselines", None)
+        if not isinstance(baselines, dict):
+            baselines = {}
+            self._runtime_gpu_start_baselines = baselines
+        return baselines
+
+    def _runtime_gpu_release_services(self) -> set[str]:
+        required = getattr(self, "_runtime_gpu_release_required", None)
+        if not isinstance(required, set):
+            required = set()
+            self._runtime_gpu_release_required = required
+        return required
+
+    def _capture_runtime_gpu_start_baseline(self, service: str) -> None:
+        """Remember driver-total memory before a managed GPU model loads."""
+
+        self._runtime_gpu_baselines()[service] = query_cuda_handoff_metrics()
+
+    def _verify_managed_runtime_gpu_release(
+        self,
+        service: str,
+        release_report: Any,
+        *,
+        before: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Fail closed until a managed Docker model returns its GPU memory."""
+
+        report = release_report if isinstance(release_report, dict) else {}
+        release_required = self._runtime_gpu_release_services()
+        if bool(report.get("gpu_release_expected", False)):
+            release_required.add(service)
+        sleeping_runtime = str(report.get("runtime_state") or "") == "sleeping"
+        gate = wait_for_global_vram_release(
+            before,
+            gpu_release_expected=service in release_required,
+            driver_baseline=self._runtime_gpu_baselines().get(service),
+            expected_drop_ratio=(
+                DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO
+                if sleeping_runtime
+                else DEFAULT_VRAM_RELEASE_EXPECTED_RATIO
+            ),
+            residual_allowance_mb=(
+                DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB
+                if sleeping_runtime
+                else 0.0
+            ),
+        )
+        self._record_runtime_performance(
+            service=service,
+            operation="vram_release_gate",
+            elapsed_ms=float(gate.get("elapsed_sec", 0.0) or 0.0) * 1000.0,
+            outcome=str(gate.get("status") or "unknown"),
+        )
+        if bool(gate.get("observed", False)):
+            release_required.discard(service)
+            self._runtime_gpu_baselines().pop(service, None)
+        return gate
+
+    def _managed_runtime_stale_cleanup(
+        self,
+        service: str,
+        runtime_manager: Any,
+    ) -> None:
+        """Stop a cancelled model load without bypassing its VRAM gate."""
+
+        before = query_cuda_handoff_metrics()
+        if self._router_runtime_is_active(runtime_manager):
+            release_report = runtime_manager.shutdown(
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service=service,
+                cancel_checker=self._prewarm_cancel_checker,
+            )
+        else:
+            release_report = runtime_manager.shutdown()
+        gate = self._verify_managed_runtime_gpu_release(
+            service,
+            release_report,
+            before=before,
+        )
+        if bool(gate.get("required")) and not bool(gate.get("observed")):
+            raise RuntimeError(
+                QCoreApplication.translate(
+                    "StageBatchedProcessor",
+                    "Managed runtime GPU release was not confirmed.",
+                )
+            )
+
+    @staticmethod
+    def _router_runtime_is_active(runtime_manager: Any) -> bool:
+        if not isinstance(
+            runtime_manager,
+            (LocalOCRRuntimeManager, LocalGemmaRuntimeManager),
+        ):
+            return False
+        checker = getattr(runtime_manager, "router_is_active", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:
+            return False
 
     def _prewarm_cancel_checker(self) -> bool:
         cancel_event = getattr(self, "_prewarm_cancel_event", None)
@@ -262,8 +396,119 @@ class StageBatchedProcessor(BatchProcessor):
             self._prewarm_cancel_event = threading.Event()
         else:
             cancel_event.clear()
+        self._runtime_resource_arbiter().reset()
+        self._inpainter_runtime_lease_held = False
+        self._runtime_gpu_baselines().clear()
+        self._runtime_gpu_release_services().clear()
+        with self._runtime_progress_lock:
+            self._runtime_progress_started.clear()
 
-    def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
+    def _runtime_progress_callback(self) -> Callable[[dict[str, Any]], None]:
+        def observe(event: dict[str, Any]) -> None:
+            payload = dict(event or {})
+            service = str(payload.get("service") or "runtime").strip().lower()
+            step_key = str(payload.get("step_key") or "runtime").strip().lower()
+            status = str(payload.get("status") or "running").strip().lower()
+            key = (service, step_key)
+            now = time.perf_counter()
+            runtime_lock = getattr(self, "_runtime_progress_lock", None)
+            if runtime_lock is None:
+                runtime_lock = threading.RLock()
+                self._runtime_progress_lock = runtime_lock
+            if not hasattr(self, "_runtime_progress_started"):
+                self._runtime_progress_started = {}
+            with runtime_lock:
+                if status in {"starting", "running", "waiting", "waiting_health"}:
+                    progress_started_now = key not in self._runtime_progress_started
+                    self._runtime_progress_started.setdefault(key, now)
+                elif status in {"completed", "ready", "failed", "cancelled"}:
+                    progress_started_now = False
+                    started = self._runtime_progress_started.pop(key, None)
+                else:
+                    progress_started_now = False
+                    started = None
+            if status in {"starting", "running", "waiting", "waiting_health"}:
+                if progress_started_now and step_key in {
+                    "container_start",
+                    "container_recreate",
+                    "compose_up",
+                    "compose_recreate",
+                }:
+                    self._record_runtime_transition(
+                        service=service,
+                        to_state="process_starting",
+                    )
+                elif progress_started_now and step_key in {
+                    "health_wait",
+                    "model_validation",
+                    "prewarm",
+                }:
+                    self._record_runtime_transition(
+                        service=service,
+                        to_state="model_loading",
+                    )
+            elif status in {"completed", "ready", "failed", "cancelled"}:
+                elapsed_ms = (
+                    max(0.0, now - started) * 1000.0
+                    if started is not None
+                    else 0.0
+                )
+                outcome = (
+                    "completed"
+                    if status in {"completed", "ready"}
+                    else status
+                )
+                self._record_runtime_performance(
+                    service=service,
+                    operation=step_key,
+                    elapsed_ms=elapsed_ms,
+                    outcome=outcome,
+                )
+                if status in {"completed", "ready"}:
+                    if step_key in {
+                        "container_start",
+                        "container_recreate",
+                        "compose_up",
+                        "compose_recreate",
+                    }:
+                        to_state = "process_ready"
+                    elif step_key in {
+                        "health_wait",
+                        "health_probe",
+                        "model_validation",
+                        "prewarm",
+                    }:
+                        to_state = "model_ready"
+                    else:
+                        to_state = "process_ready"
+                else:
+                    to_state = "stopped"
+                self._record_runtime_transition(
+                    service=service,
+                    to_state=to_state,
+                    elapsed_ms=elapsed_ms,
+                    outcome=outcome,
+                )
+
+            callback = getattr(
+                self.main_page,
+                "report_runtime_progress",
+                None,
+            )
+            if callable(callback):
+                callback(payload)
+
+        return observe
+
+    def _start_prewarm(
+        self,
+        key: str,
+        label: str,
+        service: str,
+        fn: Callable[[], None],
+        *,
+        stale_cleanup: Callable[[], None] | None = None,
+    ) -> None:
         if key in self._prewarm_jobs:
             return
         self._raise_if_cancelled()
@@ -274,13 +519,29 @@ class StageBatchedProcessor(BatchProcessor):
             message=self._stage_tr("{label} Docker 예열을 시작합니다.").format(label=label),
         )
 
+        arbiter = self._runtime_resource_arbiter()
+        token = arbiter.token(service)
+
         def runner() -> None:
             if self._prewarm_cancel_checker():
                 raise OperationCancelledError(f"{label} prewarm was cancelled before startup.")
             started_at = time.perf_counter()
             outcome = "completed"
             try:
-                fn()
+                with arbiter.model_start(
+                    token,
+                    cancel_checker=self._prewarm_cancel_checker,
+                    stale_cleanup=stale_cleanup,
+                ):
+                    self._capture_runtime_gpu_start_baseline(service)
+                    fn()
+                if self._prewarm_cancel_checker():
+                    with arbiter.model_release(service):
+                        if callable(stale_cleanup):
+                            stale_cleanup()
+                    raise OperationCancelledError(
+                        f"{label} prewarm was cancelled after startup."
+                    )
             except OperationCancelledError:
                 outcome = "cancelled"
                 raise
@@ -288,14 +549,13 @@ class StageBatchedProcessor(BatchProcessor):
                 outcome = "failed"
                 raise
             finally:
+                elapsed_ms = (time.perf_counter() - started_at) * 1000.0
                 self._record_runtime_performance(
                     service=service,
                     operation="start",
-                    elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+                    elapsed_ms=elapsed_ms,
                     outcome=outcome,
                 )
-            if self._prewarm_cancel_checker():
-                raise OperationCancelledError(f"{label} prewarm was cancelled after startup.")
             self._prewarm_progress(
                 service=service,
                 status="ready",
@@ -310,11 +570,27 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         service: str,
         fallback: Callable[[], None],
+        stale_cleanup: Callable[[], None] | None = None,
     ) -> None:
         started_at = time.perf_counter()
         outcome = "completed"
+        arbiter = self._runtime_resource_arbiter()
+        token = arbiter.token(service)
         try:
-            fallback()
+            with arbiter.model_start(
+                token,
+                cancel_checker=self._prewarm_cancel_checker,
+                stale_cleanup=stale_cleanup,
+            ):
+                self._capture_runtime_gpu_start_baseline(service)
+                fallback()
+            if self._prewarm_cancel_checker():
+                with arbiter.model_release(service):
+                    if callable(stale_cleanup):
+                        stale_cleanup()
+                raise OperationCancelledError(
+                    f"{service} startup was cancelled after model load."
+                )
         except OperationCancelledError:
             outcome = "cancelled"
             raise
@@ -322,10 +598,11 @@ class StageBatchedProcessor(BatchProcessor):
             outcome = "failed"
             raise
         finally:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
             self._record_runtime_performance(
                 service=service,
                 operation="start",
-                elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+                elapsed_ms=elapsed_ms,
                 outcome=outcome,
             )
 
@@ -335,6 +612,8 @@ class StageBatchedProcessor(BatchProcessor):
         label: str,
         service: str,
         fallback: Callable[[], None],
+        *,
+        stale_cleanup: Callable[[], None] | None = None,
     ) -> None:
         self._raise_if_cancelled()
         job = self._prewarm_jobs.pop(key, None)
@@ -342,6 +621,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._run_runtime_fallback(
                 service=service,
                 fallback=fallback,
+                stale_cleanup=stale_cleanup,
             )
             self._raise_if_cancelled()
             return
@@ -383,6 +663,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._run_runtime_fallback(
                 service=service,
                 fallback=fallback,
+                stale_cleanup=stale_cleanup,
             )
         self._raise_if_cancelled()
 
@@ -392,6 +673,7 @@ class StageBatchedProcessor(BatchProcessor):
         cancel_event = getattr(self, "_prewarm_cancel_event", None)
         if cancel_event is not None:
             cancel_event.set()
+        self._runtime_resource_arbiter().cancel_generation()
         jobs = list(self._prewarm_jobs.values())
         for job in jobs:
             job.cancel()
@@ -405,6 +687,7 @@ class StageBatchedProcessor(BatchProcessor):
         context: str = "batch cleanup",
         raise_on_failure: bool = False,
         preserve_sleeping_paddle: bool = False,
+        ocr_service: str = "ocr",
     ) -> None:
         runtime_managers = (
             (
@@ -431,31 +714,119 @@ class StageBatchedProcessor(BatchProcessor):
                     release_for_handoff=(
                         preserve_sleeping_paddle and label == "OCR"
                     ),
+                    service=(ocr_service if label == "OCR" else "gemma"),
+                    allow_foreign_owner_teardown=bool(failures),
                 )
             except Exception as exc:
                 failures.append(exc)
         if raise_on_failure and failures:
             raise failures[0]
 
-    @staticmethod
     def _shutdown_runtime_with_retry(
+        self,
         label: str,
         runtime_manager: Any,
         *,
         context: str,
         raise_on_failure: bool,
         release_for_handoff: bool = False,
+        service: str = "",
+        allow_foreign_owner_teardown: bool = False,
     ) -> None:
+        service = str(service or label or "runtime").strip().lower() or "runtime"
+        self._record_runtime_transition(
+            service=service,
+            to_state="releasing",
+        )
+        self._sample_performance_resources(f"{service}_release_start")
         last_error: Exception | None = None
+        release_before = query_cuda_handoff_metrics()
         for attempt in range(2):
+            started_at = time.perf_counter()
+            release = getattr(runtime_manager, "release_for_handoff", None)
+            used_handoff_release = (
+                release_for_handoff
+                and label == "OCR"
+                and callable(release)
+            )
+            target_state = (
+                RuntimeModelState.SLEEPING
+                if used_handoff_release
+                else RuntimeModelState.STOPPED
+            )
             try:
-                release = getattr(runtime_manager, "release_for_handoff", None)
-                if release_for_handoff and label == "OCR" and callable(release):
-                    release()
-                else:
-                    runtime_manager.shutdown()
+                router_active = self._router_runtime_is_active(runtime_manager)
+                with self._runtime_resource_arbiter().model_release(
+                    service,
+                    target_state=target_state,
+                    allow_foreign_owner_teardown=allow_foreign_owner_teardown,
+                ) as release_context:
+                    if used_handoff_release:
+                        if router_active:
+                            release_report = release(
+                                resource_arbiter=self._runtime_resource_arbiter(),
+                                runtime_service=service,
+                                cancel_checker=self._prewarm_cancel_checker,
+                            )
+                        else:
+                            release_report = release()
+                        if (
+                            isinstance(release_report, dict)
+                            and str(release_report.get("runtime_state") or "")
+                            == "stopped"
+                        ):
+                            release_context.target_state = (
+                                RuntimeModelState.STOPPED
+                            )
+                    else:
+                        if router_active:
+                            release_report = runtime_manager.shutdown(
+                                resource_arbiter=self._runtime_resource_arbiter(),
+                                runtime_service=service,
+                                cancel_checker=self._prewarm_cancel_checker,
+                                allow_foreign_owner_teardown=(
+                                    allow_foreign_owner_teardown
+                                ),
+                            )
+                        else:
+                            release_report = runtime_manager.shutdown()
+                    gate = self._verify_managed_runtime_gpu_release(
+                        service,
+                        release_report,
+                        before=release_before,
+                    )
+                    if bool(gate.get("required")) and not bool(
+                        gate.get("observed")
+                    ):
+                        raise RuntimeError(
+                            QCoreApplication.translate(
+                                "StageBatchedProcessor",
+                                "Managed runtime GPU release was not confirmed.",
+                            )
+                        )
+                elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+                completed_state = release_context.target_state.value
+                self._record_runtime_performance(
+                    service=service,
+                    operation="release",
+                    elapsed_ms=elapsed_ms,
+                )
+                self._record_runtime_transition(
+                    service=service,
+                    to_state=completed_state,
+                    elapsed_ms=elapsed_ms,
+                )
+                self._sample_performance_resources(
+                    f"{service}_release_end"
+                )
                 return
             except Exception as exc:
+                self._record_runtime_performance(
+                    service=service,
+                    operation="release",
+                    elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+                    outcome="failed",
+                )
                 last_error = exc
                 logger.warning(
                     "Failed to stop managed %s runtime during %s%s.",
@@ -464,6 +835,11 @@ class StageBatchedProcessor(BatchProcessor):
                     "; retrying once" if attempt == 0 else "",
                     exc_info=True,
                 )
+        self._record_runtime_transition(
+            service=service,
+            to_state="release_failed",
+            outcome="failed",
+        )
         if raise_on_failure and last_error is not None:
             raise last_error
 
@@ -534,8 +910,14 @@ class StageBatchedProcessor(BatchProcessor):
             lambda: runtime_manager.ensure_engine(
                 engine_key,
                 settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service=service,
+            ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                service,
+                runtime_manager,
             ),
         )
 
@@ -688,10 +1070,17 @@ class StageBatchedProcessor(BatchProcessor):
             lambda: runtime_manager.ensure_engine(
                 engine_key,
                 settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service=service,
+            ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                service,
+                runtime_manager,
             ),
         )
+        self._sample_performance_resources(f"{service}_model_ready")
 
     @staticmethod
     def _ocr_runtime_service_name(engine_key: str) -> str:
@@ -713,8 +1102,14 @@ class StageBatchedProcessor(BatchProcessor):
             "gemma",
             lambda: runtime_manager.ensure_server(
                 settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service="gemma",
+            ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                "gemma",
+                runtime_manager,
             ),
         )
 
@@ -729,10 +1124,17 @@ class StageBatchedProcessor(BatchProcessor):
             "gemma",
             lambda: runtime_manager.ensure_server(
                 settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service="gemma",
+            ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                "gemma",
+                runtime_manager,
             ),
         )
+        self._sample_performance_resources("gemma_model_ready")
 
     def _set_current_image(self, image_path: str) -> None:
         try:
@@ -883,16 +1285,28 @@ class StageBatchedProcessor(BatchProcessor):
                 total_images=total_images,
             )
 
-            ctx.image = self.main_page.image_ctrl.load_image(ctx.image_path)
-            if ctx.image is None:
-                ensure_path_materialized(ctx.image_path)
-                ctx.image = imk.read_image(ctx.image_path)
+            with self._measure_performance(
+                stage="detect",
+                operation="image_decode",
+            ):
+                ctx.image = self.main_page.image_ctrl.load_image(ctx.image_path)
+                if ctx.image is None:
+                    ensure_path_materialized(ctx.image_path)
+                    ctx.image = imk.read_image(ctx.image_path)
 
             source_lang_english = self._source_lang_english(ctx.source_lang)
             detection_hit = None
             detection_identity = None
             if checkpoint_store is not None:
-                ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
+                with self._measure_performance(
+                    stage="detect",
+                    operation="decoded_hash",
+                    workload={
+                        "page_pixel_count": int(ctx.image.shape[0])
+                        * int(ctx.image.shape[1]),
+                    },
+                ):
+                    ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
                 ctx.project_checkpoint_page_key = project_checkpoint_page_key(
                     self.main_page,
                     ctx.image_path,
@@ -939,7 +1353,16 @@ class StageBatchedProcessor(BatchProcessor):
                 if detector is None:
                     detector = TextBlockDetector(settings_page)
                     self.block_detection.block_detector_cache = detector
-                blk_list = detector.detect(ctx.image)
+                with self._measure_performance(
+                    stage="detect",
+                    operation="model_inference",
+                    workload={
+                        "page_pixel_count": int(ctx.image.shape[0])
+                        * int(ctx.image.shape[1]),
+                    },
+                    service="detector",
+                ):
+                    blk_list = detector.detect(ctx.image)
                 self._raise_if_cancelled()
                 ctx.precomputed_mask_details = detector.last_mask_details
                 ctx.detector_key = (
@@ -1027,13 +1450,6 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings=export_settings,
                     preferred_path=detector_overlay_path,
                 )
-                if policy is not None:
-                    self._plan_detected_page_ocr_prewarm(
-                        ctx,
-                        policy,
-                        index=index,
-                        total_images=total_images,
-                    )
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -1665,6 +2081,7 @@ class StageBatchedProcessor(BatchProcessor):
                 context="OCR-to-inpaint handoff",
                 raise_on_failure=True,
                 release_for_handoff=True,
+                service=self._ocr_runtime_service_name(engine_key),
             )
         self._raise_if_cancelled()
 
@@ -1762,8 +2179,35 @@ class StageBatchedProcessor(BatchProcessor):
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
         runtime = get_inpainter_runtime(settings_page)
+        uses_cuda = str(runtime.get("device", "") or "").lower().startswith(
+            "cuda"
+        )
+        if uses_cuda and not bool(
+            getattr(self, "_inpainter_runtime_lease_held", False)
+        ):
+            self._runtime_resource_arbiter().acquire_external_model(
+                "inpainter"
+            )
+            self._inpainter_runtime_lease_held = True
         self.inpainting._ensure_inpainter()
+        if uses_cuda:
+            self._runtime_resource_arbiter().mark_external_model_ready(
+                "inpainter"
+            )
         return runtime
+
+    def _release_inpainter_runtime_lease(
+        self,
+        *,
+        release_succeeded: bool,
+    ) -> None:
+        if not bool(getattr(self, "_inpainter_runtime_lease_held", False)):
+            return
+        self._runtime_resource_arbiter().release_external_model(
+            "inpainter",
+            release_succeeded=release_succeeded,
+        )
+        self._inpainter_runtime_lease_held = False
 
     def _inpaint_all(self, pages: list[StagePageContext]) -> None:
         active_pages = [
@@ -1811,6 +2255,9 @@ class StageBatchedProcessor(BatchProcessor):
                 inpainter_vram_release_observed=True,
                 inpainter_vram_release_status="not-loaded",
                 inpainter_vram_release_elapsed_sec=0.0,
+            )
+            self._release_inpainter_runtime_lease(
+                release_succeeded=True,
             )
 
     def _finish_inpaint_page(
@@ -2193,13 +2640,22 @@ class StageBatchedProcessor(BatchProcessor):
                     )
                     continue
 
-                ctx.mask_details = generate_mask(
-                    ctx.image,
-                    inpaint_blocks,
-                    settings=mask_settings,
-                    return_details=True,
-                    precomputed_mask_details=ctx.precomputed_mask_details,
-                )
+                with self._measure_performance(
+                    stage="inpaint",
+                    operation="mask_generation",
+                    workload={
+                        "block_count": len(inpaint_blocks),
+                        "page_pixel_count": int(ctx.image.shape[0])
+                        * int(ctx.image.shape[1]),
+                    },
+                ):
+                    ctx.mask_details = generate_mask(
+                        ctx.image,
+                        inpaint_blocks,
+                        settings=mask_settings,
+                        return_details=True,
+                        precomputed_mask_details=ctx.precomputed_mask_details,
+                    )
                 if protected_blocks:
                     ctx.mask_details["inpaint_protected_block_count"] = len(
                         protected_blocks
@@ -2259,7 +2715,14 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_loaded = False
         if pending:
             self._raise_if_cancelled()
-            self._ensure_inpainter()
+            with self._measure_performance(
+                stage="inpaint",
+                operation="model_load",
+                workload={"page_count": len(pending)},
+                service="inpainter",
+            ):
+                self._ensure_inpainter()
+            self._sample_performance_resources("inpainter_model_ready")
             runtime_loaded = True
             refreshed_model_identity = registered_inpainter_model_identity(
                 str(runtime.get("key", "") or ""),
@@ -2295,12 +2758,22 @@ class StageBatchedProcessor(BatchProcessor):
                 continue
             try:
                 self._raise_if_cancelled()
-                ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(
-                    ctx.image,
-                    ctx.mask,
-                    inpaint_blocks,
-                    config=config,
-                )
+                with self._measure_performance(
+                    stage="inpaint",
+                    operation="model_forward",
+                    workload={
+                        "block_count": len(inpaint_blocks),
+                        "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
+                    },
+                    service="inpainter",
+                ):
+                    ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(
+                        ctx.image,
+                        ctx.mask,
+                        inpaint_blocks,
+                        config=config,
+                    )
+                self._sample_performance_resources("inpainter_forward_end")
                 ctx.inpaint_diagnostics = dict(
                     getattr(
                         self.inpainting,
@@ -2313,56 +2786,64 @@ class StageBatchedProcessor(BatchProcessor):
                     model_identity
                 )
                 self._raise_if_cancelled()
-                ctx.inpaint_input_img = imk.convert_scale_abs(
-                    ctx.inpaint_input_img
-                )
-                inpaint_edit_mask = getattr(
-                    self.inpainting,
-                    "last_inpaint_edit_mask",
-                    None,
-                )
-                if inpaint_edit_mask is not None:
-                    ctx.mask = np.where(
-                        (ctx.mask > 0) | (inpaint_edit_mask > 0),
-                        255,
-                        0,
-                    ).astype(np.uint8)
-                (
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                    ctx.cleanup_stats,
-                ) = refine_bubble_residue_inpaint(
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                    inpaint_blocks,
-                    self.inpainting.inpainter_cache,
-                    config,
-                )
-                (
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                    ctx.cleanup_stats,
-                ) = apply_duplicate_bubble_inner_fill(
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                    ctx.mask_details,
-                    ctx.cleanup_stats,
-                )
-                outside_before_restore = count_changed_outside_edit_mask(
-                    ctx.image,
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                )
-                ctx.inpaint_input_img = composite_with_edit_mask(
-                    ctx.image,
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                )
-                outside_after_restore = count_changed_outside_edit_mask(
-                    ctx.image,
-                    ctx.inpaint_input_img,
-                    ctx.mask,
-                )
+                with self._measure_performance(
+                    stage="inpaint",
+                    operation="cleanup_and_composite",
+                    workload={
+                        "block_count": len(inpaint_blocks),
+                        "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
+                    },
+                ):
+                    ctx.inpaint_input_img = imk.convert_scale_abs(
+                        ctx.inpaint_input_img
+                    )
+                    inpaint_edit_mask = getattr(
+                        self.inpainting,
+                        "last_inpaint_edit_mask",
+                        None,
+                    )
+                    if inpaint_edit_mask is not None:
+                        ctx.mask = np.where(
+                            (ctx.mask > 0) | (inpaint_edit_mask > 0),
+                            255,
+                            0,
+                        ).astype(np.uint8)
+                    (
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                        ctx.cleanup_stats,
+                    ) = refine_bubble_residue_inpaint(
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                        inpaint_blocks,
+                        self.inpainting.inpainter_cache,
+                        config,
+                    )
+                    (
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                        ctx.cleanup_stats,
+                    ) = apply_duplicate_bubble_inner_fill(
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                        ctx.mask_details,
+                        ctx.cleanup_stats,
+                    )
+                    outside_before_restore = count_changed_outside_edit_mask(
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                    )
+                    ctx.inpaint_input_img = composite_with_edit_mask(
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                    )
+                    outside_after_restore = count_changed_outside_edit_mask(
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                    )
                 ctx.inpaint_diagnostics[
                     "outside_mask_changed_before_restore"
                 ] = int(outside_before_restore)
@@ -2446,7 +2927,13 @@ class StageBatchedProcessor(BatchProcessor):
         start_gemma: bool = True,
         handoff_outcome: str = "completed",
     ) -> None:
-        report = self.inpainting.release_inpainter_resources()
+        try:
+            report = self.inpainting.release_inpainter_resources()
+        except BaseException:
+            self._release_inpainter_runtime_lease(
+                release_succeeded=False,
+            )
+            raise
         gate = dict(report.get("vram_release_gate") or {})
         self._inpainter_release_gate = gate
         self._emit_benchmark_event(
@@ -2460,7 +2947,13 @@ class StageBatchedProcessor(BatchProcessor):
             inpainter_vram_release_status=str(gate.get("status") or ""),
             inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
         )
-        if start_gemma and gate.get("required") and not gate.get("observed"):
+        release_succeeded = not bool(
+            gate.get("required") and not gate.get("observed")
+        )
+        self._release_inpainter_runtime_lease(
+            release_succeeded=release_succeeded,
+        )
+        if not release_succeeded:
             raise RuntimeError(
                 QCoreApplication.translate(
                     "StageBatchedProcessor",
@@ -2636,6 +3129,7 @@ class StageBatchedProcessor(BatchProcessor):
         prepared_translators: dict[int, Translator] = {}
         project_hits: dict[int, Any] = {}
         gemma_runtime_required = False
+        planning_started_at = time.perf_counter()
         for ctx in pages:
             if ctx.failed_stage or ctx.no_text_detected:
                 continue
@@ -2710,6 +3204,17 @@ class StageBatchedProcessor(BatchProcessor):
                     )
                     or gemma_runtime_required
                 )
+
+        self._record_performance_detail(
+            stage="translate",
+            operation="plan",
+            elapsed_ms=(time.perf_counter() - planning_started_at) * 1000.0,
+            workload={
+                "page_count": total_images,
+                "translator_count": len(prepared_translators),
+                "project_hit_count": len(project_hits),
+            },
+        )
 
         gemma_runtime_started = False
         if gemma_runtime_required:
@@ -2844,10 +3349,17 @@ class StageBatchedProcessor(BatchProcessor):
                 # The factory may share one engine across page translators, and
                 # the SQLite/runtime identity can change after folder preflight.
                 # Refresh this page's plan immediately before use.
-                runtime_required_now = translator.prepare_translation(
-                    ctx.translation_blocks,
-                    extra_context,
-                )
+                with self._measure_performance(
+                    stage="translate",
+                    operation="refresh_plan",
+                    workload={
+                        "block_count": len(ctx.translation_blocks),
+                    },
+                ):
+                    runtime_required_now = translator.prepare_translation(
+                        ctx.translation_blocks,
+                        extra_context,
+                    )
                 if runtime_required_now and not gemma_runtime_started:
                     gate = dict(getattr(self, "_inpainter_release_gate", {}) or {})
                     if gate.get("required") and not gate.get("observed"):
@@ -2861,17 +3373,32 @@ class StageBatchedProcessor(BatchProcessor):
                     self._await_gemma_runtime()
                     gemma_runtime_started = True
             try:
-                _, translation_cache_status = translator.translate_with_cache_manager(
-                    ctx.translation_blocks,
-                    ctx.image,
-                    extra_context,
-                    self.cache_manager,
-                )
+                with self._measure_performance(
+                    stage="translate",
+                    operation="inference_and_cache",
+                    workload={
+                        "block_count": len(ctx.translation_blocks),
+                    },
+                ):
+                    _, translation_cache_status = translator.translate_with_cache_manager(
+                        ctx.translation_blocks,
+                        ctx.image,
+                        extra_context,
+                        self.cache_manager,
+                    )
+                self._sample_performance_resources("gemma_request_end")
                 self._raise_if_cancelled()
-                apply_translation_result_dictionary(
-                    ctx.translation_blocks,
-                    settings_page.get_translation_result_dictionary_rules(),
-                )
+                with self._measure_performance(
+                    stage="translate",
+                    operation="dictionary_and_sanitizer",
+                    workload={
+                        "block_count": len(ctx.translation_blocks),
+                    },
+                ):
+                    apply_translation_result_dictionary(
+                        ctx.translation_blocks,
+                        settings_page.get_translation_result_dictionary_rules(),
+                    )
                 ctx.page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._persist_translation_state(
                     ctx.image_path,
@@ -2954,6 +3481,7 @@ class StageBatchedProcessor(BatchProcessor):
                 runtime_manager,
                 context="translation-to-render handoff",
                 raise_on_failure=True,
+                service="gemma",
             )
         self._raise_if_cancelled()
 
@@ -3694,19 +4222,35 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
+        self._record_performance_workload(
+            "pipeline",
+            page_count=total_images,
+            workflow_mode="stage_batched",
+        )
         self._reset_prewarm_lifecycle()
         try:
-            if self.main_page.file_handler.should_pre_materialize(image_list):
-                self.main_page.file_handler.pre_materialize(image_list)
+            with self._measure_performance(
+                stage="pipeline",
+                operation="pre_materialize",
+                workload={"page_count": total_images},
+            ):
+                if self.main_page.file_handler.should_pre_materialize(image_list):
+                    self.main_page.file_handler.pre_materialize(image_list)
         except Exception:
             logger.debug("Stage-batched pre-materialization failed; continuing lazily.", exc_info=True)
 
-        pages = self._load_page_contexts(image_list)
-        policy = self._ensure_stage_policy(pages)
-        self._project_checkpoint_store = open_project_stage_checkpoint_store(
-            self.main_page,
-            initialize=True,
-        )
+        with self._measure_performance(
+            stage="pipeline",
+            operation="prepare_work_context",
+            workload={"page_count": total_images},
+            node_id="pipeline.prepare",
+        ):
+            pages = self._load_page_contexts(image_list)
+            policy = self._ensure_stage_policy(pages)
+            self._project_checkpoint_store = open_project_stage_checkpoint_store(
+                self.main_page,
+                initialize=True,
+            )
         self._project_checkpoint_page_keys = (
             [
                 project_checkpoint_page_key(self.main_page, image_path)
@@ -3718,18 +4262,80 @@ class StageBatchedProcessor(BatchProcessor):
         batch_completed = False
         try:
             self._raise_if_cancelled()
-            self._shutdown_managed_runtimes(
-                context="batch startup preflight",
-                raise_on_failure=True,
-                preserve_sleeping_paddle=True,
+            with self._measure_performance(
+                stage="pipeline",
+                operation="runtime_startup_preflight",
+                node_id="pipeline.runtime_preflight",
+                dependencies=("pipeline.prepare",),
+            ):
+                self._shutdown_managed_runtimes(
+                    context="batch startup preflight",
+                    raise_on_failure=True,
+                    preserve_sleeping_paddle=True,
+                    ocr_service=self._ocr_runtime_service_name(
+                        str(policy.get("primary_ocr_engine", ""))
+                    ),
+                )
+            self._raise_if_cancelled()
+            with self._measure_performance(
+                stage="detect",
+                operation="stage_window",
+                workload={"page_count": total_images},
+                node_id="stage.detect",
+                dependencies=("pipeline.runtime_preflight",),
+                service="detector",
+            ):
+                self._detect_all(pages, policy)
+            source_pixels = 0
+            for ctx in pages:
+                image = getattr(ctx, "image", None)
+                if image is None:
+                    continue
+                image_array = np.asarray(image)
+                if image_array.ndim >= 2:
+                    source_pixels += int(image_array.shape[0]) * int(
+                        image_array.shape[1]
+                    )
+            detected_blocks = sum(
+                len(getattr(ctx, "blk_list", []) or []) for ctx in pages
             )
-            self._raise_if_cancelled()
-            self._start_ocr_prewarm(policy)
-            self._raise_if_cancelled()
-            self._detect_all(pages, policy)
+            self._record_performance_workload(
+                "detect",
+                page_count=total_images,
+                source_megapixels=source_pixels / 1_000_000.0,
+                detected_block_count=detected_blocks,
+            )
             self._sample_performance_resources("detect_stage_end")
             self._raise_if_cancelled()
-            self._ocr_all(pages, policy)
+            # GPU detection can keep an ONNX session resident.  Delay model
+            # prewarm until it completes so the model-start baseline and the
+            # exclusive runtime handoff are not contaminated by concurrent
+            # detector inference.
+            self._start_ocr_prewarm(policy)
+            self._raise_if_cancelled()
+            with self._measure_performance(
+                stage="ocr",
+                operation="stage_window",
+                workload={
+                    "page_count": total_images,
+                    "detected_block_count": detected_blocks,
+                },
+                node_id="stage.ocr",
+                dependencies=("stage.detect",),
+                service=self._ocr_runtime_service_name(
+                    str(policy.get("primary_ocr_engine", ""))
+                ),
+            ):
+                self._ocr_all(pages, policy)
+            ocr_blocks = sum(
+                len(getattr(ctx, "blk_list", []) or []) for ctx in pages
+            )
+            self._record_performance_workload(
+                "ocr",
+                page_count=total_images,
+                block_count=ocr_blocks,
+                runtime_required=bool(ocr_blocks),
+            )
             self._sample_performance_resources("ocr_stage_end")
             self._raise_if_cancelled()
             if benchmark_stage_ceiling == "ocr":
@@ -3741,13 +4347,105 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 batch_completed = True
                 return
-            self._inpaint_all(pages)
+            with self._measure_performance(
+                stage="inpaint",
+                operation="stage_window",
+                workload={"page_count": total_images, "block_count": ocr_blocks},
+                node_id="stage.inpaint",
+                dependencies=("stage.ocr",),
+                service="inpainter",
+            ):
+                self._inpaint_all(pages)
+            mask_pixels = sum(
+                int(np.count_nonzero(ctx.mask))
+                for ctx in pages
+                if getattr(ctx, "mask", None) is not None
+            )
+            inpaint_roi_count = sum(
+                len(
+                    list(
+                        dict(getattr(ctx, "inpaint_diagnostics", {}) or {}).get(
+                            "model_call_diagnostics",
+                            [],
+                        )
+                        or []
+                    )
+                )
+                for ctx in pages
+            )
+            self._record_performance_workload(
+                "inpaint",
+                page_count=total_images,
+                mask_pixel_count=mask_pixels,
+                roi_count=inpaint_roi_count,
+            )
             self._sample_performance_resources("inpaint_stage_end")
             self._raise_if_cancelled()
-            self._translate_all(pages)
+            for ctx in pages:
+                if getattr(ctx, "failed_stage", "") or getattr(
+                    ctx,
+                    "no_text_detected",
+                    False,
+                ):
+                    ctx.translation_blocks = []
+                    continue
+                ctx.translation_blocks = select_translate_inpaint_blocks(
+                    getattr(ctx, "blk_list", []) or []
+                )
+            translation_blocks = sum(
+                len(getattr(ctx, "translation_blocks", []) or [])
+                for ctx in pages
+            )
+            source_character_count = 0
+            for ctx in pages:
+                for block in getattr(ctx, "translation_blocks", []) or []:
+                    block_text = getattr(block, "text", "") or ""
+                    if isinstance(block_text, (list, tuple)):
+                        source_character_count += sum(
+                            len(str(item or "")) for item in block_text
+                        )
+                    else:
+                        source_character_count += len(str(block_text))
+            with self._measure_performance(
+                stage="translate",
+                operation="stage_window",
+                workload={
+                    "page_count": total_images,
+                    "block_count": translation_blocks,
+                    "source_character_count": source_character_count,
+                },
+                node_id="stage.translate",
+                dependencies=("stage.inpaint",),
+                service="gemma",
+            ):
+                self._translate_all(pages)
+            self._record_performance_workload(
+                "translate",
+                page_count=total_images,
+                block_count=translation_blocks,
+                source_character_count=source_character_count,
+            )
             self._sample_performance_resources("translate_stage_end")
             self._raise_if_cancelled()
-            self._render_all(pages)
+            with self._measure_performance(
+                stage="render",
+                operation="stage_window",
+                workload={
+                    "page_count": total_images,
+                    "block_count": ocr_blocks,
+                    "source_megapixels": source_pixels / 1_000_000.0,
+                },
+                node_id="stage.render",
+                dependencies=("stage.translate",),
+                service="cpu_render",
+            ):
+                self._render_all(pages)
+            self._record_performance_workload(
+                "render",
+                page_count=total_images,
+                block_count=ocr_blocks,
+                source_megapixels=source_pixels / 1_000_000.0,
+            )
             self._sample_performance_resources("render_stage_end")
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
             batch_completed = True
@@ -3767,6 +4465,9 @@ class StageBatchedProcessor(BatchProcessor):
             finally:
                 self._shutdown_managed_runtimes(
                     preserve_sleeping_paddle=batch_completed,
+                    ocr_service=self._ocr_runtime_service_name(
+                        str(policy.get("primary_ocr_engine", ""))
+                    ),
                 )
             self._progress_image_path = None
 

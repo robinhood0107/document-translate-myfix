@@ -4,6 +4,9 @@ import unittest
 
 from modules.utils.gpu_handoff import (
     estimate_torch_cuda_storage_mb,
+    router_gpu_process_set,
+    wait_for_router_container_stop_release,
+    wait_for_global_vram_release,
     wait_for_vram_release,
 )
 
@@ -49,6 +52,30 @@ def _snapshot(
             "pid": 123,
             "rows": process_rows,
             "selected": process_rows[0] if process_rows else None,
+        },
+    }
+
+
+def _router_snapshot(*, used_mb: float, process_ids: set[int]) -> dict:
+    gpu_uuid = "GPU-router"
+    return {
+        "driver": {
+            "available": True,
+            "primary": {
+                "uuid": gpu_uuid,
+                "memory_used_mb": used_mb,
+            },
+        },
+        "driver_processes": {
+            "query_available": True,
+            "rows": [
+                {
+                    "pid": pid,
+                    "gpu_uuid": gpu_uuid,
+                    "memory_used_mb": None,
+                }
+                for pid in sorted(process_ids)
+            ],
         },
     }
 
@@ -114,6 +141,38 @@ class GPUHandoffTests(unittest.TestCase):
         self.assertTrue(report["available"])
         self.assertEqual(report["storage_count"], 1)
         self.assertEqual(report["total_mb"], 48.0)
+
+    def test_zero_model_router_stop_allows_small_baseline_sampling_jitter(self) -> None:
+        baseline = _router_snapshot(used_mb=390.0, process_ids=set())
+        before = _router_snapshot(used_mb=388.0, process_ids=set())
+        after = _router_snapshot(used_mb=392.0, process_ids=set())
+
+        report = wait_for_router_container_stop_release(
+            before,
+            container_baseline=baseline,
+            owned_router_process_ids=frozenset({1}),
+            timeout_sec=0.0,
+            sampler=lambda: after,
+        )
+
+        self.assertTrue(report["observed"])
+        self.assertEqual(report["status"], "observed")
+
+    def test_router_worker_probe_failure_is_not_an_empty_pid_set(self) -> None:
+        snapshot = _router_snapshot(used_mb=1200.0, process_ids=set())
+        snapshot["router_worker_processes"] = {
+            "query_available": False,
+            "rows": [],
+            "reason": "router-worker-device-fd-inspection-failed",
+        }
+
+        process_ids, source = router_gpu_process_set(
+            snapshot,
+            gpu_uuid="GPU-router",
+        )
+
+        self.assertIsNone(process_ids)
+        self.assertEqual(source, "router-worker-dxg")
 
     def test_model_sized_process_allocator_drop_satisfies_release_gate(self) -> None:
         before = _snapshot(
@@ -308,6 +367,128 @@ class GPUHandoffTests(unittest.TestCase):
         self.assertFalse(report["required"])
         self.assertTrue(report["observed"])
         self.assertEqual(report["status"], "not-required")
+
+    def test_global_driver_release_returns_to_model_start_baseline(self) -> None:
+        baseline = _snapshot(
+            process_available=False,
+            global_driver_used_mb=512.0,
+        )
+        before = _snapshot(
+            process_available=False,
+            global_driver_used_mb=3072.0,
+        )
+        after = _snapshot(
+            process_available=False,
+            global_driver_used_mb=520.0,
+        )
+
+        report = wait_for_global_vram_release(
+            before,
+            gpu_release_expected=True,
+            driver_baseline=baseline,
+            timeout_sec=0.0,
+            sampler=lambda: after,
+        )
+
+        self.assertTrue(report["observed"])
+        self.assertEqual(report["status"], "observed")
+        self.assertEqual(report["evidence_source"], "driver-global-memory")
+        self.assertEqual(report["drop_mb"], 2552.0)
+
+    def test_global_driver_release_fails_without_baseline_return(self) -> None:
+        baseline = _snapshot(
+            process_available=False,
+            global_driver_used_mb=512.0,
+        )
+        before = _snapshot(
+            process_available=False,
+            global_driver_used_mb=3072.0,
+        )
+        after = _snapshot(
+            process_available=False,
+            global_driver_used_mb=1536.0,
+        )
+
+        report = wait_for_global_vram_release(
+            before,
+            gpu_release_expected=True,
+            driver_baseline=baseline,
+            timeout_sec=0.0,
+            sampler=lambda: after,
+        )
+
+        self.assertFalse(report["observed"])
+        self.assertEqual(report["status"], "timeout")
+
+    def test_sleeping_managed_runtime_allows_only_bounded_process_residue(self) -> None:
+        baseline = _snapshot(
+            process_available=False,
+            global_driver_used_mb=512.0,
+        )
+        before = _snapshot(
+            process_available=False,
+            global_driver_used_mb=3072.0,
+        )
+        after = _snapshot(
+            process_available=False,
+            global_driver_used_mb=768.0,
+        )
+
+        report = wait_for_global_vram_release(
+            before,
+            gpu_release_expected=True,
+            driver_baseline=baseline,
+            expected_drop_ratio=0.85,
+            residual_allowance_mb=512.0,
+            timeout_sec=0.0,
+            sampler=lambda: after,
+        )
+
+        self.assertTrue(report["observed"])
+        self.assertEqual(report["expected_drop_mb"], 2176.0)
+        self.assertEqual(report["residual_allowance_mb"], 512.0)
+
+    def test_sleeping_managed_runtime_rejects_partial_model_residency(self) -> None:
+        baseline = _snapshot(
+            process_available=False,
+            global_driver_used_mb=512.0,
+        )
+        before = _snapshot(
+            process_available=False,
+            global_driver_used_mb=3072.0,
+        )
+        after = _snapshot(
+            process_available=False,
+            global_driver_used_mb=900.0,
+        )
+
+        report = wait_for_global_vram_release(
+            before,
+            gpu_release_expected=True,
+            driver_baseline=baseline,
+            expected_drop_ratio=0.85,
+            residual_allowance_mb=512.0,
+            timeout_sec=0.0,
+            sampler=lambda: after,
+        )
+
+        self.assertFalse(report["observed"])
+        self.assertEqual(report["status"], "timeout")
+
+    def test_global_driver_release_fails_closed_when_measurement_missing(self) -> None:
+        unavailable = {
+            "driver": {"available": False},
+        }
+
+        report = wait_for_global_vram_release(
+            unavailable,
+            gpu_release_expected=True,
+            timeout_sec=0.0,
+            sampler=lambda: unavailable,
+        )
+
+        self.assertFalse(report["observed"])
+        self.assertEqual(report["status"], "unavailable")
 
 
 if __name__ == "__main__":

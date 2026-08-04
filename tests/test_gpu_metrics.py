@@ -79,6 +79,20 @@ class GPUMetricsTests(unittest.TestCase):
         self.assertFalse(report["available"])
         self.assertEqual(report["reason"], "ambiguous-process-gpu")
 
+    def test_compute_processes_preserves_wsl_namespace_pid_without_memory(self) -> None:
+        output = "28, GPU-target, [Not Found], [N/A]"
+        with mock.patch(
+            "modules.utils.gpu_metrics._run_capture_status",
+            return_value=(True, output),
+        ):
+            report = gpu_metrics.query_gpu_compute_processes()
+
+        self.assertTrue(report["query_available"])
+        self.assertEqual(report["gpu_uuids"], ["GPU-target"])
+        self.assertEqual(report["rows"][0]["pid"], 28)
+        self.assertIsNone(report["rows"][0]["memory_used_mb"])
+        self.assertFalse(report["rows"][0]["memory_reported"])
+
     def test_process_cuda_metrics_include_device_uuid_and_allocator_values(self) -> None:
         cuda = SimpleNamespace(
             is_available=lambda: True,
@@ -121,6 +135,33 @@ class GPUMetricsTests(unittest.TestCase):
 
         self.assertEqual(report["process"], process)
         driver_process.assert_called_once_with(preferred_gpu_uuid="GPU-target")
+
+    def test_router_snapshot_uses_one_linux_driver_view(self) -> None:
+        gpu_output = "0, GPU-router, RTX, 12282, 2584, 9698, 0, 0"
+        process_output = "28, GPU-router, [Not Found], [N/A]"
+
+        def router_capture(args):
+            if args[0].startswith("--query-gpu="):
+                return True, gpu_output
+            self.assertTrue(args[0].startswith("--query-compute-apps="))
+            return True, process_output
+
+        with mock.patch(
+            "modules.utils.gpu_metrics._run_router_nvidia_smi",
+            side_effect=router_capture,
+        ), mock.patch(
+            "modules.utils.gpu_metrics.query_process_cuda_metrics",
+            return_value={"available": False, "reason": "torch-not-loaded"},
+        ):
+            report = gpu_metrics.query_router_cuda_handoff_metrics()
+
+        self.assertEqual(report["driver"]["primary"]["uuid"], "GPU-router")
+        self.assertEqual(report["driver_processes"]["rows"][0]["pid"], 28)
+        self.assertIsNone(report["driver_processes"]["rows"][0]["memory_used_mb"])
+        self.assertEqual(
+            report["driver_process"]["reason"],
+            "router-uses-container-driver-view",
+        )
 
 
 class GPUCleanupTests(unittest.TestCase):
