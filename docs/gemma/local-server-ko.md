@@ -83,9 +83,9 @@ docker compose `
 
 ## 현재 활성 요청값
 
-- `temperature=0.7`
-- `top_k=64`
-- `top_p=0.95`
+- `temperature=0.5`
+- `top_k=32`
+- `top_p=1.0`
 - `min_p=0.0`
 - `Chunk Size=6`
 - `Max Completion Tokens=512`
