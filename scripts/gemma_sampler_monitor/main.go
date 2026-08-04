@@ -68,16 +68,30 @@ var (
 )
 
 func main() {
+	if launchedAsSamplerLauncher(os.Args[1:]) {
+		if err := launcherMain(os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "gemma-sampler-launcher:", err)
+			os.Exit(2)
+		}
+		return
+	}
 	config, err := parseMonitorConfig(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gemma-monitor:", err)
 		os.Exit(2)
 	}
-	program := tea.NewProgram(newMonitorModel(config), tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
+	if err := runMonitor(config); err != nil {
 		fmt.Fprintln(os.Stderr, "gemma-monitor:", err)
 		os.Exit(1)
 	}
+}
+
+func runMonitor(config monitorConfig) error {
+	program := tea.NewProgram(newMonitorModel(config), tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func parseMonitorConfig(arguments []string) (monitorConfig, error) {
@@ -145,12 +159,12 @@ func (model monitorModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.now = time.Now()
 		model.snapshot = typed.snapshot
 		model.snapshotErr = typed.err
-		if typed.err == nil && typed.snapshot.State == "WAITING_FOR_JUDGMENT" && model.config.exitOnCompletion && !model.terminalExitScheduled {
+		if typed.err == nil && isTerminalSuccessState(typed.snapshot.State) && model.config.exitOnCompletion && !model.terminalExitScheduled {
 			model.terminalExitScheduled = true
 			model.terminalExitAt = model.now.Add(model.config.exitDelay)
 			return model, tea.Tick(model.config.exitDelay, func(time.Time) tea.Msg { return terminalExitMessage{} })
 		}
-		if typed.snapshot.State != "WAITING_FOR_JUDGMENT" {
+		if !isTerminalSuccessState(typed.snapshot.State) {
 			model.terminalExitScheduled = false
 			model.terminalExitAt = time.Time{}
 		}
@@ -159,7 +173,7 @@ func (model monitorModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.gpu = typed.stats
 		model.gpuErr = typed.err
 	case terminalExitMessage:
-		if model.snapshotErr == nil && model.snapshot.State == "WAITING_FOR_JUDGMENT" {
+		if model.snapshotErr == nil && isTerminalSuccessState(model.snapshot.State) {
 			return model, tea.Quit
 		}
 	}
@@ -186,17 +200,37 @@ func (model monitorModel) View() string {
 	}
 
 	percentage := completionRatio(model.snapshot.Completed, model.snapshot.Expected)
+	stagePercentage := completionRatio(model.snapshot.StageCompleted, model.snapshot.StageExpected)
+	evidenceCompleted := model.snapshot.Completed + model.snapshot.Reused
+	evidencePercentage := completionRatio(evidenceCompleted, model.snapshot.EvidenceExpected)
+	progressLines := []string{
+		renderProgressBar(percentage, maxInt(30, innerWidth-2)) + " " + fmt.Sprintf("%5.1f%%", percentage*100),
+		fmt.Sprintf("%s  %s / %s 완료  |  %s %s", labelStyle.Render("새 실행 / NEW:"), formatCount(model.snapshot.Completed), formatCount(model.snapshot.Expected), labelStyle.Render("남음 / LEFT:"), formatCount(maxInt(model.snapshot.Expected-model.snapshot.Completed, 0))),
+	}
+	if model.snapshot.EvidenceExpected > 0 {
+		progressLines = append(progressLines,
+			fmt.Sprintf("%s  r6 재사용 %s  |  전체 증거 %s / %s (%.1f%%)", labelStyle.Render("증거 / EVIDENCE:"), formatCount(model.snapshot.Reused), formatCount(evidenceCompleted), formatCount(model.snapshot.EvidenceExpected), evidencePercentage*100),
+		)
+	}
+	if model.snapshot.StageExpected > 0 {
+		progressLines = append(progressLines,
+			fmt.Sprintf("%s  %s / %s (%.1f%%)", labelStyle.Render("현재 단계 / STAGE:"), formatCount(model.snapshot.StageCompleted), formatCount(model.snapshot.StageExpected), stagePercentage*100),
+		)
+	}
+	if model.snapshot.CurrentArm != "" {
+		progressLines = append(progressLines, samplerLine(model.snapshot))
+	}
 	phasePanel := panelStyle.Width(innerWidth).Render(strings.Join([]string{
 		labelStyle.Render("현재 단계 / CURRENT PHASE") + "  " + phaseLabel(model.snapshot.Phase),
 		stateLine(model.snapshot.State, model.snapshot.ManifestStatus),
-		renderProgressBar(percentage, maxInt(30, innerWidth-2)) + " " + fmt.Sprintf("%5.1f%%", percentage*100),
-		fmt.Sprintf("%s  %s / %s 완료  |  %s %s", labelStyle.Render("진행 / PROGRESS:"), formatCount(model.snapshot.Completed), formatCount(model.snapshot.Expected), labelStyle.Render("남음 / LEFT:"), formatCount(maxInt(model.snapshot.Expected-model.snapshot.Completed, 0))),
+		strings.Join(progressLines, "\n"),
 		phaseDescription(model.snapshot.Phase, model.snapshot.Expected),
 	}, "\n"))
 
 	etaPanel := panelStyle.Width(innerWidth).Render(strings.Join([]string{
 		labelStyle.Render("속도·예상 종료 / RATE AND ETA"),
 		formatETA(model.snapshot.Estimate),
+		activityLine(model.snapshot),
 		freshnessLine(model.snapshot.UpdatedAt, model.now),
 	}, "\n"))
 
@@ -205,12 +239,26 @@ func (model monitorModel) View() string {
 		formatGPU(model.gpu, model.gpuErr, model.config.disableGPU),
 	}, "\n"))
 
+	checkpointLines := []string{
+		labelStyle.Render("체크포인트·로그 / CHECKPOINT AND LOG"),
+		freshnessLine(model.snapshot.UpdatedAt, model.now),
+		lastCompletionLine(model.snapshot.Estimate),
+		dimStyle.Render("runner log: ") + valueStyle.Render(shortenMiddle(supervisorLogPath(model.config.runRoot), innerWidth-14)),
+	}
+	if model.snapshot.Detail != "" {
+		checkpointLines = append(checkpointLines, warnStyle.Render("마지막 상태: ")+valueStyle.Render(shortenMiddle(model.snapshot.Detail, innerWidth-18)))
+	}
+	if model.snapshot.WorkerPID > 0 {
+		checkpointLines = append(checkpointLines, dimStyle.Render(fmt.Sprintf("현재 Python worker PID: %d", model.snapshot.WorkerPID)))
+	}
+	checkpointPanel := panelStyle.Width(innerWidth).Render(strings.Join(checkpointLines, "\n"))
+
 	terminalLine := ""
 	if model.terminalExitScheduled {
 		remaining := maxDuration(model.terminalExitAt.Sub(model.now), 0)
-		terminalLine = okStyle.Render("정상 단계 종료 / WAITING FOR JUDGMENT") + "  " + dimStyle.Render("이 창은 "+formatDuration(remaining)+" 후 자동 종료됩니다.")
+		terminalLine = okStyle.Render("정상 실행 종료 / WAITING FOR FINAL JUDGMENT") + "  " + dimStyle.Render("이 창은 "+formatDuration(remaining)+" 후 자동 종료됩니다.")
 	}
-	parts := []string{header, runLine, phasePanel, etaPanel, gpuPanel}
+	parts := []string{header, runLine, phasePanel, etaPanel, gpuPanel, checkpointPanel}
 	if terminalLine != "" {
 		parts = append(parts, terminalLine)
 	}
@@ -244,6 +292,10 @@ func completionRatio(completed, expected int) float64 {
 	return math.Min(1, math.Max(0, float64(completed)/float64(expected)))
 }
 
+func isTerminalSuccessState(state string) bool {
+	return state == "WAITING_FOR_JUDGMENT" || state == "WAITING_FOR_FINAL_JUDGMENT"
+}
+
 func renderProgressBar(ratio float64, width int) string {
 	filled := int(math.Round(ratio * float64(width)))
 	filled = minInt(width, maxInt(0, filled))
@@ -268,12 +320,14 @@ func phaseDescription(phase string, expected int) string {
 		return dimStyle.Render("실행 matrix 정보를 읽는 중 / Reading the execution matrix")
 	}
 	switch phase {
+	case "":
+		return dimStyle.Render("r6 재사용을 검증하고 Router를 준비 중입니다 / Validating r6 reuse and preparing Router")
 	case "temperature":
 		return dimStyle.Render("matrix: temperature 0.1–1.0 × 2 seeds × 478 cases = " + formatCount(expected))
 	case "joint_top_p_top_k":
-		return dimStyle.Render("matrix: selected temperature × top-p/top-k × 2 seeds = " + formatCount(expected))
+		return dimStyle.Render("고정 matrix: 온도 10개 × top-p 4개 × top-k 3개 × 2 seed (r6 기본값 10개 재사용)")
 	case "min_p":
-		return dimStyle.Render("matrix: selected tuples × min-p × 2 seeds = " + formatCount(expected))
+		return dimStyle.Render("고정 matrix: 온도 10개 × min-p 0/.05/.10 × 2 seed (0은 joint 결과 재사용)")
 	default:
 		return dimStyle.Render("matrix slots: " + formatCount(expected))
 	}
@@ -283,12 +337,24 @@ func stateLine(state, manifestStatus string) string {
 	label := state
 	style := valueStyle
 	switch state {
-	case "RUNNING":
+	case "RUNNING", "RUNNING_JOINT", "RUNNING_MIN_P":
 		label = "실행 중 / RUNNING"
 		style = okStyle
-	case "WAITING_FOR_JUDGMENT":
-		label = "판정 대기 / WAITING FOR JUDGMENT"
+	case "VALIDATING_REUSE":
+		label = "r6 재사용 검증 / VALIDATING REUSE"
+		style = warnStyle
+	case "RELEASING":
+		label = "Router unload·VRAM 반환 확인 / RELEASING"
+		style = warnStyle
+	case "WAITING_FOR_JUDGMENT", "WAITING_FOR_FINAL_JUDGMENT":
+		label = "최종 판정 대기 / WAITING FOR FINAL JUDGMENT"
 		style = okStyle
+	case "RESUME_REQUIRED":
+		label = "자동 재개 대기 / RESUME REQUIRED"
+		style = warnStyle
+	case "FAILED_CLOSED", "RELEASE_FAILED":
+		label = "안전 중단 / FAILED CLOSED"
+		style = badStyle
 	case "":
 		label = "준비 중 / PREPARING"
 		style = warnStyle
@@ -305,7 +371,16 @@ func stateLine(state, manifestStatus string) string {
 func formatETA(estimate ETAEstimate) string {
 	switch estimate.Status {
 	case "complete":
-		return okStyle.Render("단계 완료 / PHASE COMPLETE")
+		return okStyle.Render("실행 완료 / EXECUTION COMPLETE")
+	case "baseline":
+		rangeText := ""
+		if estimate.LowRemaining > 0 || estimate.HighRemaining > 0 {
+			rangeText = fmt.Sprintf("  |  범위 약 %s~%s", formatDuration(estimate.LowRemaining), formatDuration(estimate.HighRemaining))
+		}
+		return strings.Join([]string{
+			labelStyle.Render("초기 ETA / INITIAL ETA:") + " r6 실측 투영",
+			fmt.Sprintf("%s  약 %s  |  %s%s", labelStyle.Render("예상 종료 / ETA:"), formatDuration(estimate.Remaining), estimate.FinishAt.In(time.Local).Format("01-02 15:04 MST"), dimStyle.Render(rangeText)),
+		}, "\n")
 	case "stalled":
 		return warnStyle.Render("최근 progress 갱신이 90초를 넘었습니다. ETA를 일시 보류합니다 / No fresh completion for 90s; ETA paused.")
 	case "stable", "measuring":
@@ -313,13 +388,65 @@ func formatETA(estimate ETAEstimate) string {
 		if estimate.Status == "stable" {
 			confidence = "안정 / stable"
 		}
+		activeETA := estimate.Remaining
+		if estimate.ActiveRemaining > 0 {
+			activeETA = estimate.ActiveRemaining
+		}
+		backoff := ""
+		if estimate.ExpectedBackoff > 0 {
+			backoff = "  |  " + dimStyle.Render("예상 retry 대기 "+formatDuration(estimate.ExpectedBackoff))
+		}
 		return strings.Join([]string{
 			fmt.Sprintf("%s  %.1f slots/min  |  %d개 최근 완료 표본, %s", labelStyle.Render("속도 / RATE:"), estimate.RatePerMinute, estimate.SampleCount, formatDuration(estimate.Observation)),
-			fmt.Sprintf("%s  약 %s  |  %s  |  %s", labelStyle.Render("예상 종료 / ETA:"), formatDuration(estimate.Remaining), estimate.FinishAt.In(time.Local).Format("01-02 15:04 MST"), dimStyle.Render("robust median · "+confidence)),
+			fmt.Sprintf("%s  활성 약 %s%s", labelStyle.Render("활성 ETA / ACTIVE ETA:"), formatDuration(activeETA), backoff),
+			fmt.Sprintf("%s  약 %s  |  %s  |  %s", labelStyle.Render("예상 종료 / ETA:"), formatDuration(estimate.Remaining), estimate.FinishAt.In(time.Local).Format("01-02 15:04 MST"), dimStyle.Render("recent/overall blend · "+confidence)),
 		}, "\n")
 	default:
 		return dimStyle.Render("완료 표본을 수집 중입니다 / Collecting enough completion samples for ETA")
 	}
+}
+
+func activityLine(snapshot Snapshot) string {
+	if snapshot.ActiveSeconds <= 0 && snapshot.BackoffSeconds <= 0 {
+		return dimStyle.Render("활성 시간 / ACTIVE: 아직 측정 중")
+	}
+	return fmt.Sprintf(
+		"%s  %s  |  %s %s",
+		labelStyle.Render("활성 시간 / ACTIVE:"),
+		formatDuration(time.Duration(snapshot.ActiveSeconds*float64(time.Second))),
+		labelStyle.Render("재시도 대기 / BACKOFF:"),
+		formatDuration(time.Duration(snapshot.BackoffSeconds*float64(time.Second))),
+	)
+}
+
+func lastCompletionLine(estimate ETAEstimate) string {
+	if estimate.RecentComplete.IsZero() {
+		return dimStyle.Render("마지막 완료 / LAST COMPLETE: 아직 없음")
+	}
+	return dimStyle.Render("마지막 완료 / LAST COMPLETE: ") + valueStyle.Render(estimate.RecentComplete.In(time.Local).Format("01-02 15:04:05 MST"))
+}
+
+func supervisorLogPath(runRoot string) string {
+	managedRoot := managedRunRoot(runRoot)
+	return filepath.Join(filepath.Dir(managedRoot), "supervisor-logs", filepath.Base(managedRoot)+".log")
+}
+
+func samplerLine(snapshot Snapshot) string {
+	parts := []string{
+		fmt.Sprintf("t=%.2f", snapshot.CurrentSampler.Temperature),
+		fmt.Sprintf("top-p=%.2f", snapshot.CurrentSampler.TopP),
+		fmt.Sprintf("top-k=%d", snapshot.CurrentSampler.TopK),
+		fmt.Sprintf("min-p=%.2f", snapshot.CurrentSampler.MinP),
+	}
+	caseText := ""
+	if snapshot.CaseCount > 0 && snapshot.CurrentCase > 0 {
+		caseText = fmt.Sprintf("  |  seed %d · case %d/%d", snapshot.CurrentSeed, snapshot.CurrentCase, snapshot.CaseCount)
+	}
+	attempts := snapshot.Attempts
+	return strings.Join([]string{
+		labelStyle.Render("현재 sampler / CURRENT SAMPLER:") + " " + valueStyle.Render(strings.Join(parts, "  ")) + dimStyle.Render(caseText),
+		fmt.Sprintf("%s  valid %s  |  retry %s  |  timeout %s  |  indeterminate %s", labelStyle.Render("응답 / RESPONSES:"), formatCount(attempts.Valid), formatCount(attempts.Retry), formatCount(attempts.Timeout), formatCount(attempts.Indeterminate)),
+	}, "\n")
 }
 
 func freshnessLine(updatedAt, now time.Time) string {

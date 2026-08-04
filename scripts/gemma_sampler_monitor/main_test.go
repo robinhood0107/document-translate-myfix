@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ func TestReadSnapshotUsesRecentCompletionWindowForETA(t *testing.T) {
 	lines := make([]string, 0, 120)
 	for index := 0; index < 120; index++ {
 		stamp := now.Add(-5*time.Second - time.Duration(119-index)*2*time.Second)
-		lines = append(lines, fmt.Sprintf(`{"recorded_utc":%q}`, stamp.Format(time.RFC3339)))
+		lines = append(lines, fmt.Sprintf(`{"entry":{"recorded_utc":%q}}`, stamp.Format(time.RFC3339)))
 	}
 	if err := os.WriteFile(filepath.Join(root, "completion-index.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -83,6 +84,119 @@ func TestReadSnapshotResolvesManagedRunArtifactsDirectory(t *testing.T) {
 	}
 	if snapshot.ManifestStatus != "completed" {
 		t.Fatalf("managed manifest was not selected: %#v", snapshot)
+	}
+}
+
+func TestCampaignSnapshotShowsNewAndReusedEvidenceWithBlendedETA(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, time.August, 3, 14, 30, 0, 0, time.UTC)
+	progress := fmt.Sprintf(
+		`{"state":"RUNNING_JOINT","phase":"joint_top_p_top_k","campaign_completed_logical_slots":500,"campaign_expected_logical_slots":124280,"reused_logical_slots":9560,"evidence_expected_logical_slots":133840,"stage_completed_logical_slots":500,"stage_expected_logical_slots":105160,"case_count":478,"current_sampler":{"temperature":0.7,"top_p":1,"top_k":0,"min_p":0},"current_seed":20260802,"current_case_position":22,"attempt_counts":{"valid":500,"retry":2,"timeout":1,"indeterminate":3},"active_elapsed_seconds":1000,"initial_eta_seconds":102544,"initial_eta_low_seconds":98400,"initial_eta_high_seconds":119340,"worker_pid":1234,"updated_utc":%q}`,
+		now.Add(-5*time.Second).Format(time.RFC3339),
+	)
+	if err := os.WriteFile(filepath.Join(root, "progress.json"), []byte(progress), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines := make([]string, 0, 120)
+	for index := 0; index < 120; index++ {
+		stamp := now.Add(-5*time.Second - time.Duration(119-index)*2*time.Second)
+		lines = append(lines, fmt.Sprintf(`{"recorded_utc":%q}`, stamp.Format(time.RFC3339)))
+	}
+	if err := os.WriteFile(filepath.Join(root, "completion-index.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := readSnapshot(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Completed != 500 || snapshot.Expected != 124280 || snapshot.Reused != 9560 || snapshot.EvidenceExpected != 133840 {
+		t.Fatalf("campaign evidence counters were not retained: %#v", snapshot)
+	}
+	if snapshot.StageExpected != 105160 || snapshot.CurrentSampler.TopK != 0 || snapshot.CurrentSeed != 20260802 {
+		t.Fatalf("campaign sampler context was not retained: %#v", snapshot)
+	}
+	if snapshot.Estimate.Status != "stable" || snapshot.Estimate.RatePerMinute <= 0 {
+		t.Fatalf("campaign ETA did not blend live data: %#v", snapshot.Estimate)
+	}
+	if snapshot.Estimate.RecentComplete.IsZero() {
+		t.Fatalf("campaign snapshot did not retain the last completion timestamp: %#v", snapshot.Estimate)
+	}
+}
+
+func TestEstimateCampaignETASeparatesBackoffFromActiveETA(t *testing.T) {
+	now := time.Date(2026, time.August, 3, 14, 30, 0, 0, time.UTC)
+	timestamps := make([]time.Time, 0, 120)
+	for index := 0; index < 120; index++ {
+		timestamps = append(timestamps, now.Add(-5*time.Second-time.Duration(119-index)*2*time.Second))
+	}
+	estimate := estimateCampaignETA(
+		timestamps,
+		500,
+		124280,
+		1000,
+		100,
+		102544,
+		98400,
+		119340,
+		now.Add(-5*time.Second),
+		now,
+	)
+	if estimate.Status != "stable" || estimate.ActiveRemaining <= 0 || estimate.ExpectedBackoff <= 0 {
+		t.Fatalf("campaign ETA did not expose active and backoff portions: %#v", estimate)
+	}
+	if estimate.Remaining != estimate.ActiveRemaining+estimate.ExpectedBackoff {
+		t.Fatalf("wall ETA did not include the expected backoff: %#v", estimate)
+	}
+}
+
+func TestFindRepositoryRootFindsCuda13BatchFromLauncherLocation(t *testing.T) {
+	root := t.TempDir()
+	scripts := filepath.Join(root, "scripts")
+	if err := os.Mkdir(scripts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scripts, cuda13BatchName), []byte("@echo off\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launcherDir := filepath.Join(root, "private-artifacts", "tools")
+	if err := os.MkdirAll(launcherDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	found, ok := findRepositoryRoot(launcherDir)
+	if !ok || found != root {
+		t.Fatalf("launcher could not resolve its repository root: found=%q ok=%v", found, ok)
+	}
+}
+
+func TestBatchCommandLineKeepsPathQuotesUnescaped(t *testing.T) {
+	got := batchCommandLine(`C:\sampler tools\build monitor.bat`, "--monitor-only-if-stale")
+	want := `cmd.exe /d /c call "C:\sampler tools\build monitor.bat" "--monitor-only-if-stale"`
+	if got != want {
+		t.Fatalf("unexpected batch command line: got=%q want=%q", got, want)
+	}
+	if strings.Contains(got, `\"`) {
+		t.Fatalf("CMD must not receive escaped path quotes: %q", got)
+	}
+}
+
+func TestBatchCommandRunsABatchWhosePathContainsSpacesOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("native CMD execution is verified by the Windows Go test run")
+	}
+	root := t.TempDir()
+	batchPath := filepath.Join(root, "sampler tools", "probe.bat")
+	if err := os.MkdirAll(filepath.Dir(batchPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(batchPath, []byte("@echo off\r\nif /I \"%~1\"==\"--probe\" exit /b 0\r\nexit /b 1\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := newBatchCommand(batchPath, "--probe")
+	command.Dir = root
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("native CMD did not run quoted batch path: %v\n%s", err, output)
 	}
 }
 
