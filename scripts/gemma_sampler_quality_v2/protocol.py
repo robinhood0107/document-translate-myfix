@@ -33,6 +33,16 @@ TOP_P_VALUES = (0.85, 0.90, 0.95, 0.98, 1.00)
 TOP_K_VALUES = (0, 32, 64, 128, 256, 512)
 MIN_P_VALUES = (0.00, 0.01, 0.03, 0.05, 0.10)
 
+# The single-campaign plan intentionally keeps the historical staged helpers
+# above intact for archived lab evidence.  New execution uses this immutable
+# matrix instead: r6 is read-only provenance and every remaining arm runs in
+# one Router session.
+CAMPAIGN_PROTOCOL_VERSION = "gemma-sampler-quality-v2-campaign-v1"
+CAMPAIGN_RUN_ID = "gemma-sampler-v2-single-campaign"
+CAMPAIGN_TOP_P_VALUES = (0.85, 0.90, 0.95, 1.00)
+CAMPAIGN_TOP_K_VALUES = (0, 32, 64)
+CAMPAIGN_MIN_P_VALUES = (0.00, 0.05, 0.10)
+
 
 class ProtocolError(ValueError):
     """Raised when a run would deviate from the fixed v2 protocol."""
@@ -106,6 +116,64 @@ class SamplerArm:
         }
 
 
+@dataclass(frozen=True)
+class CampaignPlan:
+    """The sealed, non-adaptive sampler campaign executed by one CUDA13 BAT.
+
+    ``temperature_arms`` are not replayed: they name the complete r6 evidence
+    set.  The ten default rows in ``joint_arms`` reuse that evidence; the ten
+    min-p=0 rows reuse the matching p=1/k=0 rows produced earlier in this
+    same campaign.  Keeping those origins explicit prevents accidental GPU
+    replays or an unreviewed adaptive matrix change.
+    """
+
+    temperature_arms: tuple[SamplerArm, ...]
+    joint_arms: tuple[SamplerArm, ...]
+    min_p_arms: tuple[SamplerArm, ...]
+
+    @property
+    def all_arms(self) -> tuple[SamplerArm, ...]:
+        return self.temperature_arms + self.joint_arms + self.min_p_arms
+
+    @property
+    def new_joint_arms(self) -> tuple[SamplerArm, ...]:
+        return new_arms(self.joint_arms)
+
+    @property
+    def new_min_p_arms(self) -> tuple[SamplerArm, ...]:
+        return new_arms(self.min_p_arms)
+
+    @property
+    def sampler_keys(self) -> tuple[str, ...]:
+        """Unique tuple identities in deterministic campaign order."""
+
+        keys: list[str] = []
+        for arm in self.all_arms:
+            if arm.sampler.key not in keys:
+                keys.append(arm.sampler.key)
+        return tuple(keys)
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "protocol_version": CAMPAIGN_PROTOCOL_VERSION,
+            "run_id": CAMPAIGN_RUN_ID,
+            "temperature_arms": [arm.payload() for arm in self.temperature_arms],
+            "joint_arms": [arm.payload() for arm in self.joint_arms],
+            "min_p_arms": [arm.payload() for arm in self.min_p_arms],
+            "execution_order": [
+                "joint_top_p_top_k:p1.00-k0-m0.00-all-temperatures",
+                "joint_top_p_top_k:remaining-arms",
+                "min_p:remaining-arms",
+            ],
+            "seeds": list(SEEDS),
+            "fixed_request_contract": fixed_request_contract_payload(),
+        }
+
+    @property
+    def sha256(self) -> str:
+        return canonical_sha256(self.payload())
+
+
 def default_sampler_tuple() -> SamplerTuple:
     return SamplerTuple(*DEFAULT_TUPLE)
 
@@ -159,6 +227,57 @@ def min_p_arms(selected_tuples: Sequence[SamplerTuple]) -> tuple[SamplerArm, ...
     return tuple(arms)
 
 
+def campaign_plan() -> CampaignPlan:
+    """Return the approved fixed 140-tuple single-campaign sampler matrix.
+
+    The p=1/k=0 rows are deliberately first, before every other joint arm.
+    No result from that first group changes the remainder of the matrix.
+    """
+
+    temperatures = temperature_arms()
+    joint: list[SamplerArm] = []
+    # First execute the completely unfiltered p=1/k=0 comparison at every
+    # temperature.  These are new responses, not an inferred baseline.
+    for temperature in TEMPERATURE_VALUES:
+        joint.append(
+            SamplerArm(
+                "joint_top_p_top_k",
+                SamplerTuple(temperature, 1.00, 0, 0.00),
+            )
+        )
+    # Then cover all remaining joint combinations.  The historical r6 default
+    # rows are declared reused but remain part of the sealed evidence matrix.
+    for temperature in TEMPERATURE_VALUES:
+        for top_p in CAMPAIGN_TOP_P_VALUES:
+            for top_k in CAMPAIGN_TOP_K_VALUES:
+                if top_p == 1.00 and top_k == 0:
+                    continue
+                sampler = SamplerTuple(temperature, top_p, top_k, 0.00)
+                joint.append(
+                    SamplerArm(
+                        "joint_top_p_top_k",
+                        sampler,
+                        reused=top_p == 0.95 and top_k == 64,
+                    )
+                )
+    min_p: list[SamplerArm] = []
+    for temperature in TEMPERATURE_VALUES:
+        for minimum in CAMPAIGN_MIN_P_VALUES:
+            min_p.append(
+                SamplerArm(
+                    "min_p",
+                    SamplerTuple(temperature, 1.00, 0, minimum),
+                    # p=1/k=0/min-p=0 was produced in the first joint group.
+                    reused=minimum == 0.00,
+                )
+            )
+    return CampaignPlan(
+        temperature_arms=temperatures,
+        joint_arms=tuple(joint),
+        min_p_arms=tuple(min_p),
+    )
+
+
 def new_arms(arms: Iterable[SamplerArm]) -> tuple[SamplerArm, ...]:
     return tuple(arm for arm in arms if not arm.reused)
 
@@ -187,6 +306,37 @@ def expected_response_counts(
         "joint_top_p_top_k": joint,
         "min_p": min_p,
         "total_new": temperature + joint + min_p,
+    }
+
+
+def campaign_response_counts(
+    *,
+    case_count: int = CORPUS_CASE_COUNT,
+    seed_count: int = len(SEEDS),
+) -> dict[str, int]:
+    """Return exact single-campaign response evidence counts.
+
+    The values are deliberately fixed to the approved 478-case/two-seed
+    corpus.  A caller with a different corpus must create a new protocol
+    rather than silently shrink this long-running campaign.
+    """
+
+    if case_count != CORPUS_CASE_COUNT:
+        raise ProtocolError("Campaign response totals require the frozen 478-case corpus.")
+    if seed_count != len(SEEDS):
+        raise ProtocolError("Campaign response totals require the two fixed seeds.")
+    plan = campaign_plan()
+    per_arm = case_count * seed_count
+    reused_temperature = len(plan.temperature_arms) * per_arm
+    joint = len(plan.new_joint_arms) * per_arm
+    min_p = len(plan.new_min_p_arms) * per_arm
+    evidence = len(plan.sampler_keys) * per_arm
+    return {
+        "r6_reused": reused_temperature,
+        "joint_new": joint,
+        "min_p_new": min_p,
+        "total_new": joint + min_p,
+        "total_evidence": evidence,
     }
 
 
@@ -281,3 +431,13 @@ if expected_response_counts() != {
     "total_new": 76480,
 }:
     raise RuntimeError("Sampler v2 matrix totals do not match the approved plan.")
+
+
+if campaign_response_counts() != {
+    "r6_reused": 9560,
+    "joint_new": 105160,
+    "min_p_new": 19120,
+    "total_new": 124280,
+    "total_evidence": 133840,
+}:
+    raise RuntimeError("Sampler v2 single-campaign totals do not match the approved plan.")

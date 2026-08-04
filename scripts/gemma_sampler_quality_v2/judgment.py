@@ -521,9 +521,11 @@ def rank_sampler_results(
 ) -> list[dict[str, Any]]:
     """Rank only fully judged responses using the specified lexicographic rule."""
 
+    if scope not in {"tuning", "holdout", "all"}:
+        raise JudgmentError("Sampler rank scope must be tuning, holdout, or all.")
     aggregates: dict[str, dict[str, Any]] = {}
     for record in records:
-        if str(record.get("split") or "") != scope:
+        if scope != "all" and str(record.get("split") or "") != scope:
             continue
         sampler = _record_sampler(record)
         entry = aggregates.setdefault(

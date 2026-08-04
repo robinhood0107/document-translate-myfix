@@ -24,12 +24,45 @@ const (
 )
 
 type progressRecord struct {
-	State      string `json:"state"`
-	Phase      string `json:"phase"`
-	Completed  int    `json:"completed_logical_slots"`
-	Expected   int    `json:"phase_expected_logical_slots"`
-	UpdatedUTC string `json:"updated_utc"`
-	Schema     string `json:"schema_version"`
+	State             string        `json:"state"`
+	Phase             string        `json:"phase"`
+	Completed         int           `json:"completed_logical_slots"`
+	Expected          int           `json:"phase_expected_logical_slots"`
+	CampaignCompleted int           `json:"campaign_completed_logical_slots"`
+	CampaignExpected  int           `json:"campaign_expected_logical_slots"`
+	Reused            int           `json:"reused_logical_slots"`
+	EvidenceExpected  int           `json:"evidence_expected_logical_slots"`
+	StageCompleted    int           `json:"stage_completed_logical_slots"`
+	StageExpected     int           `json:"stage_expected_logical_slots"`
+	CaseCount         int           `json:"case_count"`
+	CurrentSampler    samplerRecord `json:"current_sampler"`
+	CurrentArm        string        `json:"current_arm_key"`
+	CurrentSeed       int           `json:"current_seed"`
+	CurrentCase       int           `json:"current_case_position"`
+	AttemptCounts     attemptRecord `json:"attempt_counts"`
+	ActiveSeconds     float64       `json:"active_elapsed_seconds"`
+	BackoffSeconds    float64       `json:"backoff_elapsed_seconds"`
+	InitialETASeconds int           `json:"initial_eta_seconds"`
+	InitialETALow     int           `json:"initial_eta_low_seconds"`
+	InitialETAHigh    int           `json:"initial_eta_high_seconds"`
+	Detail            string        `json:"detail"`
+	WorkerPID         int           `json:"worker_pid"`
+	UpdatedUTC        string        `json:"updated_utc"`
+	Schema            string        `json:"schema_version"`
+}
+
+type samplerRecord struct {
+	Temperature float64 `json:"temperature"`
+	TopP        float64 `json:"top_p"`
+	TopK        int     `json:"top_k"`
+	MinP        float64 `json:"min_p"`
+}
+
+type attemptRecord struct {
+	Valid         int `json:"valid"`
+	Retry         int `json:"retry"`
+	Timeout       int `json:"timeout"`
+	Indeterminate int `json:"indeterminate"`
 }
 
 type manifestRecord struct {
@@ -38,6 +71,9 @@ type manifestRecord struct {
 
 type completionIndexRecord struct {
 	RecordedUTC string `json:"recorded_utc"`
+	Entry       struct {
+		RecordedUTC string `json:"recorded_utc"`
+	} `json:"entry"`
 }
 
 type phaseStatusRecord struct {
@@ -45,25 +81,43 @@ type phaseStatusRecord struct {
 }
 
 type ETAEstimate struct {
-	Status         string
-	RatePerMinute  float64
-	Remaining      time.Duration
-	FinishAt       time.Time
-	SampleCount    int
-	Observation    time.Duration
-	RecentComplete time.Time
+	Status          string
+	RatePerMinute   float64
+	Remaining       time.Duration
+	FinishAt        time.Time
+	SampleCount     int
+	Observation     time.Duration
+	RecentComplete  time.Time
+	LowRemaining    time.Duration
+	HighRemaining   time.Duration
+	ActiveRemaining time.Duration
+	ExpectedBackoff time.Duration
 }
 
 type Snapshot struct {
-	RunRoot        string
-	State          string
-	Phase          string
-	Completed      int
-	Expected       int
-	UpdatedAt      time.Time
-	ManifestStatus string
-	Estimate       ETAEstimate
-	ReadAt         time.Time
+	RunRoot          string
+	State            string
+	Phase            string
+	Completed        int
+	Expected         int
+	Reused           int
+	EvidenceExpected int
+	StageCompleted   int
+	StageExpected    int
+	CaseCount        int
+	CurrentSampler   samplerRecord
+	CurrentArm       string
+	CurrentSeed      int
+	CurrentCase      int
+	Attempts         attemptRecord
+	ActiveSeconds    float64
+	BackoffSeconds   float64
+	Detail           string
+	WorkerPID        int
+	UpdatedAt        time.Time
+	ManifestStatus   string
+	Estimate         ETAEstimate
+	ReadAt           time.Time
 }
 
 type GPUStat struct {
@@ -90,10 +144,31 @@ func readSnapshot(runRoot string, now time.Time) (Snapshot, error) {
 	if progress.Completed < 0 || progress.Expected < 0 || (progress.Expected > 0 && progress.Completed > progress.Expected) {
 		return snapshot, fmt.Errorf("progress snapshot has impossible completion counts")
 	}
+	if progress.CampaignCompleted < 0 || progress.CampaignExpected < 0 || (progress.CampaignExpected > 0 && progress.CampaignCompleted > progress.CampaignExpected) || progress.Reused < 0 || progress.EvidenceExpected < 0 || (progress.EvidenceExpected > 0 && progress.CampaignCompleted+progress.Reused > progress.EvidenceExpected) || progress.StageCompleted < 0 || progress.StageExpected < 0 || (progress.StageExpected > 0 && progress.StageCompleted > progress.StageExpected) {
+		return snapshot, fmt.Errorf("campaign progress snapshot has impossible completion counts")
+	}
 	snapshot.State = strings.TrimSpace(progress.State)
 	snapshot.Phase = strings.TrimSpace(progress.Phase)
 	snapshot.Completed = progress.Completed
 	snapshot.Expected = progress.Expected
+	if progress.CampaignExpected > 0 {
+		snapshot.Completed = progress.CampaignCompleted
+		snapshot.Expected = progress.CampaignExpected
+	}
+	snapshot.Reused = progress.Reused
+	snapshot.EvidenceExpected = progress.EvidenceExpected
+	snapshot.StageCompleted = progress.StageCompleted
+	snapshot.StageExpected = progress.StageExpected
+	snapshot.CaseCount = progress.CaseCount
+	snapshot.CurrentSampler = progress.CurrentSampler
+	snapshot.CurrentArm = strings.TrimSpace(progress.CurrentArm)
+	snapshot.CurrentSeed = progress.CurrentSeed
+	snapshot.CurrentCase = progress.CurrentCase
+	snapshot.Attempts = progress.AttemptCounts
+	snapshot.ActiveSeconds = progress.ActiveSeconds
+	snapshot.BackoffSeconds = progress.BackoffSeconds
+	snapshot.Detail = strings.TrimSpace(progress.Detail)
+	snapshot.WorkerPID = progress.WorkerPID
 	snapshot.UpdatedAt = parseUTCTimestamp(progress.UpdatedUTC)
 	if snapshot.Expected == 0 && snapshot.Phase != "" {
 		snapshot.Expected = readPhaseExpected(artifactRoot, snapshot.Phase)
@@ -102,9 +177,37 @@ func readSnapshot(runRoot string, now time.Time) (Snapshot, error) {
 
 	timestamps, indexErr := readRecentCompletionTimes(filepath.Join(artifactRoot, "completion-index.jsonl"), completionSampleMax)
 	if indexErr == nil {
-		snapshot.Estimate = estimateCompletionETA(
-			timestamps,
-			maxInt(snapshot.Expected-snapshot.Completed, 0),
+		if progress.CampaignExpected > 0 {
+			snapshot.Estimate = estimateCampaignETA(
+				timestamps,
+				snapshot.Completed,
+				snapshot.Expected,
+				snapshot.ActiveSeconds,
+				snapshot.BackoffSeconds,
+				progress.InitialETASeconds,
+				progress.InitialETALow,
+				progress.InitialETAHigh,
+				snapshot.UpdatedAt,
+				now,
+			)
+		} else {
+			snapshot.Estimate = estimateCompletionETA(
+				timestamps,
+				maxInt(snapshot.Expected-snapshot.Completed, 0),
+				snapshot.UpdatedAt,
+				now,
+			)
+		}
+	} else if progress.CampaignExpected > 0 {
+		snapshot.Estimate = estimateCampaignETA(
+			nil,
+			snapshot.Completed,
+			snapshot.Expected,
+			snapshot.ActiveSeconds,
+			snapshot.BackoffSeconds,
+			progress.InitialETASeconds,
+			progress.InitialETALow,
+			progress.InitialETAHigh,
 			snapshot.UpdatedAt,
 			now,
 		)
@@ -112,6 +215,70 @@ func readSnapshot(runRoot string, now time.Time) (Snapshot, error) {
 		snapshot.Estimate = ETAEstimate{Status: "measuring"}
 	}
 	return snapshot, nil
+}
+
+func estimateCampaignETA(
+	timestamps []time.Time,
+	completed int,
+	expected int,
+	activeSeconds float64,
+	backoffSeconds float64,
+	initialSeconds int,
+	initialLow int,
+	initialHigh int,
+	updatedAt time.Time,
+	now time.Time,
+) ETAEstimate {
+	remaining := maxInt(expected-completed, 0)
+	if remaining == 0 {
+		return ETAEstimate{Status: "complete"}
+	}
+	if updatedAt.IsZero() || now.Sub(updatedAt) > progressStaleAfter {
+		return ETAEstimate{Status: "stalled"}
+	}
+	if completed < 500 || initialSeconds <= 0 {
+		base := time.Duration(initialSeconds) * time.Second
+		if initialSeconds <= 0 {
+			base = 0
+		}
+		ratio := float64(remaining) / math.Max(float64(expected), 1)
+		remainingDuration := time.Duration(float64(base) * ratio)
+		recentComplete := time.Time{}
+		if len(timestamps) > 0 {
+			recentComplete = timestamps[len(timestamps)-1]
+		}
+		return ETAEstimate{
+			Status:          "baseline",
+			Remaining:       remainingDuration,
+			ActiveRemaining: remainingDuration,
+			FinishAt:        now.Add(remainingDuration),
+			SampleCount:     completed,
+			RecentComplete:  recentComplete,
+			LowRemaining:    time.Duration(float64(time.Duration(initialLow)*time.Second) * ratio),
+			HighRemaining:   time.Duration(float64(time.Duration(initialHigh)*time.Second) * ratio),
+		}
+	}
+	recent := estimateCompletionETA(timestamps, remaining, updatedAt, now)
+	if recent.RatePerMinute <= 0 || activeSeconds <= 0 {
+		return recent
+	}
+	overallRate := float64(completed) / (activeSeconds / 60.0)
+	if overallRate <= 0 || math.IsInf(overallRate, 0) || math.IsNaN(overallRate) {
+		return recent
+	}
+	backoffRatio := math.Max(0, backoffSeconds) / activeSeconds
+	recentActiveRate := recent.RatePerMinute * (1 + backoffRatio)
+	combinedRate := recentActiveRate*0.7 + overallRate*0.3
+	activeRemaining := time.Duration((float64(remaining) / combinedRate) * float64(time.Minute))
+	expectedBackoff := time.Duration(float64(activeRemaining) * backoffRatio)
+	remainingDuration := activeRemaining + expectedBackoff
+	recent.Status = "stable"
+	recent.RatePerMinute = combinedRate
+	recent.Remaining = remainingDuration
+	recent.ActiveRemaining = activeRemaining
+	recent.ExpectedBackoff = expectedBackoff
+	recent.FinishAt = now.Add(remainingDuration)
+	return recent
 }
 
 func readPhaseExpected(artifactRoot, phase string) int {
@@ -226,7 +393,11 @@ func readRecentCompletionTimes(path string, limit int) ([]time.Time, error) {
 			// will become a valid line on the following refresh.
 			continue
 		}
-		if parsed := parseUTCTimestamp(record.RecordedUTC); !parsed.IsZero() {
+		recordedUTC := record.RecordedUTC
+		if recordedUTC == "" {
+			recordedUTC = record.Entry.RecordedUTC
+		}
+		if parsed := parseUTCTimestamp(recordedUTC); !parsed.IsZero() {
 			timestamps = append(timestamps, parsed)
 		}
 	}

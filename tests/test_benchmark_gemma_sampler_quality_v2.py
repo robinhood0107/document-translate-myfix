@@ -18,7 +18,18 @@ if str(ROOT) not in sys.path:
 
 from scripts import benchmark_gemma_sampler_quality_v2 as sampler_cli  # noqa: E402
 from scripts import validation_artifact_harness as harness  # noqa: E402
-from scripts.gemma_sampler_quality_v2 import corpus, execution, judgment, protocol, report, runtime, storage  # noqa: E402
+from scripts.gemma_sampler_quality_v2 import (  # noqa: E402
+    campaign,
+    corpus,
+    execution,
+    final_analysis,
+    incremental,
+    judgment,
+    protocol,
+    report,
+    runtime,
+    storage,
+)
 from scripts.gemma_sampler_quality_v2.storage import RunStore, read_json  # noqa: E402
 from scripts.gemma_sampler_quality_v2.review import render_private_review_html  # noqa: E402
 
@@ -147,6 +158,30 @@ def test_matrix_counts_exclude_temperature_zero_and_reuse_existing_rows() -> Non
     assert protocol.filters_disabled(top_k=0, top_p=1.0)
     with pytest.raises(protocol.ProtocolError):
         protocol.SamplerTuple(0.0, 0.95, 64, 0.0)
+
+
+def test_single_campaign_matrix_is_fixed_and_reuses_only_approved_rows() -> None:
+    plan = protocol.campaign_plan()
+
+    assert len(plan.temperature_arms) == 10
+    assert len(plan.joint_arms) == 120
+    assert len(plan.new_joint_arms) == 110
+    assert len(plan.min_p_arms) == 30
+    assert len(plan.new_min_p_arms) == 20
+    assert len(plan.sampler_keys) == 140
+    assert all(
+        arm.sampler.top_p == 1.0 and arm.sampler.top_k == 0 and arm.sampler.min_p == 0.0
+        for arm in plan.joint_arms[:10]
+    )
+    assert [arm.sampler.temperature for arm in plan.joint_arms[:10]] == list(protocol.TEMPERATURE_VALUES)
+    assert protocol.campaign_response_counts() == {
+        "r6_reused": 9560,
+        "joint_new": 105160,
+        "min_p_new": 19120,
+        "total_new": 124280,
+        "total_evidence": 133840,
+    }
+    assert plan.sha256 == protocol.campaign_plan().sha256
 
 
 def test_atomic_write_retries_a_transient_permission_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -501,6 +536,738 @@ def test_blind_cluster_judgment_propagates_to_each_actual_response() -> None:
     assert ranked[0]["unique_error_cases"] == 1
 
 
+def _incremental_fixture() -> tuple[dict[str, object], list[dict[str, object]]]:
+    cases = [
+        {
+            "case_id": "case-tuning",
+            "split": "tuning",
+            "language": "ja-ko",
+            "source_text": "source tuning",
+            "context_after_text": "context tuning",
+            "canonical_translation": "정답 A",
+            "required_meaning": ["meaning A"],
+            "prohibited_changes": ["number_change"],
+        },
+        {
+            "case_id": "case-holdout",
+            "split": "holdout",
+            "language": "en-ko",
+            "source_text": "source holdout",
+            "context_after_text": "context holdout",
+            "canonical_translation": "정답 B",
+            "required_meaning": ["meaning B"],
+            "prohibited_changes": ["identity_change"],
+        },
+    ]
+    reference: dict[str, object] = {
+        "reference_sha256": "a" * 64,
+        "cases": cases,
+    }
+    records: list[dict[str, object]] = []
+    for index, (case, translation) in enumerate(zip(cases, ("후보 A", "후보 B"), strict=True)):
+        verdict = judgment.validate_response_envelope(
+            {"choices": [{"index": 0, "content": json.dumps({"translation": translation}, ensure_ascii=False), "finish_reason": "stop"}]}
+        )
+        records.append(
+            {
+                "case_id": case["case_id"],
+                "split": case["split"],
+                "logical_slot": f"slot-{index}",
+                "sampler": protocol.SamplerTuple(0.3, 0.95, 64, 0.0).payload(),
+                "response_validation": verdict.payload(),
+                "translation": verdict.translation,
+                "latency_ms": 10.0 + index,
+                "completion_tokens": 4 + index,
+            }
+        )
+    return reference, records
+
+
+def test_incremental_blind_batches_cover_all_478_splits_and_reuse_stable_clusters() -> None:
+    reference, records = _incremental_fixture()
+    ledger = incremental.new_incremental_ledger(reference)
+    packet = incremental.build_incremental_judgment_packet(
+        reference,
+        records,
+        ledger,
+        batch_size=1,
+    )
+
+    assert packet["scope"] == "all-478"
+    assert packet["pending_total_cluster_count"] == 2
+    assert packet["batch_cluster_count"] == 1
+    serialized = json.dumps(packet, ensure_ascii=False)
+    assert "logical_slot" not in serialized
+    assert "sampler_key" not in serialized
+    assert "top_p" not in serialized
+
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.mark_pending_batch(
+        ledger,
+        reference=reference,
+        packet=packet,
+        packet_file="judgment-batch-0001.json",
+    )
+    ledger = incremental.apply_incremental_judgments(
+        ledger,
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "PASS",
+                "category": "faithful_translation",
+                "naturalness": 5,
+            }
+        },
+        applied_utc="2026-08-04T00:00:00Z",
+    )
+    refreshed = incremental.build_incremental_judgment_packet(
+        reference,
+        records,
+        ledger,
+        batch_size=10,
+    )
+
+    assert refreshed["reused_judged_cluster_count"] == 1
+    assert refreshed["pending_total_cluster_count"] == 1
+    assert refreshed["rows"][0]["cluster_id"] != cluster_id
+
+
+def test_incremental_ledger_imports_prior_blind_decisions_and_final_rank_uses_all_cases() -> None:
+    reference, records = _incremental_fixture()
+    prior_packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    prior_cluster = prior_packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=prior_packet,
+        decisions={
+            prior_cluster: {
+                "decision": "PASS",
+                "category": "faithful_translation",
+                "naturalness": 5,
+            }
+        },
+        source_label="prior-temperature",
+    )
+    packet = incremental.build_incremental_judgment_packet(reference, records, ledger, batch_size=10)
+    remaining_cluster = packet["rows"][0]["cluster_id"]
+    ledger = incremental.mark_pending_batch(
+        ledger,
+        reference=reference,
+        packet=packet,
+        packet_file="judgment-batch-0001.json",
+    )
+    ledger = incremental.apply_incremental_judgments(
+        ledger,
+        reference=reference,
+        packet=packet,
+        decisions={
+            remaining_cluster: {
+                "decision": "MINOR",
+                "category": "naturalness_grammar",
+                "naturalness": 3,
+            }
+        },
+        applied_utc="2026-08-04T00:01:00Z",
+    )
+    verdicts = incremental.bind_incremental_ledger_to_records(reference, records, ledger)
+    ranked = judgment.rank_sampler_results(records, verdicts, scope="all")
+
+    assert len(ledger["imports"]) == 1
+    assert ranked[0]["response_count"] == 2
+    assert ranked[0]["minor"] == 1
+    assert ranked[0]["unique_error_cases"] == 1
+
+
+def test_incremental_ledger_amends_stale_manual_verdict_with_sealed_audit() -> None:
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    previous = dict(ledger["verdicts"][cluster_id])
+
+    ledger = incremental.apply_incremental_amendments(
+        ledger,
+        reference=reference,
+        amendments={
+            cluster_id: {
+                "expected_previous_sha256": incremental.incremental_verdict_sha256(previous),
+                "decision": "PASS",
+                "category": "meaning_preserving_onomatopoeia",
+                "naturalness": 5,
+                "reason": "Current rule explicitly allows meaning-preserving onomatopoeia.",
+            }
+        },
+        reason="Correct imported verdicts that conflict with the sealed semantic rule.",
+        applied_utc="2026-08-04T01:00:00Z",
+    )
+
+    incremental.validate_incremental_ledger(ledger, reference=reference)
+    amended = ledger["verdicts"][cluster_id]
+    assert amended["decision"] == "PASS"
+    assert amended["category"] == "meaning_preserving_onomatopoeia"
+    assert len(ledger["amendments"]) == 1
+    change = ledger["amendments"][0]["changes"][0]
+    assert change["before"] == previous
+    assert change["after"] == amended
+    verdicts = incremental.bind_incremental_ledger_to_records(reference, records[:1], ledger)
+    ranked = judgment.rank_sampler_results(records[:1], verdicts, scope="all")
+    assert ranked[0]["minor"] == 0
+    assert ranked[0]["response_count"] == 1
+
+
+def test_incremental_amendment_fails_closed_on_stale_hash_or_automatic_verdict() -> None:
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    amendment = {
+        cluster_id: {
+            "expected_previous_sha256": "0" * 64,
+            "decision": "PASS",
+            "category": "meaning_preserving_onomatopoeia",
+            "naturalness": 5,
+            "reason": "Current rule explicitly allows this difference.",
+        }
+    }
+
+    with pytest.raises(judgment.JudgmentError, match="previous verdict hash"):
+        incremental.apply_incremental_amendments(
+            ledger,
+            reference=reference,
+            amendments=amendment,
+            reason="Correct a stale imported verdict.",
+            applied_utc="2026-08-04T01:00:00Z",
+        )
+
+    automatic = incremental.new_incremental_ledger(reference)
+    automatic["verdicts"] = {
+        cluster_id: {
+            **ledger["verdicts"][cluster_id],
+            "automatic": True,
+        }
+    }
+    automatic["ledger_sha256"] = protocol.canonical_sha256(
+        {key: value for key, value in automatic.items() if key != "ledger_sha256"}
+    )
+    amendment[cluster_id]["expected_previous_sha256"] = incremental.incremental_verdict_sha256(
+        automatic["verdicts"][cluster_id]
+    )
+    with pytest.raises(judgment.JudgmentError, match="automatic verdict"):
+        incremental.apply_incremental_amendments(
+            automatic,
+            reference=reference,
+            amendments=amendment,
+            reason="Automatic transport verdicts must be regenerated, not amended.",
+            applied_utc="2026-08-04T01:00:00Z",
+        )
+
+
+def test_incremental_amendment_audit_must_match_the_final_verdict() -> None:
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    previous = dict(ledger["verdicts"][cluster_id])
+    ledger = incremental.apply_incremental_amendments(
+        ledger,
+        reference=reference,
+        amendments={
+            cluster_id: {
+                "expected_previous_sha256": incremental.incremental_verdict_sha256(previous),
+                "decision": "PASS",
+                "category": "meaning_preserving_onomatopoeia",
+                "naturalness": 5,
+                "reason": "Current rule explicitly allows this difference.",
+            }
+        },
+        reason="Correct a stale imported verdict.",
+        applied_utc="2026-08-04T01:00:00Z",
+    )
+    ledger["verdicts"][cluster_id] = previous
+    ledger["ledger_sha256"] = protocol.canonical_sha256(
+        {key: value for key, value in ledger.items() if key != "ledger_sha256"}
+    )
+
+    with pytest.raises(judgment.JudgmentError, match="final verdict diverged"):
+        incremental.validate_incremental_ledger(ledger, reference=reference)
+
+
+def test_incremental_amendment_command_writes_audited_private_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive_root = tmp_path / "banchmark_result_log"
+    archive_root.mkdir()
+    monkeypatch.setattr(harness, "default_archive_root", lambda: archive_root)
+    monkeypatch.setattr(harness, "_is_ignored_by_git", lambda _path: True)
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    run = harness.ManagedArtifactRun.create(
+        family=sampler_cli.FAMILY,
+        category=sampler_cli.CATEGORY,
+        run_id="amend-incremental-command",
+    )
+    storage.atomic_write_json(run.artifact_root / sampler_cli.INCREMENTAL_LEDGER_FILE, ledger)
+    reference_path = archive_root / "reference.json"
+    _write_json(reference_path, {})
+    monkeypatch.setattr(sampler_cli, "load_frozen_reference", lambda _path: reference)
+    amendment_path = archive_root / "amendment.json"
+    _write_json(
+        amendment_path,
+        {
+            "schema_version": incremental.INCREMENTAL_AMENDMENT_SCHEMA_VERSION,
+            "rule_version": incremental.SEMANTIC_JUDGMENT_RULE_VERSION,
+            "reference_sha256": reference["reference_sha256"],
+            "reason": "Correct a stale imported verdict.",
+            "amendments": {
+                cluster_id: {
+                    "expected_previous_sha256": incremental.incremental_verdict_sha256(
+                        ledger["verdicts"][cluster_id]
+                    ),
+                    "decision": "PASS",
+                    "category": "meaning_preserving_onomatopoeia",
+                    "naturalness": 5,
+                    "reason": "Current rule explicitly allows this difference.",
+                }
+            },
+        },
+    )
+
+    result = sampler_cli.command_amend_incremental_judgment(
+        SimpleNamespace(
+            resume_run=str(run.run_root),
+            reference=str(reference_path),
+            amendments=str(amendment_path),
+        )
+    )
+
+    assert result == 0
+    amended = read_json(run.artifact_root / sampler_cli.INCREMENTAL_LEDGER_FILE)
+    assert amended["verdicts"][cluster_id]["decision"] == "PASS"
+    assert amended["amendments"][0]["changes"][0]["before"]["decision"] == "MINOR"
+    artifact = read_json(run.artifact_root / "judgment-amendment-0001.json")
+    assert artifact["amendment_id"] == amended["amendments"][0]["amendment_id"]
+    manifest = read_json(run.manifest_path)
+    assert manifest["metadata"]["command"] == "amend-incremental-judgment"
+
+
+def test_incremental_ledger_rejects_reusable_packet_from_changed_reference() -> None:
+    reference, records = _incremental_fixture()
+    prior_packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    prior_cluster = prior_packet["rows"][0]["cluster_id"]
+    prior_packet["rows"][0]["canonical_translation"] = "바뀐 정답"
+
+    with pytest.raises(judgment.JudgmentError, match="does not match the frozen reference"):
+        incremental.seed_ledger_from_completed_packet(
+            incremental.new_incremental_ledger(reference),
+            reference=reference,
+            packet=prior_packet,
+            decisions={
+                prior_cluster: {
+                    "decision": "PASS",
+                    "category": "faithful_translation",
+                    "naturalness": 5,
+                }
+            },
+            source_label="different-reference",
+        )
+
+
+def test_incremental_ledger_fails_closed_when_semantic_rule_version_changes() -> None:
+    reference, _records = _incremental_fixture()
+    ledger = incremental.new_incremental_ledger(reference)
+    ledger["rule_version"] = "different-rule"
+
+    with pytest.raises(judgment.JudgmentError, match="different semantic rule"):
+        incremental.validate_incremental_ledger(ledger, reference=reference)
+
+
+def test_incremental_packet_checks_identity_keys_without_rejecting_candidate_words() -> None:
+    reference, records = _incremental_fixture()
+    response_verdict = judgment.validate_response_envelope(
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "content": json.dumps(
+                        {"translation": "logical_slot sampler_key는 번역문의 일반 문자열이다"},
+                        ensure_ascii=False,
+                    ),
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    records[0]["translation"] = response_verdict.translation
+    records[0]["response_validation"] = response_verdict.payload()
+    packet = incremental.build_incremental_judgment_packet(
+        reference,
+        records,
+        incremental.new_incremental_ledger(reference),
+        batch_size=10,
+    )
+
+    incremental.validate_incremental_packet(packet, reference=reference)
+
+    packet["rows"][0]["sampler_key"] = "secret-arm"
+    packet["packet_sha256"] = protocol.canonical_sha256(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    with pytest.raises(judgment.JudgmentError, match="leaked sampler execution identity"):
+        incremental.validate_incremental_packet(packet, reference=reference)
+
+
+def test_incremental_command_error_preserves_running_run_for_resume() -> None:
+    checkpoints: list[dict[str, object]] = []
+
+    class FakeRun:
+        def checkpoint(self, *, metadata: dict[str, object]) -> None:
+            checkpoints.append(metadata)
+
+        def fail(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("incremental errors must not close the managed run")
+
+    sampler_cli._checkpoint_incremental_error(
+        FakeRun(),  # type: ignore[arg-type]
+        command="apply-incremental-judgment",
+        error=RuntimeError("checkpoint race"),
+    )
+
+    assert checkpoints == [
+        {
+            "command": "apply-incremental-judgment",
+            "state": "ERROR_REQUIRES_INSPECTION",
+            "error_type": "RuntimeError",
+            "error_message": "checkpoint race",
+        }
+    ]
+
+
+def test_live_snapshot_index_does_not_recover_or_rewrite_in_flight_case(tmp_path: Path) -> None:
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    store = storage.RunStore(root)
+    destination = store.case_path(
+        phase="joint_top_p_top_k",
+        arm="joint-arm",
+        run="seed-run",
+        case_id="case-safe",
+    )
+    storage.atomic_write_json(
+        destination,
+        {
+            "status": "complete",
+            "recorded_utc": "2026-08-04T00:00:00Z",
+            "phase": "joint_top_p_top_k",
+            "arm_key": "joint-arm",
+            "case_id": "case-safe",
+            "logical_slot": "slot-safe",
+        },
+    )
+
+    assert list(store.iter_snapshot_completion_entries()) == []
+    assert not store.completion_index_path.exists()
+    assert store.completed_count() == 1
+    assert store.completion_index_path.exists()
+
+
+def _final_analysis_fixture() -> tuple[
+    dict[str, object],
+    protocol.CampaignPlan,
+    list[dict[str, object]],
+    list[dict[str, object]],
+    dict[str, object],
+]:
+    cases = [
+        {
+            "case_id": "case-name-age",
+            "split": "tuning",
+            "language": "ja-ko",
+            "source_text": "private source A",
+            "context_after_text": "private context A",
+            "canonical_translation": "본명 나나세 아야카 25세",
+            "required_meaning": ["name and age"],
+            "prohibited_changes": ["name_masking"],
+        },
+        {
+            "case_id": "case-meaning",
+            "split": "holdout",
+            "language": "en-ko",
+            "source_text": "private source B",
+            "context_after_text": "private context B",
+            "canonical_translation": "정답 B",
+            "required_meaning": ["meaning B"],
+            "prohibited_changes": ["meaning_change"],
+        },
+    ]
+    reference: dict[str, object] = {
+        "reference_sha256": "f" * 64,
+        "cases": cases,
+    }
+    baseline = protocol.SamplerArm(
+        "temperature",
+        protocol.SamplerTuple(0.7, 0.95, 64, 0.0),
+    )
+    joint = protocol.SamplerArm(
+        "joint_top_p_top_k",
+        protocol.SamplerTuple(0.7, 1.0, 0, 0.0),
+    )
+    minimum = protocol.SamplerArm(
+        "min_p",
+        protocol.SamplerTuple(0.7, 1.0, 0, 0.05),
+    )
+    plan = protocol.CampaignPlan(
+        temperature_arms=(baseline,),
+        joint_arms=(joint,),
+        min_p_arms=(minimum,),
+    )
+    translations = {
+        baseline.sampler.key: {
+            (20260802, "case-name-age"): "본명 나Please세 아야카 25세",
+            (20260803, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260802, "case-meaning"): "정답 B",
+            (20260803, "case-meaning"): "정답 B",
+        },
+        joint.sampler.key: {
+            (20260802, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260803, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260802, "case-meaning"): "자연스러운 번역",
+            (20260803, "case-meaning"): "자연스러운 번역",
+        },
+        minimum.sampler.key: {
+            (20260802, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260803, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260802, "case-meaning"): "반대 번역",
+            (20260803, "case-meaning"): "반대 번역",
+        },
+    }
+
+    def records_for(arms: tuple[protocol.SamplerArm, ...]) -> list[dict[str, object]]:
+        records: list[dict[str, object]] = []
+        for arm in arms:
+            for seed in protocol.SEEDS:
+                for case in cases:
+                    case_id = str(case["case_id"])
+                    translation = translations[arm.sampler.key][(seed, case_id)]
+                    response = {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "content": json.dumps(
+                                    {"translation": translation},
+                                    ensure_ascii=False,
+                                ),
+                                "finish_reason": "stop",
+                            }
+                        ]
+                    }
+                    verdict = judgment.validate_response_envelope(response)
+                    records.append(
+                        {
+                            "status": "complete",
+                            "phase": arm.phase,
+                            "arm_key": arm.key,
+                            "logical_slot": f"{arm.sampler.key}|{seed}|{case_id}",
+                            "case_id": case_id,
+                            "split": case["split"],
+                            "sampler": arm.sampler.payload(),
+                            "seed": seed,
+                            "reference_sha256": reference["reference_sha256"],
+                            "runtime_fingerprint": "runtime-one",
+                            "request_identity": {"case_id": case_id, "fixed": True},
+                            "response": response,
+                            "response_validation": verdict.payload(),
+                            "translation": verdict.translation if verdict.status == "VALID" else "",
+                            "latency_ms": 10.0,
+                            "completion_tokens": 4,
+                        }
+                    )
+        return records
+
+    r6_records = records_for((baseline,))
+    campaign_records = records_for((joint, minimum))
+    all_records = r6_records + campaign_records
+    ledger = incremental.new_incremental_ledger(reference)
+    packet = incremental.build_incremental_judgment_packet(reference, all_records, ledger, batch_size=10)
+    decisions = {
+        str(row["cluster_id"]): {
+            "decision": "MAJOR" if row["candidate_translation"] == "반대 번역" else "PASS",
+            "category": (
+                "semantic_reversal"
+                if row["candidate_translation"] == "반대 번역"
+                else "faithful_translation"
+            ),
+            "naturalness": 2 if row["candidate_translation"] == "반대 번역" else 5,
+        }
+        for row in packet["rows"]
+    }
+    ledger = incremental.mark_pending_batch(
+        ledger,
+        reference=reference,
+        packet=packet,
+        packet_file="judgment-batch-0001.json",
+    )
+    ledger = incremental.apply_incremental_judgments(
+        ledger,
+        reference=reference,
+        packet=packet,
+        decisions=decisions,
+        applied_utc="2026-08-04T00:00:00Z",
+    )
+    return reference, plan, r6_records, campaign_records, ledger
+
+
+def test_final_campaign_analysis_requires_exact_matrix_and_applies_name_age_gate() -> None:
+    reference, plan, r6_records, campaign_records, ledger = _final_analysis_fixture()
+    per_arm = 2 * len(protocol.SEEDS)
+    status = {
+        "state": "WAITING_FOR_FINAL_JUDGMENT",
+        "reference_sha256": reference["reference_sha256"],
+        "campaign_plan_sha256": plan.sha256,
+        "reused_logical_slots": per_arm,
+        "completed_new_logical_slots": per_arm * 2,
+        "expected_evidence_logical_slots": per_arm * 3,
+        "sampler_keys": list(plan.sampler_keys),
+        "seeds": list(protocol.SEEDS),
+        "r6_runtime_fingerprint": "runtime-one",
+        "runtime_fingerprint": "runtime-one",
+    }
+    plan_artifact = {
+        "campaign_plan_sha256": plan.sha256,
+        "plan": plan.payload(),
+        "reference_sha256": reference["reference_sha256"],
+    }
+    evidence = final_analysis.validate_final_campaign_evidence(
+        reference=reference,
+        r6_records=r6_records,
+        campaign_records=campaign_records,
+        r6_manifest={"status": "completed"},
+        campaign_manifest={"status": "completed"},
+        campaign_status=status,
+        campaign_plan_artifact=plan_artifact,
+        plan=plan,
+    )
+    gates = {
+        "schema_version": final_analysis.FINAL_GATE_SCHEMA_VERSION,
+        "reference_sha256": reference["reference_sha256"],
+        "gates": [
+            {
+                "gate_id": "required-name-age-v1",
+                "case_id": "case-name-age",
+                "required_substrings": ["나나세 아야카", "25"],
+            }
+        ],
+    }
+    public, private = final_analysis.build_final_campaign_analysis(
+        reference=reference,
+        records=r6_records + campaign_records,
+        ledger=ledger,
+        gates=gates,
+        evidence_summary=evidence,
+        plan=plan,
+    )
+
+    assert evidence["total_response_count"] == 12
+    assert len(public["ranked_arms"]) == 3
+    assert public["provisional_candidate_sampler_key"] == "t0.70-p1.00-k0-m0.00"
+    assert public["required_gates"][0]["excluded_sampler_keys"] == [
+        "t0.70-p0.95-k64-m0.00"
+    ]
+    assert public["product_promotion_allowed"] is False
+    assert len(public["seed_rows"]) == 3
+    assert {item["decision"] for item in private["error_clusters"]} == {
+        "CATASTROPHIC",
+        "MAJOR",
+    }
+    catastrophic = next(
+        item for item in private["error_clusters"] if item["decision"] == "CATASTROPHIC"
+    )
+    assert catastrophic["candidate_translation"] == ""
+    assert catastrophic["raw_response"] is not None
+
+
+def test_final_campaign_evidence_rejects_one_missing_sampler_seed_case() -> None:
+    reference, plan, r6_records, campaign_records, _ledger = _final_analysis_fixture()
+    per_arm = 2 * len(protocol.SEEDS)
+
+    with pytest.raises(judgment.JudgmentError, match="Final response counts"):
+        final_analysis.validate_final_campaign_evidence(
+            reference=reference,
+            r6_records=r6_records,
+            campaign_records=campaign_records[:-1],
+            r6_manifest={"status": "completed"},
+            campaign_manifest={"status": "completed"},
+            campaign_status={
+                "state": "WAITING_FOR_FINAL_JUDGMENT",
+                "reference_sha256": reference["reference_sha256"],
+                "campaign_plan_sha256": plan.sha256,
+                "reused_logical_slots": per_arm,
+                "completed_new_logical_slots": per_arm * 2,
+                "expected_evidence_logical_slots": per_arm * 3,
+                "sampler_keys": list(plan.sampler_keys),
+                "seeds": list(protocol.SEEDS),
+            },
+            campaign_plan_artifact={
+                "campaign_plan_sha256": plan.sha256,
+                "plan": plan.payload(),
+                "reference_sha256": reference["reference_sha256"],
+            },
+            plan=plan,
+        )
+
+
 def test_automatic_blind_verdicts_hide_sampler_and_logical_slot_identity() -> None:
     reference = {
         "cases": [
@@ -780,6 +1547,294 @@ def test_phase_report_exposes_tuning_scope_for_holdout_gate() -> None:
     )
     assert tuning_report["scope"] == "tuning"
     assert packet["scope"] == "holdout"
+
+
+def test_campaign_preflight_reuses_complete_r6_without_starting_a_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution, "CORPUS_CASE_COUNT", 1)
+    case = {
+        "case_id": "case-safe",
+        "split": "tuning",
+        "language": "ja-ko",
+        "source_text": "source",
+        "context_after_text": "context",
+        "canonical_translation": "canonical",
+        "required_meaning": ["meaning"],
+        "prohibited_changes": ["number_change"],
+        "review_status": "APPROVED",
+    }
+    reference = {
+        "schema_version": corpus.REFERENCE_SCHEMA_VERSION,
+        "state": "FROZEN",
+        "case_identity": "language+source_text+context_after_text",
+        "cases": [case],
+    }
+    reference["reference_sha256"] = protocol.canonical_sha256(
+        {
+            "schema_version": reference["schema_version"],
+            "case_identity": reference["case_identity"],
+            "cases": reference["cases"],
+        }
+    )
+    request_identity = {"case_id": "case-safe", "request_sha256_without_sampler_or_seed": "a" * 64}
+    monkeypatch.setattr(
+        campaign,
+        "_campaign_request_identities",
+        lambda **_kwargs: ({"Japanese": object()}, {"case-safe": request_identity}),
+    )
+
+    run_root = tmp_path / "r6-run"
+    artifact_root = run_root / "artifacts"
+    artifact_root.mkdir(parents=True)
+    _write_json(run_root / "artifact-manifest.json", {"status": "completed"})
+    r6_store = RunStore(artifact_root)
+    plan = protocol.campaign_plan()
+    for arm in plan.temperature_arms:
+        for seed, order in zip(protocol.SEEDS, ("forward", "reverse"), strict=True):
+            slot = f"temperature|{arm.sampler.key}|seed-{seed}|case-safe"
+            r6_store.record_case_if_first(
+                phase="temperature",
+                arm=arm.key,
+                run=f"seed-{seed}-{order}",
+                case_id="case-safe",
+                logical_slot=slot,
+                payload={
+                    "status": "complete",
+                    "recorded_utc": "2026-08-03T00:00:00Z",
+                    "phase": "temperature",
+                    "arm_key": arm.key,
+                    "sampler": arm.sampler.payload(),
+                    "seed": seed,
+                    "case_id": "case-safe",
+                    "split": "tuning",
+                    "reference_sha256": reference["reference_sha256"],
+                    "runtime_fingerprint": "router-fingerprint",
+                    "request_identity": request_identity,
+                    "response_validation": {
+                        "schema_version": judgment.RESPONSE_VALIDATION_SCHEMA_VERSION,
+                        "status": "VALID",
+                    },
+                    "logical_slot": slot,
+                },
+            )
+    expected = len(plan.temperature_arms) * len(protocol.SEEDS)
+    r6_store.write_phase_status(
+        "temperature",
+        {
+            "state": "WAITING_FOR_JUDGMENT",
+            "phase": "temperature",
+            "reference_sha256": reference["reference_sha256"],
+            "arms": [arm.payload() for arm in plan.temperature_arms],
+            "expected_logical_slots": expected,
+            "completed_logical_slots": expected,
+        },
+    )
+    _write_json(
+        artifact_root / "runtime-contract.json",
+        {
+            "fingerprint": "router-fingerprint",
+            "image_ref": protocol.PINNED_LLAMA_CPP_IMAGE,
+            "binary_version": "version: 10133 (ff067f76d)",
+            "command_sha256": "b" * 64,
+            "preset_sha256": "c" * 64,
+            "effective_context_size": "4096",
+            "fixed_request_contract_sha256": protocol.canonical_sha256(
+                protocol.fixed_request_contract_payload()
+            ),
+        },
+    )
+
+    summary = campaign.campaign_preflight_summary(reference=reference, r6_store=r6_store)
+
+    assert summary["state"] == "READY_TO_RUN"
+    assert summary["response_counts"]["total_new"] == 124280
+    assert summary["case_count"] == 1
+
+
+def test_campaign_runs_one_runtime_session_then_waits_for_final_judgment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution, "CORPUS_CASE_COUNT", 1)
+    monkeypatch.setattr(protocol, "TEMPERATURE_VALUES", (0.1,))
+    scaled_counts = {
+        "r6_reused": 2,
+        "joint_new": 22,
+        "min_p_new": 4,
+        "total_new": 26,
+        "total_evidence": 28,
+    }
+    monkeypatch.setattr(campaign, "campaign_response_counts", lambda: dict(scaled_counts))
+    case = {
+        "case_id": "case-safe",
+        "split": "tuning",
+        "language": "ja-ko",
+        "source_text": "source",
+        "context_after_text": "context",
+        "canonical_translation": "canonical",
+        "required_meaning": ["meaning"],
+        "prohibited_changes": ["number_change"],
+        "review_status": "APPROVED",
+    }
+    reference = {
+        "schema_version": corpus.REFERENCE_SCHEMA_VERSION,
+        "state": "FROZEN",
+        "case_identity": "language+source_text+context_after_text",
+        "cases": [case],
+    }
+    reference["reference_sha256"] = protocol.canonical_sha256(
+        {
+            "schema_version": reference["schema_version"],
+            "case_identity": reference["case_identity"],
+            "cases": reference["cases"],
+        }
+    )
+    request_identity = {"case_id": "case-safe", "request_sha256_without_sampler_or_seed": "a" * 64}
+    engine = object()
+    monkeypatch.setattr(
+        campaign,
+        "_campaign_request_identities",
+        lambda **_kwargs: ({"Japanese": engine}, {"case-safe": request_identity}),
+    )
+    monkeypatch.setattr(
+        execution,
+        "_case_request",
+        lambda _engine, _case, sampler, seed: (
+            {"sampler": sampler.payload(), "seed": seed},
+            request_identity,
+        ),
+    )
+
+    r6_run = tmp_path / "r6-run"
+    r6_artifacts = r6_run / "artifacts"
+    r6_artifacts.mkdir(parents=True)
+    _write_json(r6_run / "artifact-manifest.json", {"status": "completed"})
+    r6_store = RunStore(r6_artifacts)
+    plan = protocol.campaign_plan()
+    for seed, order in zip(protocol.SEEDS, ("forward", "reverse"), strict=True):
+        arm = plan.temperature_arms[0]
+        slot = f"temperature|{arm.sampler.key}|seed-{seed}|case-safe"
+        r6_store.record_case_if_first(
+            phase="temperature",
+            arm=arm.key,
+            run=f"seed-{seed}-{order}",
+            case_id="case-safe",
+            logical_slot=slot,
+            payload={
+                "status": "complete",
+                "recorded_utc": "2026-08-03T00:00:00Z",
+                "phase": "temperature",
+                "arm_key": arm.key,
+                "sampler": arm.sampler.payload(),
+                "seed": seed,
+                "case_id": "case-safe",
+                "split": "tuning",
+                "reference_sha256": reference["reference_sha256"],
+                "runtime_fingerprint": "router-fingerprint",
+                "request_identity": request_identity,
+                "response_validation": {"schema_version": judgment.RESPONSE_VALIDATION_SCHEMA_VERSION},
+                "logical_slot": slot,
+            },
+        )
+    r6_store.write_phase_status(
+        "temperature",
+        {
+            "state": "WAITING_FOR_JUDGMENT",
+            "phase": "temperature",
+            "reference_sha256": reference["reference_sha256"],
+            "arms": [arm.payload() for arm in plan.temperature_arms],
+            "expected_logical_slots": 2,
+            "completed_logical_slots": 2,
+        },
+    )
+    _write_json(
+        r6_artifacts / "runtime-contract.json",
+        {
+            "fingerprint": "router-fingerprint",
+            "image_ref": protocol.PINNED_LLAMA_CPP_IMAGE,
+            "binary_version": "version: 10133 (ff067f76d)",
+            "command_sha256": "b" * 64,
+            "preset_sha256": "c" * 64,
+            "effective_context_size": "4096",
+            "fixed_request_contract_sha256": protocol.canonical_sha256(
+                protocol.fixed_request_contract_payload()
+            ),
+        },
+    )
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.contract = _router_runtime_contract(gemma_context_size="4096")
+            self.started = 0
+            self.closed = 0
+
+        def start(self) -> object:
+            self.started += 1
+            return self.contract
+
+        def request(self, _payload: object, *, timeout_sec: float) -> runtime.ReplayResponse:
+            assert timeout_sec == 1.0
+            return runtime.ReplayResponse(
+                envelope={
+                    "choices": [
+                        {"index": 0, "finish_reason": "stop", "message": {"content": '{"translation":"ok"}'}}
+                    ]
+                },
+                latency_ms=1.0,
+                completion_tokens=1,
+            )
+
+        def close(self) -> None:
+            self.closed += 1
+
+    campaign_root = tmp_path / "campaign"
+    campaign_root.mkdir()
+    fake_runtime = FakeRuntime()
+    status = campaign.execute_campaign(
+        store=RunStore(campaign_root),
+        reference=reference,
+        r6_store=r6_store,
+        timeout_sec=1.0,
+        max_attempts=1,
+        runtime=fake_runtime,
+    )
+
+    assert status["state"] == "WAITING_FOR_FINAL_JUDGMENT"
+    assert status["completed_new_logical_slots"] == 26
+    assert fake_runtime.started == 1
+    assert fake_runtime.closed == 1
+    records = list(execution.iter_completed_records(RunStore(campaign_root)))
+    assert len(records) == 26
+    assert {record["reference_sha256"] for record in records} == {reference["reference_sha256"]}
+
+
+def test_campaign_progress_excludes_retry_backoff_from_active_elapsed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    store = RunStore(artifact_root)
+    validation = campaign.CampaignReuseValidation(
+        plan=protocol.campaign_plan(),
+        cases=(),
+        engines={},
+        request_identities={},
+        r6_records={},
+        r6_contract={},
+    )
+    moments = iter((100.0, 105.0))
+    monkeypatch.setattr(campaign.time, "monotonic", lambda: next(moments))
+
+    progress = campaign._CampaignProgress(store=store, validation=validation)
+    progress.add_backoff(2.0)
+    progress.write(state="RUNNING_JOINT")
+
+    payload = read_json(store.progress_path)
+    assert payload["active_elapsed_seconds"] == 3.0
+    assert payload["backoff_elapsed_seconds"] == 2.0
 
 
 def test_reused_phase_rows_require_matching_reference_runtime_and_request_contract(
@@ -1084,29 +2139,30 @@ def test_startup_failure_keeps_setup_cause_after_successful_terminal_cleanup() -
     assert isinstance(raised.value.__cause__, RuntimeError)
 
 
-def test_windows_bats_resume_transient_worker_exit_and_keep_cuda_pair() -> None:
+def test_only_cuda13_bat_can_start_or_resume_the_campaign() -> None:
     bat = (ROOT / "scripts" / "benchmark_gemma_sampler_quality_v2.bat").read_text(encoding="utf-8")
     cuda13 = (ROOT / "scripts" / "benchmark_gemma_sampler_quality_v2_cuda13.bat").read_text(
         encoding="utf-8"
     )
-    assert "SAMPLER_EXIT%\"==\"75" in bat
-    assert "goto retry" in bat
-    assert "SAMPLER_PRIOR_RESPONSE_RUN" in bat
+    assert "Read-only campaign preflight only" in bat
+    assert "run-campaign" not in bat
+    assert "verify-campaign" in bat
     assert ".venv-win\\Scripts\\python.exe" in bat
+    assert "SAMPLER_EXIT%\"==\"75" in cuda13
+    assert "goto retry" in cuda13
+    assert "run-campaign" in cuda13
+    assert "SAMPLER_LAUNCHED_BY_EXE" in cuda13
+    assert "SAMPLER_PHASE" not in cuda13
     assert ".venv-win-cuda13\\Scripts\\python.exe" in cuda13
 
 
-@pytest.mark.parametrize(
-    "name",
-    (
-        "benchmark_gemma_sampler_quality_v2.bat",
-        "benchmark_gemma_sampler_quality_v2_cuda13.bat",
-    ),
-)
-def test_windows_sampler_bats_launch_the_read_only_monitor_and_persist_runner_logs(name: str) -> None:
-    bat = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+def test_cuda13_bat_launches_the_read_only_monitor_and_persists_runner_logs() -> None:
+    bat = (ROOT / "scripts" / "benchmark_gemma_sampler_quality_v2_cuda13.bat").read_text(
+        encoding="utf-8"
+    )
 
     assert "SAMPLER_NO_MONITOR" in bat
+    assert "SAMPLER_VERIFY_ONLY" in bat
     assert "build_gemma_sampler_monitor.bat --if-stale" in bat
     assert 'start "Gemma Sampler Monitor"' in bat
     assert '"%SAMPLER_MONITOR_EXE%" --run-root "%SAMPLER_RUN_ROOT%"' in bat
@@ -1120,8 +2176,10 @@ def test_monitor_builder_uses_scoop_fallback_and_private_executable_output() -> 
 
     assert "%USERPROFILE%\\scoop\\shims\\go.exe" in builder
     assert "%USERPROFILE%\\scoop\\apps\\go\\current\\bin\\go.exe" in builder
-    assert "banchmark_result_log\\tools\\gemma-monitor.exe" in builder
+    assert "gemma-monitor.exe" in builder
+    assert "gemma-sampler-launcher.exe" in builder
     assert "--if-stale" in builder
+    assert "--monitor-only-if-stale" in builder
     assert "build -trimpath" in builder
 
 
@@ -1131,6 +2189,12 @@ def test_monitor_source_uses_bubble_tea_alt_screen_and_bounded_snapshot_reads() 
 
     assert "tea.WithAltScreen()" in monitor
     assert "runner·Docker·GPU 작업은 계속됩니다" in monitor
+    launcher = (ROOT / "scripts" / "gemma_sampler_monitor" / "launcher.go").read_text(encoding="utf-8")
+    assert "gemma-sampler-launcher.exe" in launcher
+    assert "--monitor-only-if-stale" in launcher
+    assert "windowsCampaignWorkerAlive" in launcher
+    assert "활성 시간 / ACTIVE:" in monitor
+    assert "runner log:" in monitor
     assert "readSharedFile" in snapshot
     assert "file.Close()" in snapshot
     assert "Do not tail or retain a handle" in snapshot

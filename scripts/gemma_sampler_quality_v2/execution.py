@@ -323,8 +323,13 @@ def _records_completed(store: RunStore) -> int:
     return store.completed_count()
 
 
-def iter_completed_records(store: RunStore) -> Iterable[dict[str, Any]]:
-    for entry in store.iter_completion_entries():
+def iter_completed_records(store: RunStore, *, snapshot: bool = False) -> Iterable[dict[str, Any]]:
+    entries = (
+        store.iter_snapshot_completion_entries()
+        if snapshot
+        else store.iter_completion_entries()
+    )
+    for entry in entries:
         indexed_slot = str(entry.pop("_completion_index_logical_slot", "") or "")
         relative = str(entry.get("path") or "")
         candidate = (store.root / relative).resolve()
@@ -351,6 +356,7 @@ def iter_compatible_completed_records(
     stores: Sequence[RunStore],
     *,
     reference: Mapping[str, Any],
+    snapshot: bool = False,
 ) -> Iterable[dict[str, Any]]:
     """Yield only mutually compatible private records from one or more phases."""
 
@@ -359,7 +365,7 @@ def iter_compatible_completed_records(
     case_by_id = {str(case["case_id"]): case for case in cases}
     logical_slots: set[str] = set()
     for store in stores:
-        for record in iter_completed_records(store):
+        for record in iter_completed_records(store, snapshot=snapshot):
             if str(record.get("status") or "") != "complete":
                 raise ExecutionError("Completion index points to a non-complete response record.")
             logical_slot = str(record.get("logical_slot") or "")
@@ -403,10 +409,17 @@ def collect_completed_records(
     stores: Sequence[RunStore],
     *,
     reference: Mapping[str, Any],
+    snapshot: bool = False,
 ) -> list[dict[str, Any]]:
     """Materialize compatible records only for judgment/report aggregation."""
 
-    return list(iter_compatible_completed_records(stores, reference=reference))
+    return list(
+        iter_compatible_completed_records(
+            stores,
+            reference=reference,
+            snapshot=snapshot,
+        )
+    )
 
 
 def sampler_keys_from_phase_status(

@@ -181,6 +181,31 @@ class RunStore:
             result["_completion_index_logical_slot"] = logical_slot
             yield result
 
+    def iter_snapshot_completion_entries(self) -> Iterable[dict[str, Any]]:
+        """Read only fully appended index entries without recovery or writes.
+
+        A live campaign can have one case JSON between its atomic write and the
+        following index append.  Incremental review deliberately waits for the
+        index entry instead of invoking normal crash recovery against a writer
+        that is still healthy.
+        """
+
+        index: dict[str, dict[str, Any]] = {}
+        if self.completion_index_path.exists():
+            self._read_completion_jsonl(self.completion_index_path, index)
+        elif self._legacy_completion_index_path.exists():
+            legacy = read_json(self._legacy_completion_index_path)
+            if not isinstance(legacy, Mapping):
+                raise StorageError("Legacy completion index is not an object.")
+            for logical_slot, entry in legacy.items():
+                if not isinstance(entry, Mapping) or not str(logical_slot or ""):
+                    raise StorageError("Legacy completion index has an invalid entry.")
+                index[str(logical_slot)] = dict(entry)
+        for logical_slot, entry in index.items():
+            result = dict(entry)
+            result["_completion_index_logical_slot"] = logical_slot
+            yield result
+
     def is_completed(self, logical_slot: str) -> bool:
         return str(logical_slot) in self._completion_index()
 
