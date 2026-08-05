@@ -282,6 +282,32 @@ class BatchProcessor:
         minutes, secs = divmod(remainder, 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
+    def observe_progress(
+        self,
+        stage_name: str,
+        index: int,
+        total: int,
+        step: int,
+        steps: int,
+    ) -> dict[str, float | None]:
+        """진행률과 남은 시간을 하나의 출처로 계산한다.
+
+        레거시 파이프라인은 한 페이지가 모든 단계를 지나므로, 페이지 단위 외삽이
+        맞는 모델이다. stage-batched 는 전제가 달라 이 훅을 재정의한다.
+        """
+
+        total_units = max(total * steps, 1)
+        current_units = min(max(index * steps + step, 0), total_units)
+        return {
+            "progress_fraction": current_units / total_units,
+            "eta_seconds": self._estimate_eta_seconds(index, total),
+        }
+
+    def describe_progress(self, stage_name: str, index: int, total: int) -> str:
+        """진행 메시지. 파이프라인 모양에 맞는 문장을 쓴다."""
+
+        return f"{index + 1}/{total} 페이지 {stage_name} 단계 진행 중..."
+
     def _estimate_eta_seconds(self, index: int, total: int) -> float | None:
         if self._run_started_at is None:
             return None
@@ -397,10 +423,11 @@ class BatchProcessor:
         image_name = os.path.basename(self._progress_image_path) if self._progress_image_path else '-'
         run_elapsed = (time.monotonic() - self._run_started_at) if self._run_started_at is not None else None
         page_elapsed = (time.monotonic() - self._page_started_at) if self._page_started_at is not None else None
-        percent = 0.0
-        total_units = max(total * steps, 1)
-        current_units = min(max(index * steps + step, 0), total_units)
-        percent = (current_units / total_units) * 100.0
+        # 진행률과 남은 시간은 한 곳에서만 계산한다. 예전에는 파이프라인과 UI 트래커가
+        # 각자 추정해서 같은 순간에 2초와 23분으로 갈렸다.
+        progress = self.observe_progress(stage_name, index, total, step, steps)
+        percent = progress["progress_fraction"] * 100.0
+        eta_seconds = progress["eta_seconds"]
         logger.info(
             "Batch progress: page=%d/%d image=%s stage=%s overall=%.1f%% elapsed=%s page_elapsed=%s eta=%s",
             index + 1 if total else 0,
@@ -410,7 +437,7 @@ class BatchProcessor:
             percent,
             self._format_duration(run_elapsed),
             self._format_duration(page_elapsed),
-            self._format_duration(self._estimate_eta_seconds(index, total)),
+            self._format_duration(eta_seconds),
         )
         if step > 0:
             self._report_runtime_progress(
@@ -419,11 +446,14 @@ class BatchProcessor:
                 status="running",
                 step_key=stage_name,
                 stage_name=stage_name,
-                message=f"{index + 1}/{total} 페이지 {stage_name} 단계 진행 중...",
+                message=self.describe_progress(stage_name, index, total),
                 page_index=index,
                 page_total=total,
                 image_name=image_name,
                 source_preview_path=self._progress_image_path,
+                # 트래커는 이 값을 그대로 쓴다. 다시 추정하지 않는다.
+                eta_seconds=eta_seconds,
+                progress_fraction=progress["progress_fraction"],
             )
         self.main_page.progress_update.emit(index, total, step, steps, change_name)
 

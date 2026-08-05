@@ -269,6 +269,11 @@ class AutomaticProgressTracker:
 
     def _estimate_eta(self, event: dict[str, Any], now: float) -> tuple[float | None, str]:
         phase = str(event.get("phase") or "")
+        # 파이프라인이 남은 시간을 실어 보냈으면 그것이 유일한 출처다. 여기서 다시
+        # 추정하면 두 값이 갈린다. 실제로 같은 순간에 2초와 23분이 찍혔다.
+        supplied = event.get("eta_seconds")
+        if isinstance(supplied, (int, float)) and not isinstance(supplied, bool):
+            return max(float(supplied), 0.0), AUTOMATIC_PROGRESS_TRANSLATIONS["live_stable"]
         if phase in {"gemma_startup", "ocr_startup"}:
             return self._estimate_startup_eta(event, now)
         if phase == "pipeline":
@@ -332,6 +337,11 @@ class AutomaticProgressTracker:
         return max(estimated_total - elapsed, 0.0), used_history
 
     def _estimate_progress(self, event: dict[str, Any]) -> float:
+        # 남은 시간과 같은 이유로, 파이프라인이 준 진행률을 우선한다. 단계 sweep
+        # 모델에서는 페이지 인덱스만으로 진행률을 되계산할 수 없다.
+        supplied = event.get("progress_fraction")
+        if isinstance(supplied, (int, float)) and not isinstance(supplied, bool):
+            return min(max(float(supplied) * 100.0, 0.0), 100.0)
         if str(event.get("phase") or "") != "pipeline":
             return 0.0
         page_total = int(event.get("page_total") or self.page_total or 0)

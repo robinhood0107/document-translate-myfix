@@ -110,6 +110,7 @@ from modules.utils.export_paths import (
     resolve_export_directory,
 )
 from modules.utils.exceptions import OperationCancelledError
+from modules.utils.stage_sweep_eta import StageSweepEtaEstimator
 from modules.utils.gpu_handoff import (
     DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO,
     DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB,
@@ -235,6 +236,57 @@ class StageBatchedProcessor(BatchProcessor):
         9: 'render-all',
         10: 'save-and-finish',
     }
+
+    # 사용자에게 보일 단계 이름. 내부 sweep 이름을 그대로 쓰면 무슨 일이 일어나는지
+    # 알 수 없다.
+    STAGE_LABELS = {
+        'detect-all': '텍스트 영역 검출',
+        'ocr-all': '텍스트 인식(OCR)',
+        'inpaint-all': '원본 텍스트 제거(인페인팅)',
+        'translate-all': '번역',
+        'render-all': '번역문 렌더링',
+        'save-and-finish': '저장 및 마무리',
+    }
+
+    def _stage_eta_estimator(self, total: int):
+        """이 실행의 (단계 x 페이지) 추정기. 페이지 수가 바뀌면 새로 만든다."""
+
+        estimator = getattr(self, "_stage_eta", None)
+        if estimator is None or estimator.page_total != max(int(total), 0):
+            estimator = StageSweepEtaEstimator(
+                page_total=total,
+                stage_order=tuple(self.STAGE_NAMES_BY_STEP[key] for key in
+                                  sorted(self.STAGE_NAMES_BY_STEP)),
+            )
+            estimator.start_run(time.monotonic())
+            self._stage_eta = estimator
+        return estimator
+
+    def observe_progress(
+        self,
+        stage_name: str,
+        index: int,
+        total: int,
+        step: int,
+        steps: int,
+    ) -> dict[str, float | None]:
+        """단계 sweep 모델로 진행률과 남은 시간을 계산한다.
+
+        레거시 외삽은 첫 sweep 의 마지막 페이지를 실행 종료로 착각해
+        `overall=99.8% eta=00:00:02` 를 냈다. 여기서는 남은 sweep 이 모두 계산에
+        들어간다.
+        """
+
+        estimator = self._stage_eta_estimator(total)
+        estimator.observe(stage_name, index, time.monotonic())
+        return {
+            "progress_fraction": estimator.progress_fraction(),
+            "eta_seconds": estimator.remaining_seconds(),
+        }
+
+    def describe_progress(self, stage_name: str, index: int, total: int) -> str:
+        label = self.STAGE_LABELS.get(stage_name, stage_name)
+        return f"{label}: {index + 1}/{total} 페이지"
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
