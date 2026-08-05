@@ -385,6 +385,15 @@ class LocalLlamaRouterCoordinator:
     ) -> RouterReleaseEvidence | None:
         """Finish normal work or terminally stop an owned pair after failure/cancel."""
 
+        # 컨테이너를 정지하는 호출은 정의상 종료 정리다. 이 시점의 취소 신호는 "정리
+        # 하라"는 뜻이지 "정리를 그만두라"는 뜻이 아니다. 취소 검사기를 그대로 아래로
+        # 넘기면 컨테이너 정지가 스스로 취소되어 RELEASE_FAILED 로 떨어지고, 그
+        # 상태는 소유권을 계속 붙들기 때문에 이후 모든 실행이 preflight 에서
+        # "Router is in RELEASE_FAILED" 로 실패한다. 즉 한 번의 취소가 앱을 영구히
+        # 막는다. 그래서 정지 경로에서는 취소를 받지 않는다.
+        if stop_container:
+            cancel_checker = None
+
         with self._state_lock:
             loaded_model = self._loaded_model
             state = self._state
