@@ -2287,14 +2287,22 @@ class ComicTranslate(ComicTranslateUI):
         reset_output_reservations = getattr(self, "reset_automatic_output_reservations", None)
         if callable(reset_output_reservations):
             reset_output_reservations()
-        ocr_preflight_cache: dict[str, str] = {}
+        # 사전 검사는 (원본 언어, 대상 언어) 조합에만 의존한다. 그런데 이 검사는
+        # Docker 를 여러 번 호출해 한 번에 약 0.8초가 걸리므로, 페이지마다 돌리면
+        # 366장 아카이브에서 GUI 스레드가 5분 가까이 멈추고 Windows 가 "응답하지
+        # 않습니다"를 띄운다. 조합마다 한 번만 검사한다. '모두 번역'은 모든 페이지에
+        # 같은 언어를 적용하므로 보통 한 번으로 끝난다.
+        validated_language_pairs: set[tuple[str, str]] = set()
 
         for path in selected_paths:
             page_state = self.image_ctrl.ensure_page_state(path)
             tgt = page_state['target_lang']
             src = page_state['source_lang']
-            if not validate_settings(self, tgt, source_lang=src, preflight_cache=ocr_preflight_cache):
+            if (src, tgt) in validated_language_pairs:
+                continue
+            if not validate_settings(self, tgt, source_lang=src):
                 return False
+            validated_language_pairs.add((src, tgt))
 
         prepare_preview_run = getattr(self, "_prepare_intermediate_preview_run", None)
         if callable(prepare_preview_run):

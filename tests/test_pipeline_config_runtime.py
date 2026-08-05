@@ -31,6 +31,7 @@ class _FakeSettingsPage:
         self._server_url = server_url
         self._translator = "Custom Local Server(Gemma)"
         self._ocr = "Optimal (HunyuanOCR / PaddleOCR VL)"
+        self._hunyuan_url = "http://127.0.0.1:28080/v1"
 
     def get_tool_selection(self, key: str) -> str:
         if key == "ocr":
@@ -46,7 +47,7 @@ class _FakeSettingsPage:
         return {"server_url": self._server_url}
 
     def get_hunyuan_ocr_settings(self) -> dict:
-        return {"server_url": "http://127.0.0.1:28080/v1"}
+        return {"server_url": self._hunyuan_url}
 
     def get_mangalmm_ocr_settings(self) -> dict:
         return {"server_url": "http://127.0.0.1:28081/v1"}
@@ -90,80 +91,43 @@ class PipelineConfigRuntimeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
-    def test_validate_ocr_initializes_runtime_manager_when_missing(self) -> None:
+    def test_validate_ocr_never_touches_docker_on_the_ui_thread(self) -> None:
+        """사전 검사는 즉시 읽을 수 있는 설정만 본다.
+
+        런타임 준비 상태 확인(compose, 이미지, 준비 볼륨 계약)은 모두 Docker 호출이고
+        파이프라인의 ensure_engine 이 어차피 수행한다. 사전 검사에서 하면 진행 표시
+        없이 UI 가 멈추고, 페이지가 많은 아카이브에서는 창이 응답을 잃는다.
+        """
+
         main = _FakeMain()
-        self.assertFalse(hasattr(main, "local_ocr_runtime_manager"))
 
-        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None) as validate_engine, \
-             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="HunyuanOCR|http://127.0.0.1:28080/v1") as preflight_cache_key, \
-             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="healthy") as probe_managed_engine:
-            result = validate_ocr(main, source_lang="Japanese")
+        with mock.patch.object(
+            LocalOCRRuntimeManager, "validate_engine"
+        ) as validate_engine, mock.patch.object(
+            LocalOCRRuntimeManager, "probe_managed_engine"
+        ) as probe_managed_engine:
+            self.assertTrue(validate_ocr(main, source_lang="Japanese"))
 
-        self.assertTrue(result)
-        self.assertTrue(hasattr(main, "local_ocr_runtime_manager"))
-        self.assertIsInstance(main.local_ocr_runtime_manager, LocalOCRRuntimeManager)
-        validate_engine.assert_called_once()
-        preflight_cache_key.assert_called_once()
-        probe_managed_engine.assert_called_once()
+        validate_engine.assert_not_called()
+        probe_managed_engine.assert_not_called()
+        self.assertEqual(main.batch_report_ctrl.entries, [])
 
-    def test_validate_ocr_registers_preflight_error_for_local_runtime_failure(self) -> None:
+    def test_validate_ocr_still_rejects_an_empty_server_url(self) -> None:
+        """설정만으로 알 수 있는 결함은 계속 즉시 막는다."""
+
         main = _FakeMain()
-        failure = LocalServiceSetupError(
-            "No such image: local/llama.cpp:server-cuda-b8672",
-            service_name="HunyuanOCR",
-            settings_page_name="HunyuanOCR Settings",
-        )
+        main.settings_page._server_url = ""
 
-        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", side_effect=failure), \
-             mock.patch("app.ui.messages.Messages.show_local_service_error", return_value=None):
-            result = validate_ocr(main, source_lang="Japanese")
+        with mock.patch(
+            "app.ui.messages.Messages.show_missing_local_service_config_error",
+            return_value=None,
+        ):
+            self.assertFalse(validate_ocr(main, source_lang="Japanese"))
 
-        self.assertFalse(result)
         self.assertEqual(len(main.batch_report_ctrl.entries), 1)
         title, details = main.batch_report_ctrl.entries[0]
-        self.assertIn("runtime setup failed", title)
-        self.assertIn("No such image", details)
-
-    def test_validate_ocr_health_miss_does_not_fail_preflight(self) -> None:
-        main = _FakeMain()
-
-        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None), \
-             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="HunyuanOCR|http://127.0.0.1:28080/v1"), \
-             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="unavailable") as probe_managed_engine:
-            result = validate_ocr(main, source_lang="Japanese")
-
-        self.assertTrue(result)
-        self.assertEqual(main.batch_report_ctrl.entries, [])
-        probe_managed_engine.assert_called_once()
-
-    def test_validate_ocr_supports_direct_mangalmm_runtime(self) -> None:
-        main = _FakeMain()
-        main.settings_page._ocr = "MangaLMM"
-
-        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None) as validate_engine, \
-             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="MangaLMM|http://127.0.0.1:28081/v1") as preflight_cache_key, \
-             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="healthy") as probe_managed_engine:
-            result = validate_ocr(main, source_lang="Japanese")
-
-        self.assertTrue(result)
-        validate_engine.assert_called_once()
-        preflight_cache_key.assert_called_once()
-        probe_managed_engine.assert_called_once()
-
-    def test_validate_ocr_reuses_preflight_cache_for_same_engine_and_url(self) -> None:
-        main = _FakeMain()
-        preflight_cache: dict[str, str] = {}
-
-        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None), \
-             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="HunyuanOCR|http://127.0.0.1:28080/v1"), \
-             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="healthy") as probe_managed_engine:
-            first = validate_ocr(main, source_lang="Japanese", preflight_cache=preflight_cache)
-            second = validate_ocr(main, source_lang="Japanese", preflight_cache=preflight_cache)
-
-        self.assertTrue(first)
-        self.assertTrue(second)
-        self.assertEqual(preflight_cache, {"HunyuanOCR|http://127.0.0.1:28080/v1": "healthy"})
-        probe_managed_engine.assert_called_once()
+        self.assertIn("settings missing", title)
+        self.assertIn("Server URL", details)
 
     def test_validate_translator_initializes_runtime_manager_when_missing(self) -> None:
         main = _FakeMain()

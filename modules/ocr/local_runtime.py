@@ -589,11 +589,6 @@ class LocalOCRRuntimeManager:
         server_url = self._resolve_server_url(engine_key, settings_page)
         return _normalize_url(server_url) == _normalize_url(config["managed_url"])
 
-    def preflight_cache_key(self, engine_key: str, settings_page: Any) -> str | None:
-        if not self.should_manage_engine(engine_key, settings_page):
-            return None
-        return f"{engine_key}|{_normalize_url(self._resolve_server_url(engine_key, settings_page))}"
-
     def get_ocr_cache_identity(
         self,
         engine_key: str,
@@ -1888,10 +1883,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-paddleocr-vl-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-paddleocr-vl-volume-probe",
                 "--rm",
                 "--pull",
                 "never",
@@ -2022,10 +2022,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-mangalmm-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-mangalmm-volume-probe",
                 "--rm",
                 "--pull",
                 "never",
@@ -2227,10 +2232,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-hunyuanocr-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-hunyuanocr-volume-probe",
                 "--rm",
                 "--pull",
                 "never",
@@ -2367,10 +2377,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-paddleocr-vl-spotting-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-paddleocr-vl-spotting-volume-probe",
                 "--rm",
                 "--pull",
                 "never",

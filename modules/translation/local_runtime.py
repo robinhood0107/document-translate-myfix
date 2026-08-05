@@ -917,9 +917,14 @@ printf 'manifest_base64='
 base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-gemma-volume-probe")
         command = [
             "docker",
             "run",
+            "--name",
+            "comic-translate-gemma-volume-probe",
             "--rm",
             "--pull",
             "never",

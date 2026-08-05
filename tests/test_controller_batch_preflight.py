@@ -109,26 +109,26 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         controller.webtoon_mode = False
         return controller
 
-    def test_start_batch_process_reuses_one_preflight_cache_for_multiple_pages(self) -> None:
-        controller = self._build_controller()
-        captured_caches: list[dict[str, str]] = []
+    def test_start_batch_validates_once_per_language_pair(self) -> None:
+        """사전 검사는 Docker 를 호출하므로 페이지마다 반복하면 UI 가 멈춘다."""
 
-        def _validate(_main, _target_lang, *, source_lang=None, preflight_cache=None):
-            self.assertEqual(source_lang, "Japanese")
-            self.assertIsNotNone(preflight_cache)
-            captured_caches.append(preflight_cache)
+        controller = self._build_controller()
+        calls: list[tuple[str, str]] = []
+
+        def _validate(_main, target_lang, *, source_lang=None):
+            calls.append((source_lang, target_lang))
             return True
 
         with mock.patch("controller.validate_settings", side_effect=_validate):
             result = ComicTranslate._start_batch_process_for_paths(
                 controller,
-                ["page-a.png", "page-b.png"],
+                ["page-a.png", "page-b.png", "page-c.png"],
                 run_type="batch",
             )
 
         self.assertTrue(result)
-        self.assertEqual(len(captured_caches), 2)
-        self.assertIs(captured_caches[0], captured_caches[1])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "Japanese")
 
     def test_one_page_auto_process_uses_batch_entrypoint(self) -> None:
         controller = self._build_controller()
