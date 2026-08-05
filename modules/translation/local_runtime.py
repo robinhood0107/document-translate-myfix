@@ -44,7 +44,10 @@ from modules.utils.local_llama_router import (
     RouterPair,
     RouterRuntimeSpec,
 )
-from modules.utils.local_llama_router.contracts import router_pair_for_engine_key
+from modules.utils.local_llama_router.contracts import (
+    ROUTER_GEMMA_HOST_PORT,
+    router_pair_for_engine_key,
+)
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
     inspect_llama_cpp_runtime,
@@ -223,6 +226,8 @@ class LocalGemmaRuntimeManager:
         coordinator = self._router_coordinator
         if coordinator is None or self._router_pair is not None:
             return
+        # Every pair publishes the one shared Gemma host port, so reclaiming any
+        # pair's ports also releases another pair's leftover Gemma listener.
         pair = router_pair_for_engine_key("PaddleOCR VL")
         if pair is None:
             return
@@ -230,7 +235,7 @@ class LocalGemmaRuntimeManager:
             configured_port = urlparse(str(api_base_url or "").strip()).port
         except ValueError:
             return
-        if configured_port != pair.gemma_port:
+        if configured_port != ROUTER_GEMMA_HOST_PORT:
             return
         try:
             released = coordinator.release_owned_pair_ports(

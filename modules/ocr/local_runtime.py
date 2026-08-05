@@ -42,7 +42,9 @@ from modules.ocr.mangalmm_full_page.runtime import (
     DEFAULT_MANGALMM_LLAMA_CPP_IMAGE,
     DEFAULT_MANGALMM_MODEL_VOLUME,
     DEFAULT_MANGALMM_READY_MANIFEST,
+    DEFAULT_MANGALMM_RUNTIME_OPTIONS,
     MANGALMM_MMPROJ_NAME,
+    MANGALMM_MODEL_ALIAS,
     MANGALMM_MODEL_NAME,
     MANGALMM_MODEL_SPECS,
     MANGALMM_RUNTIME_FINGERPRINT_LABEL,
@@ -50,6 +52,7 @@ from modules.ocr.mangalmm_full_page.runtime import (
     MangaLMMRuntimeContract,
     MangaLMMRuntimeContractError,
     build_mangalmm_runtime_contract,
+    resolve_mangalmm_runtime_options,
     validate_mangalmm_volume_name,
 )
 from modules.ocr.paddle_spotting.runtime import (
@@ -73,6 +76,7 @@ from modules.utils.local_llama_router import (
     LocalLlamaRouterCoordinator,
     RouterModelMaterial,
     RouterPair,
+    RouterPairKind,
     RouterRuntimeSpec,
 )
 from modules.utils.local_llama_router.contracts import router_pair_for_engine_key
@@ -108,6 +112,16 @@ PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF = (
 PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST = (
     PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[-1]
 )
+# The Arbiter lease name each managed OCR engine holds.  The stage scheduler
+# passes the same names explicitly; this table is the fallback both a Router
+# load and its release resolve through so they can never disagree.
+_OCR_RUNTIME_SERVICE_NAMES = {
+    "PaddleOCR VL": "paddleocr_vl",
+    "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+    "HunyuanOCR": "hunyuanocr",
+    "MangaLMM": "mangalmm",
+}
+
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -203,7 +217,7 @@ class LocalOCRRuntimeManager:
         engine_key: str,
         settings_page: Any,
     ) -> RouterPair | None:
-        """Return a Router pair only for the full default Paddle + Gemma path."""
+        """Return a Router pair only for a complete default OCR + Gemma path."""
 
         coordinator = self._router_coordinator
         gemma_manager = self._router_gemma_manager
@@ -218,12 +232,34 @@ class LocalOCRRuntimeManager:
             gemma_endpoint, gemma_model = credentials(settings_page)
         except Exception:
             return None
-        return coordinator.classify_pair(
+        pair = coordinator.classify_pair(
             engine_key,
             self._resolve_server_url(engine_key, settings_page),
             gemma_endpoint,
             gemma_model,
         )
+        if pair is None or not self._router_preset_matches_runtime_options(pair):
+            return None
+        return pair
+
+    def _router_preset_matches_runtime_options(self, pair: RouterPair) -> bool:
+        """Reject the Router when its static preset would drop a tuned option.
+
+        The Router configures models from a fingerprinted preset file instead of
+        Compose environment variables, so an engine whose separate-server route
+        exposes tunable runtime options can only be routed while those options
+        still hold their frozen default.  Otherwise the tuned value would be
+        silently ignored, which would change OCR behaviour rather than only its
+        startup cost, so the separate-server route stays in charge.
+        """
+
+        if pair.kind is not RouterPairKind.MANGALMM:
+            return True
+        try:
+            resolved = resolve_mangalmm_runtime_options(os.environ)
+        except MangaLMMRuntimeContractError:
+            return False
+        return resolved == DEFAULT_MANGALMM_RUNTIME_OPTIONS
 
     def router_is_active(self) -> bool:
         pair = self._router_pair
@@ -402,10 +438,29 @@ class LocalOCRRuntimeManager:
                 runtime_options=dict(contract.runtime_options),
                 preparation_version=contract.preparation_version,
             )
+        elif engine_key == "MangaLMM":
+            self._ensure_mangalmm_runtime_image()
+            contract = self._mangalmm_runtime_contract(force_refresh=True)
+            material = RouterModelMaterial(
+                alias=MANGALMM_MODEL_ALIAS,
+                model_file=MANGALMM_MODEL_NAME,
+                model_sha256=str(
+                    MANGALMM_MODEL_SPECS[MANGALMM_MODEL_NAME]["sha256"]
+                ),
+                mmproj_file=MANGALMM_MMPROJ_NAME,
+                mmproj_sha256=str(
+                    MANGALMM_MODEL_SPECS[MANGALMM_MMPROJ_NAME]["sha256"]
+                ),
+                volume_name=contract.volume_name,
+                ready_manifest_sha256=contract.ready_manifest_sha256,
+                source_fingerprint=contract.fingerprint,
+                runtime_options=dict(contract.runtime_options),
+                preparation_version=contract.preparation_version,
+            )
         else:
             raise self._build_setup_error(
                 engine_key,
-                "Router supports only the two PaddleOCR-VL product routes.",
+                "Router supports the two PaddleOCR-VL routes and MangaLMM.",
             )
         gemma_material, gemma_image_ref = material_getter(settings_page)
         if str(contract.llama_image_ref) != str(gemma_image_ref):
@@ -687,7 +742,7 @@ class LocalOCRRuntimeManager:
                     stop_container=True,
                     resource_arbiter=resource_arbiter,
                     runtime_service=self._router_owner_service(
-                        runtime_service or "ocr"
+                        runtime_service or self._router_owned_service_default()
                     ),
                     cancel_checker=cancel_checker,
                 )
@@ -776,7 +831,7 @@ class LocalOCRRuntimeManager:
                 stop_container=True,
                 resource_arbiter=resource_arbiter,
                 runtime_service=self._router_owner_service(
-                    runtime_service or "ocr"
+                    runtime_service or self._router_owned_service_default()
                 ),
                 cancel_checker=cancel_checker,
             )
@@ -808,11 +863,7 @@ class LocalOCRRuntimeManager:
             except Exception as exc:
                 raise self._build_setup_error(engine_key, str(exc)) from exc
         spec = self._router_runtime_spec(engine_key, settings_page, pair)
-        service = runtime_service or (
-            "paddleocr_vl"
-            if engine_key == "PaddleOCR VL"
-            else "paddleocr_vl_spotting"
-        )
+        service = runtime_service or self._router_service_name(engine_key)
         try:
             coordinator.load(
                 spec,
@@ -852,7 +903,7 @@ class LocalOCRRuntimeManager:
             return {"runtime_state": "stopped", "gpu_release_expected": False}
         evidence = coordinator.finish(
             arbiter=resource_arbiter,
-            service=runtime_service or "ocr",
+            service=runtime_service or self._router_owned_service_default(),
             stop_container=stop_container,
             cancel_checker=cancel_checker,
             allow_foreign_owner_teardown=allow_foreign_owner_teardown,
@@ -881,6 +932,20 @@ class LocalOCRRuntimeManager:
             "router_model_generation": snapshot.model_generation,
         }
 
+    @staticmethod
+    def _router_service_name(engine_key: str, fallback: str = "ocr") -> str:
+        """The single GPU lease name a Router load and its release must share.
+
+        A load that takes one lease name while its release asks for another
+        deadlocks the Arbiter, so both directions resolve the name here instead
+        of defaulting independently.
+        """
+
+        return _OCR_RUNTIME_SERVICE_NAMES.get(
+            str(engine_key or ""),
+            str(fallback or "ocr"),
+        )
+
     def _router_owner_service(self, fallback: str) -> str:
         """Return the Arbiter service that owns the currently selected pair."""
 
@@ -893,17 +958,19 @@ class LocalOCRRuntimeManager:
             if loaded_model == spec.gemma_model.alias:
                 return "gemma"
             if loaded_model == spec.ocr_model.alias:
-                return {
-                    "PaddleOCR VL": "paddleocr_vl",
-                    "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
-                }.get(spec.pair.ocr_engine_key, str(fallback or "ocr"))
-        return {
-            "PaddleOCR VL": "paddleocr_vl",
-            "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
-        }.get(
-            self._active_engine or "",
-            str(fallback or "ocr"),
-        )
+                return self._router_service_name(
+                    spec.pair.ocr_engine_key,
+                    fallback,
+                )
+        return self._router_service_name(self._active_engine or "", fallback)
+
+    def _router_owned_service_default(self) -> str:
+        """The lease name of the pair this manager currently owns."""
+
+        pair = self._router_pair
+        if pair is None:
+            return "ocr"
+        return self._router_service_name(pair.ocr_engine_key)
 
     def _ensure_engine_uncached(
         self,
@@ -1127,7 +1194,7 @@ class LocalOCRRuntimeManager:
                 return self._router_finish(
                     stop_container=True,
                     resource_arbiter=resource_arbiter,
-                    runtime_service=runtime_service or "ocr",
+                    runtime_service=runtime_service or self._router_owned_service_default(),
                     cancel_checker=cancel_checker,
                     allow_foreign_owner_teardown=allow_foreign_owner_teardown,
                 )
@@ -1163,7 +1230,7 @@ class LocalOCRRuntimeManager:
                 return self._router_finish(
                     stop_container=False,
                     resource_arbiter=resource_arbiter,
-                    runtime_service=runtime_service or "ocr",
+                    runtime_service=runtime_service or self._router_owned_service_default(),
                     cancel_checker=cancel_checker,
                 )
             if self._active_engine not in (None, "PaddleOCR VL"):

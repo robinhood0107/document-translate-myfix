@@ -28,7 +28,11 @@ ROUTER_SERVICE_NAME = "llama-router"
 
 DEFAULT_CROP_ROUTER_ENDPOINT = "http://127.0.0.1:18000/v1/chat/completions"
 DEFAULT_SPOTTING_ROUTER_ENDPOINT = "http://127.0.0.1:18002/v1/chat/completions"
+DEFAULT_MANGALMM_ROUTER_ENDPOINT = "http://127.0.0.1:28081/v1"
 DEFAULT_GEMMA_ROUTER_ENDPOINT = "http://127.0.0.1:18080/v1"
+# Every pair publishes this one Gemma host port, so releasing any pair's ports
+# also reclaims another pair's leftover Gemma listener.
+ROUTER_GEMMA_HOST_PORT = 18080
 DEFAULT_GEMMA_ROUTER_MODEL = "gemma-4-26B-IQ4_NL.gguf"
 DEFAULT_ROUTER_IMAGE = (
     "ghcr.io/ggml-org/llama.cpp@sha256:"
@@ -39,6 +43,7 @@ DEFAULT_ROUTER_IMAGE = (
 class RouterPairKind(str, Enum):
     CROP = "crop"
     SPOTTING = "spotting"
+    MANGALMM = "mangalmm"
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,20 @@ _ROUTER_PAIRS: tuple[RouterPair, ...] = (
             _ROOT_DIR / "paddleocr_vl_spotting_docker_files" / "router-models.ini"
         ),
         container_name="comic-translate-router-spotting-v2",
+    ),
+    RouterPair(
+        kind=RouterPairKind.MANGALMM,
+        ocr_engine_key="MangaLMM",
+        ocr_alias="MangaLMM",
+        ocr_endpoint=DEFAULT_MANGALMM_ROUTER_ENDPOINT,
+        gemma_endpoint=DEFAULT_GEMMA_ROUTER_ENDPOINT,
+        ocr_port=28081,
+        gemma_port=ROUTER_GEMMA_HOST_PORT,
+        compose_file=(
+            _ROOT_DIR / "mangalmm_docker_files" / "docker-compose.router.yaml"
+        ),
+        preset_file=_ROOT_DIR / "mangalmm_docker_files" / "router-models.ini",
+        container_name="comic-translate-router-mangalmm-v2",
     ),
 )
 

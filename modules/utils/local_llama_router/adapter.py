@@ -32,6 +32,7 @@ from .contracts import (
     ROUTER_PROJECT_LABEL,
     ROUTER_SERVICE_NAME,
     RouterPair,
+    RouterPairKind,
     RouterRuntimeContract,
     RouterRuntimeSpec,
     build_router_contract,
@@ -39,6 +40,9 @@ from .contracts import (
     expected_router_server_args,
     router_environment,
 )
+
+
+_ROUTER_PAIR_LABEL_VALUES = frozenset(kind.value for kind in RouterPairKind)
 
 
 class RouterAdapterError(RuntimeError):
@@ -69,7 +73,9 @@ class RouterContainerInspection:
             str(self.labels.get(ROUTER_OWNER_LABEL, "")) == ROUTER_OWNER_VALUE
             and str(self.labels.get(ROUTER_PROJECT_LABEL, ""))
             == ROUTER_PROJECT_NAME
-            and str(self.labels.get(ROUTER_PAIR_LABEL, "")) in {"crop", "spotting"}
+            # Derive the accepted pair labels from the pair enum so a new pair
+            # is never misread as a foreign container.
+            and str(self.labels.get(ROUTER_PAIR_LABEL, "")) in _ROUTER_PAIR_LABEL_VALUES
         )
 
     def owned_by(self, contract: RouterRuntimeContract) -> bool:

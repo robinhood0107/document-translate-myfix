@@ -26,6 +26,29 @@ MangaLMM full-page는 기본 OCR이 아니다. 사용자 화면에서는
 동일한 검증 결과를 기준으로 고정됐다. 사용자가 직접 지정한 과거
 `/layout-parsing` endpoint는 unmanaged 호환 경로로만 남는다.
 
+## Router pair와 기본 경로
+
+관리형 기본 구성(Gemma 번역기 + 제품 기본 endpoint·모델)에서는 Compose project
+`comic-translate-llama-router-v2`의 Router pair가 기본 경로다. pair는 상호
+배타적이며 한 번에 하나만 뜬다.
+
+| OCR 선택 | Router 컨테이너 | 호스트 포트 |
+|---|---|---|
+| PaddleOCR VL (최적값의 일본어·한국어·영어) | `comic-translate-router-crop-v2` | 18000, 18080 |
+| PaddleOCR VL Spotting | `comic-translate-router-spotting-v2` | 18002, 18080 |
+| MangaLMM(실험용, 느림) | `comic-translate-router-mangalmm-v2` | 28081, 18080 |
+| HunyuanOCR (최적값의 중국어) | 없음 — separate-server | 28080 |
+
+HunyuanOCR은 아직 준비 볼륨 계약이 없어 Router pair가 아니다. Router는 SHA로
+검증된 external volume과 ready manifest를 요구하는데, HunyuanOCR Compose는
+`../testmodel` bind mount를 쓴다.
+
+Router는 모델을 fingerprint된 정적 preset(`router-models.ini`)으로 구성하고
+Compose 환경변수를 쓰지 않는다. 따라서 separate-server 경로가 노출하는 조정
+가능한 런타임 옵션이 기본값에서 벗어나면 그 pair는 Router를 쓰지 않고
+separate-server 경로로 남는다. 조정값이 조용히 무시되면 기동 비용이 아니라 OCR
+동작 자체가 달라지기 때문이다.
+
 ## Router와 separate-server 호스트 포트 인계
 
 Router 컨테이너는 OCR 포트와 Gemma 포트 `18080`을 함께 publish하므로
@@ -35,8 +58,10 @@ separate-server 컨테이너와 정확히 같은 호스트 포트를 쓴다.
 |---|---|
 | `comic-translate-router-crop-v2` | 18000, 18080 |
 | `comic-translate-router-spotting-v2` | 18002, 18080 |
+| `comic-translate-router-mangalmm-v2` | 28081, 18080 |
 | `paddleocr-llamacpp` | 18000 |
 | `paddleocr-spotting-llamacpp` | 18002 |
+| `mangalmm-local-server` | 28081 |
 | `gemma-local-server` | 18080 |
 
 따라서 두 경로는 상대 경로의 컨테이너를 서로 인계받아야 한다.
