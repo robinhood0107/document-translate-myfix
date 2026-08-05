@@ -113,6 +113,7 @@ from modules.utils.exceptions import OperationCancelledError
 from modules.utils.gpu_handoff import (
     DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO,
     DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB,
+    gpu_release_enforcement_enabled,
     DEFAULT_VRAM_RELEASE_EXPECTED_RATIO,
     wait_for_global_vram_release,
 )
@@ -303,7 +304,13 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         before: dict[str, Any],
     ) -> dict[str, Any]:
-        """Fail closed until a managed Docker model returns its GPU memory."""
+        """관리형 Docker 모델의 GPU 반환을 측정해 게이트 결과로 돌려준다.
+
+        측정과 기록은 항상 수행한다. 결과를 실패로 처리할지는
+        `gpu_handoff.gpu_release_enforcement_enabled()`가 정하며 기본값은
+        처리하지 않는 것이다. 드라이버 보고 노이즈 하나로 폴더 전체 작업이
+        중단되는 편이 미확인 잔여 메모리보다 나쁘다.
+        """
 
         report = release_report if isinstance(release_report, dict) else {}
         release_required = self._runtime_gpu_release_services()
@@ -357,13 +364,33 @@ class StageBatchedProcessor(BatchProcessor):
             release_report,
             before=before,
         )
-        if bool(gate.get("required")) and not bool(gate.get("observed")):
+        self._handle_unconfirmed_gpu_release(service, gate)
+
+    def _handle_unconfirmed_gpu_release(
+        self,
+        service: str,
+        gate: dict[str, Any],
+    ) -> None:
+        """GPU 반환이 확인되지 않았을 때의 단일 처리 지점.
+
+        기본값은 경고만 남기고 계속 진행하는 것이다. 회귀 조사에서 다시 강제하려면
+        `COMIC_TRANSLATE_ENFORCE_GPU_RELEASE=1`을 설정한다.
+        """
+
+        if not bool(gate.get("required")) or bool(gate.get("observed")):
+            return
+        if gpu_release_enforcement_enabled():
             raise RuntimeError(
                 QCoreApplication.translate(
                     "StageBatchedProcessor",
                     "Managed runtime GPU release was not confirmed.",
                 )
             )
+        logger.warning(
+            "%s 런타임의 GPU 반환을 확인하지 못했습니다(status=%s). 실행은 계속합니다.",
+            service,
+            gate.get("status", "unknown"),
+        )
 
     @staticmethod
     def _router_runtime_is_active(runtime_manager: Any) -> bool:
@@ -795,15 +822,7 @@ class StageBatchedProcessor(BatchProcessor):
                         release_report,
                         before=release_before,
                     )
-                    if bool(gate.get("required")) and not bool(
-                        gate.get("observed")
-                    ):
-                        raise RuntimeError(
-                            QCoreApplication.translate(
-                                "StageBatchedProcessor",
-                                "Managed runtime GPU release was not confirmed.",
-                            )
-                        )
+                    self._handle_unconfirmed_gpu_release(service, gate)
                 elapsed_ms = (time.perf_counter() - started_at) * 1000.0
                 completed_state = release_context.target_state.value
                 self._record_runtime_performance(
@@ -2954,11 +2973,16 @@ class StageBatchedProcessor(BatchProcessor):
             release_succeeded=release_succeeded,
         )
         if not release_succeeded:
-            raise RuntimeError(
-                QCoreApplication.translate(
-                    "StageBatchedProcessor",
-                    "Gemma could not start because inpainter VRAM release was not confirmed."
+            if gpu_release_enforcement_enabled():
+                raise RuntimeError(
+                    QCoreApplication.translate(
+                        "StageBatchedProcessor",
+                        "Gemma could not start because inpainter VRAM release was not confirmed."
+                    )
                 )
+            logger.warning(
+                "인페인터 VRAM 반환을 확인하지 못했습니다(status=%s). 번역 단계를 계속합니다.",
+                gate.get("status", "unknown"),
             )
         if not start_gemma:
             return
@@ -3220,11 +3244,19 @@ class StageBatchedProcessor(BatchProcessor):
         if gemma_runtime_required:
             gate = dict(getattr(self, "_inpainter_release_gate", {}) or {})
             if gate.get("required") and not gate.get("observed"):
-                raise RuntimeError(
-                    QCoreApplication.translate(
-                        "StageBatchedProcessor",
-                        "Gemma could not start because inpainter VRAM release was not confirmed."
+                if gpu_release_enforcement_enabled():
+                    raise RuntimeError(
+                        QCoreApplication.translate(
+                            "StageBatchedProcessor",
+                            "Gemma could not start because inpainter VRAM release was not confirmed."
+                        )
                     )
+                # 인페인터 VRAM 확인에 실패했다고 번역 단계를 포기하지 않는다.
+                # 실제로 메모리가 부족하면 Gemma 적재가 그 사실을 드러낸다.
+                logger.warning(
+                    "인페인터 VRAM 반환을 확인하지 못했습니다(status=%s). "
+                    "Gemma 기동을 계속합니다.",
+                    gate.get("status", "unknown"),
                 )
             self._start_gemma_prewarm()
             self._await_gemma_runtime()
@@ -3363,11 +3395,17 @@ class StageBatchedProcessor(BatchProcessor):
                 if runtime_required_now and not gemma_runtime_started:
                     gate = dict(getattr(self, "_inpainter_release_gate", {}) or {})
                     if gate.get("required") and not gate.get("observed"):
-                        raise RuntimeError(
-                            QCoreApplication.translate(
-                                "StageBatchedProcessor",
-                                "Gemma could not start because inpainter VRAM release was not confirmed."
+                        if gpu_release_enforcement_enabled():
+                            raise RuntimeError(
+                                QCoreApplication.translate(
+                                    "StageBatchedProcessor",
+                                    "Gemma could not start because inpainter VRAM release was not confirmed."
+                                )
                             )
+                        logger.warning(
+                            "인페인터 VRAM 반환을 확인하지 못했습니다(status=%s). "
+                            "Gemma 기동을 계속합니다.",
+                            gate.get("status", "unknown"),
                         )
                     self._start_gemma_prewarm()
                     self._await_gemma_runtime()

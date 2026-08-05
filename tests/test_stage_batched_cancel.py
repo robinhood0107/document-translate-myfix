@@ -1323,6 +1323,13 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
 
     def test_unobserved_managed_runtime_release_keeps_gpu_lease(self) -> None:
+        # 미확인 해제를 실패로 처리하는 계약이 대상이므로 진단용 강제를 켠다.
+        patcher = mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         processor = self._processor(cancelled=False)
         processor._record_runtime_transition = mock.Mock()
         processor._record_runtime_performance = mock.Mock()
@@ -1414,6 +1421,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(snapshot.states["gemma"], "stopped")
 
     def test_cancelled_start_with_unobserved_cleanup_keeps_gpu_lease(self) -> None:
+        # 이 테스트들은 미확인 해제를 실패로 처리하는 계약 자체가 대상이다. 그
+        # 처리는 진단용 강제를 켰을 때만 일어나므로 여기서 명시적으로 켠다.
+        patcher = mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         processor = self._processor(cancelled=False)
         processor._record_runtime_transition = mock.Mock()
         processor._record_runtime_performance = mock.Mock()
@@ -2225,6 +2240,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._write_final_render_export.assert_called_once()
 
     def test_cache_state_change_cannot_bypass_unobserved_vram_release_gate(self) -> None:
+        # 이 테스트들은 미확인 해제를 실패로 처리하는 계약 자체가 대상이다. 그
+        # 처리는 진단용 강제를 켰을 때만 일어나므로 여기서 명시적으로 켠다.
+        patcher = mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         processor = self._processor(cancelled=False)
         processor.main_page.settings_page = SimpleNamespace(
             get_llm_settings=lambda: {"extra_context": "context"},

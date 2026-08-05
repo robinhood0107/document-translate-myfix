@@ -100,14 +100,19 @@ class InpainterReleaseTests(unittest.TestCase):
         ):
             processor._ensure_inpainter()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "VRAM release was not confirmed",
+        # 강제가 켜져 있을 때만 실패 lease 를 남기고 중단한다.
+        with mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
         ):
-            processor._release_inpainter_before_gemma(
-                [],
-                start_gemma=False,
-            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "VRAM release was not confirmed",
+            ):
+                processor._release_inpainter_before_gemma(
+                    [],
+                    start_gemma=False,
+                )
 
         snapshot = processor._runtime_resource_arbiter().snapshot()
         self.assertEqual(snapshot.active_model, "inpainter")
@@ -271,6 +276,9 @@ class InpainterReleaseTests(unittest.TestCase):
             started = True
 
         processor._start_gemma_prewarm = start_gemma
+        # 비차단 경로는 Gemma 기동까지 계속 진행하므로, 그 뒤에 필요한 최소 표면을
+        # 더블에 갖춰 둔다.
+        processor._raise_if_cancelled = lambda: None
         page = StagePageContext(
             image_path="example.png",
             image_name="example.png",
@@ -278,9 +286,20 @@ class InpainterReleaseTests(unittest.TestCase):
             target_lang="Korean",
         )
 
-        with self.assertRaisesRegex(RuntimeError, "VRAM release was not confirmed"):
-            processor._release_inpainter_before_gemma([page])
+        # 기본값은 강건성 우선이다. VRAM 확인에 실패해도 게이트에서 멈추지 않고
+        # 번역 단계로 넘어간다. (이 페이지에는 번역 블록이 없어 예열까지 가지 않는
+        # 것이 정상이며, 여기서 확인하려는 것은 게이트가 중단시키지 않는다는 점이다.)
+        processor._release_inpainter_before_gemma([page])
 
+        # 강제를 켜면 예전처럼 차단한다.
+        with mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "VRAM release was not confirmed"
+            ):
+                processor._release_inpainter_before_gemma([page])
         self.assertFalse(started)
 
     def test_aborted_inpaint_releases_resources_without_starting_gemma(self) -> None:
