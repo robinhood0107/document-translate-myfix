@@ -22,15 +22,25 @@ from dataclasses import dataclass, field
 
 # 각 단계가 페이지당 대략 얼마나 무거운지에 대한 사전 비중. 상대값만 의미가 있다.
 # 첫 표본이 들어오면 그 단계는 실측으로 대체되므로, 이 값은 "아직 한 번도 돌지 않은
-# 단계"의 자리만 채운다. 값의 근거는 실측 프로파일이다. 검출은 GPU 한 번 통과,
-# OCR 은 블록 수만큼 요청, 인페인팅은 마스크 생성과 LaMa 통과, 번역은 배치 요청,
-# 렌더는 CPU 합성이다.
+# 단계"의 자리만 채운다.
+#
+# 값은 366장 실측에서 가져왔다. 짐작으로 넣은 첫 값들은 방향이 반대여서, 인페인팅
+# sweep 이 시작되는 순간 남은 시간이 2분에서 13분으로 튀었다.
+#
+#   ocr-all      71s / 366장 = 0.19 s/page
+#   inpaint-all 467s / 366장 = 1.28 s/page   (OCR 의 약 6.6배)
+#
+# OCR 이 가벼운 이유는 Router 안에서 crop 만 추론하고 영구 캐시가 히트하기 때문이고,
+# 인페인팅이 무거운 이유는 페이지마다 마스크 생성과 LaMa 통과가 들어가기 때문이다.
+# 측정한 값: ocr-all 1.0 : inpaint-all 6.6. 나머지는 아직 실측이 없는 추정치이며,
+# 그 단계가 처음 도는 순간 실측으로 대체된다. 두 번째 실행부터는 아래 이력 학습이
+# 이 표 전체를 대신하므로, 이 값들은 "첫 실행의 출발점" 역할만 한다.
 DEFAULT_STAGE_WEIGHTS: dict[str, float] = {
     "detect-all": 1.0,
-    "ocr-all": 4.0,
-    "inpaint-all": 3.0,
-    "translate-all": 2.0,
-    "render-all": 1.0,
+    "ocr-all": 1.0,
+    "inpaint-all": 6.6,
+    "translate-all": 3.0,
+    "render-all": 1.5,
     "save-and-finish": 0.2,
 }
 
@@ -95,6 +105,39 @@ class StageSweepEtaEstimator:
         self.page_total = max(int(self.page_total), 0)
         for name in self.stage_order:
             self._stages[name] = _StageState(name=name)
+
+    def seed_from_history(self, per_page_by_stage: dict[str, float]) -> None:
+        """지난 실행에서 측정한 페이지당 속도로 비중을 대체한다.
+
+        사전 비중은 짐작이므로 첫 실행에서 남은 시간이 크게 틀린다. 실제로 짐작한
+        비중이 방향까지 반대여서, 인페인팅 sweep 이 시작되는 순간 남은 시간이 2분에서
+        13분으로 튀었다. 이력이 있으면 그 값을 비중으로 써서 첫 페이지부터 맞는
+        추정을 낸다. 이력은 상대값으로만 쓰이므로 장비가 달라져도 비율이 유지되는 한
+        유효하고, 실측이 들어오면 계속 갱신된다.
+        """
+
+        rates = {
+            str(name): float(value)
+            for name, value in (per_page_by_stage or {}).items()
+            if isinstance(value, (int, float)) and float(value) > 0.0
+        }
+        if not rates:
+            return
+        reference = min(rates.values())
+        for name, rate in rates.items():
+            if name not in self._stages:
+                self._stages[name] = _StageState(name=name)
+                self.stage_order = self.stage_order + (name,)
+            self.stage_weights[name] = rate / reference
+
+    def measured_per_page_by_stage(self) -> dict[str, float]:
+        """이번 실행에서 실제로 측정한 페이지당 속도. 다음 실행의 씨앗이 된다."""
+
+        return {
+            name: stage.per_page_sec
+            for name, stage in self._stages.items()
+            if stage.per_page_sec is not None and stage.per_page_sec > 0.0
+        }
 
     # -- 관측 -------------------------------------------------------------
 

@@ -259,8 +259,32 @@ class StageBatchedProcessor(BatchProcessor):
                                   sorted(self.STAGE_NAMES_BY_STEP)),
             )
             estimator.start_run(time.monotonic())
+            # 지난 실행들에서 측정한 단계 속도로 시작한다. 내장 사전 비중은 짐작이라
+            # 첫 실행에서 남은 시간이 튄다. 이력이 있으면 첫 페이지부터 맞는다.
+            tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
+            reader = getattr(tracker, "read_stage_rates", None)
+            if callable(reader):
+                try:
+                    estimator.seed_from_history(reader())
+                except Exception:
+                    logger.debug("Could not seed the stage ETA model.", exc_info=True)
             self._stage_eta = estimator
         return estimator
+
+    def _persist_stage_rates(self) -> None:
+        """이번 실행에서 측정한 단계 속도를 다음 실행을 위해 남긴다."""
+
+        estimator = getattr(self, "_stage_eta", None)
+        if estimator is None:
+            return
+        tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
+        writer = getattr(tracker, "record_stage_rates", None)
+        if not callable(writer):
+            return
+        try:
+            writer(estimator.measured_per_page_by_stage())
+        except Exception:
+            logger.debug("Could not persist the stage ETA model.", exc_info=True)
 
     def observe_progress(
         self,
@@ -4588,6 +4612,7 @@ class StageBatchedProcessor(BatchProcessor):
             )
             raise
         finally:
+            self._persist_stage_rates()
             try:
                 self._shutdown_prewarm_executor()
             finally:

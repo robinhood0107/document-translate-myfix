@@ -137,3 +137,95 @@ class LegacyProcessorKeepsItsOwnModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NonSweepEventsKeepTheEstimateTests(unittest.TestCase):
+    """미리보기 알림처럼 sweep 이 아닌 이벤트가 추정을 되돌리면 안 된다.
+
+    실제 로그에서 인페인팅 sweep 이 끝난 직후 미리보기 알림 네 줄에서 남은 시간이
+    3분 33초에서 24분 08초로 뛰었다. 그 알림들은 eta 를 싣지 않아 트래커가 자체
+    계산으로 되돌아갔기 때문이다.
+    """
+
+    def _sweep_event(self, **extra) -> dict:
+        payload = {
+            "phase": "pipeline",
+            "service": "batch",
+            "status": "running",
+            "step_key": "inpaint-all",
+            "stage_name": "inpaint-all",
+            "page_index": 365,
+            "page_total": PAGES,
+            "image_name": "366.png",
+            "eta_seconds": 213.0,
+            "progress_fraction": 0.714,
+        }
+        payload.update(extra)
+        return payload
+
+    def _preview_notice(self) -> dict:
+        return {
+            "phase": "pipeline",
+            "service": "batch",
+            "status": "running",
+            "step_key": "preview_raw_mask_disabled",
+            "stage_name": "raw_mask",
+            "page_index": 0,
+            "page_total": PAGES,
+            "image_name": "001.png",
+        }
+
+    def test_a_preview_notice_holds_the_last_estimate(self) -> None:
+        tracker = AutomaticProgressTracker()
+        tracker.reset(page_total=PAGES)
+        tracker.enrich(self._sweep_event())
+        event = tracker.enrich(self._preview_notice())
+        self.assertAlmostEqual(event["eta_sec"], 213.0, delta=1e-6)
+
+    def test_a_preview_notice_does_not_rewind_progress(self) -> None:
+        tracker = AutomaticProgressTracker()
+        tracker.reset(page_total=PAGES)
+        tracker.enrich(self._sweep_event())
+        event = tracker.enrich(self._preview_notice())
+        self.assertAlmostEqual(event["overall_progress_percent"], 71.4, delta=0.1)
+
+    def test_a_new_run_forgets_the_previous_estimate(self) -> None:
+        tracker = AutomaticProgressTracker()
+        tracker.reset(page_total=PAGES)
+        tracker.enrich(self._sweep_event())
+        tracker.reset(page_total=PAGES)
+        event = tracker.enrich(self._preview_notice())
+        self.assertNotAlmostEqual(event.get("eta_sec") or -1.0, 213.0, delta=1e-6)
+
+
+class StageRateHistoryTests(unittest.TestCase):
+    """이력 학습이 없으면 첫 실행의 사전 비중이 그대로 오차가 된다."""
+
+    def test_measured_rates_round_trip_through_the_tracker(self) -> None:
+        from modules.utils.stage_sweep_eta import StageSweepEtaEstimator
+
+        tracker = AutomaticProgressTracker()
+        measured = {"ocr-all": 0.194, "inpaint-all": 1.276}
+        tracker.record_stage_rates(measured)
+        stored = tracker.read_stage_rates()
+        for name, rate in measured.items():
+            self.assertAlmostEqual(stored.get(name, 0.0), rate, delta=1e-6)
+
+        estimator = StageSweepEtaEstimator(page_total=10)
+        estimator.start_run(0.0)
+        estimator.seed_from_history(stored)
+        # 비중은 상대값이다. 인페인팅이 OCR 의 약 6.6배여야 한다.
+        self.assertAlmostEqual(
+            estimator.stage_weights["inpaint-all"]
+            / estimator.stage_weights["ocr-all"],
+            1.276 / 0.194,
+            delta=0.1,
+        )
+
+    def test_seeding_ignores_unusable_samples(self) -> None:
+        from modules.utils.stage_sweep_eta import StageSweepEtaEstimator
+
+        estimator = StageSweepEtaEstimator(page_total=5)
+        before = dict(estimator.stage_weights)
+        estimator.seed_from_history({"ocr-all": 0.0, "inpaint-all": -1.0})
+        self.assertEqual(estimator.stage_weights, before)

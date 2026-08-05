@@ -10,6 +10,7 @@ import unittest
 
 from modules.utils.stage_sweep_eta import (
     DEFAULT_STAGE_ORDER,
+    DEFAULT_STAGE_WEIGHTS,
     StageSweepEtaEstimator,
 )
 
@@ -37,9 +38,14 @@ class StageSweepEtaTests(unittest.TestCase):
         self.assertLess(estimator.progress_fraction(), 0.15)
         remaining = estimator.remaining_seconds()
         self.assertIsNotNone(remaining)
-        # 검출이 페이지당 1초였고 검출 비중이 1.0 이므로, 남은 네 단계의 비중 합
-        # (4+3+2+1+0.2)=10.2 만큼이 남아야 한다.
-        self.assertAlmostEqual(remaining, 366 * 10.2, delta=366 * 0.5)
+        # 검출이 페이지당 1초였고 검출 비중이 1.0 이므로, 남은 단계들의 비중 합
+        # 만큼이 남아야 한다. 비중은 실측으로 갱신되므로 표에서 계산한다.
+        remaining_weight = sum(
+            weight
+            for name, weight in DEFAULT_STAGE_WEIGHTS.items()
+            if name != "detect-all"
+        )
+        self.assertAlmostEqual(remaining, 366 * remaining_weight, delta=366 * 0.5)
 
     def test_progress_never_moves_backwards_across_a_stage_boundary(self) -> None:
         estimator = self._estimator(pages=10)
@@ -60,14 +66,19 @@ class StageSweepEtaTests(unittest.TestCase):
             estimator.observe("detect-all", index, now)
         self.assertAlmostEqual(estimator.stage_per_page_estimate("detect-all"), 2.0, delta=0.2)
 
-        # OCR 은 아직 안 돌았으므로 사전 비중(4.0)으로 환산된 값이어야 한다.
-        self.assertAlmostEqual(estimator.stage_per_page_estimate("ocr-all"), 8.0, delta=0.8)
+        # OCR 은 아직 안 돌았으므로 사전 비중으로 환산된 값이어야 한다.
+        ocr_prior = 2.0 * DEFAULT_STAGE_WEIGHTS["ocr-all"]
+        self.assertAlmostEqual(
+            estimator.stage_per_page_estimate("ocr-all"), ocr_prior, delta=0.2
+        )
 
         # 단계 전환 보고는 시작만 표시한다. 그 구간에는 모델 스왑이 섞여 있어
         # 페이지 속도로 쓰면 안 된다. 따라서 아직 사전 비중이 유지된다.
         now += 10.0
         estimator.observe("ocr-all", 0, now)
-        self.assertAlmostEqual(estimator.stage_per_page_estimate("ocr-all"), 8.0, delta=0.8)
+        self.assertAlmostEqual(
+            estimator.stage_per_page_estimate("ocr-all"), ocr_prior, delta=0.2
+        )
 
         # 두 번째 페이지부터 실측이 사전 비중을 대체한다.
         now += 10.0
