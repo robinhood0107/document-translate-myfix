@@ -1401,10 +1401,6 @@ Verifica la tua connessione Internet.</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation type="unfinished"></translation>
     </message>

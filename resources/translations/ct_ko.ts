@@ -1434,10 +1434,6 @@ Please check your internet connection.</source>
         <translation>{service} 설정 누락</translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation>{service} 런타임 준비 실패</translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation>Stage-Batched Pipeline은 현재 제품 모드에서 단일 런타임 OCR 경로만 지원합니다.</translation>
     </message>
