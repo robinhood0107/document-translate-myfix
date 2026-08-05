@@ -417,9 +417,18 @@ class BatchProcessor:
         10: 'save-and-finish',
     }
 
-    def emit_progress(self, index, total, step, steps, change_name):
-        """Wrapper around main_page.progress_update.emit that logs current batch position with ETA."""
-        stage_name = self.STAGE_NAMES_BY_STEP.get(step, f'stage-{step}')
+    def emit_progress(self, index, total, step, steps, change_name, stage_name=None):
+        """Wrapper around main_page.progress_update.emit that logs current batch position with ETA.
+
+        `stage_name` 을 주면 그 이름을 그대로 쓴다. 숫자 step 에서 이름을 되찾는 방식은
+        오해를 만들었다. stage-batched 의 step 3 은 마스크 생성과 LaMa 통과를 모두 하는
+        단계인데, 레거시 표에서 3 은 `pre-inpaint-setup` 이라 "인페인트 준비" 라는 이름이
+        366 줄 찍혔다. 이제 단계가 자기 이름을 직접 말한다.
+        """
+
+        stage_name = str(stage_name or "").strip() or self.STAGE_NAMES_BY_STEP.get(
+            step, f'stage-{step}'
+        )
         image_name = os.path.basename(self._progress_image_path) if self._progress_image_path else '-'
         run_elapsed = (time.monotonic() - self._run_started_at) if self._run_started_at is not None else None
         page_elapsed = (time.monotonic() - self._page_started_at) if self._page_started_at is not None else None

@@ -224,10 +224,11 @@ class StagePageContext:
 
 
 class StageBatchedProcessor(BatchProcessor):
-    # stage-batched 파이프라인은 단계가 전체 페이지를 훑는다. 레거시 지도는 "한
-    # 페이지가 여러 단계를 지난다"는 전제라서 여기서는 이름이 전부 어긋난다.
-    # 실제로 step 3 은 인페인팅인데 레거시 이름은 pre-inpaint-setup 이었고, 그 이름이
-    # 366 줄 내내 찍혔다.
+    # 각 sweep 은 emit_progress 에 자기 이름을 직접 넘긴다. 이 표는 그 이름을 잃어버린
+    # 호출이 있을 때의 안전망일 뿐이며, 로그 라벨의 근거로 쓰이지 않는다. 숫자 step 에서
+    # 이름을 되찾는 방식이 오해를 만들었다. step 3 은 마스크 생성과 LaMa 통과를 모두
+    # 하는 단계인데 레거시 표의 3 은 `pre-inpaint-setup` 이라, "인페인트 준비" 가 366 줄
+    # 찍혔다.
     STAGE_NAMES_BY_STEP = {
         0: 'detect-all',
         2: 'ocr-all',
@@ -236,6 +237,17 @@ class StageBatchedProcessor(BatchProcessor):
         9: 'render-all',
         10: 'save-and-finish',
     }
+
+    # sweep 이 실제로 도는 순서. 숫자 step 은 레거시 호환용 식별자라서 정렬해도 실행
+    # 순서가 되지 않는다. 번역(7)이 인페인팅(3)보다 먼저 돌기 때문이다.
+    STAGE_SWEEP_ORDER = (
+        'detect-all',
+        'ocr-all',
+        'translate-all',
+        'inpaint-all',
+        'render-all',
+        'save-and-finish',
+    )
 
     # 사용자에게 보일 단계 이름. 내부 sweep 이름을 그대로 쓰면 무슨 일이 일어나는지
     # 알 수 없다.
@@ -255,8 +267,7 @@ class StageBatchedProcessor(BatchProcessor):
         if estimator is None or estimator.page_total != max(int(total), 0):
             estimator = StageSweepEtaEstimator(
                 page_total=total,
-                stage_order=tuple(self.STAGE_NAMES_BY_STEP[key] for key in
-                                  sorted(self.STAGE_NAMES_BY_STEP)),
+                stage_order=self.STAGE_SWEEP_ORDER,
             )
             estimator.start_run(time.monotonic())
             # 지난 실행들에서 측정한 단계 속도로 시작한다. 내장 사전 비중은 짐작이라
@@ -1396,7 +1407,7 @@ class StageBatchedProcessor(BatchProcessor):
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
             self._set_current_image(ctx.image_path)
-            self.emit_progress(index, total_images, 0, 10, True)
+            self.emit_progress(index, total_images, 0, 10, True, stage_name='detect-all')
             self._start_page_summary(ctx.image_path, ctx.source_lang, ctx.target_lang)
             self._log_page_start(index, total_images, ctx.image_path)
             self.main_page.image_ctrl.update_processing_summary(
@@ -2096,7 +2107,7 @@ class StageBatchedProcessor(BatchProcessor):
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
-            self.emit_progress(index, total_images, 2, 10, False)
+            self.emit_progress(index, total_images, 2, 10, False, stage_name='ocr-all')
             if ctx.no_text_detected:
                 self.main_page.image_ctrl.mark_processing_stage(
                     ctx.image_path,
@@ -2211,7 +2222,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._shutdown_runtime_with_retry(
                 "OCR",
                 runtime_manager,
-                context="OCR-to-inpaint handoff",
+                context="OCR-to-translate handoff",
                 raise_on_failure=True,
                 release_for_handoff=True,
                 service=self._ocr_runtime_service_name(engine_key),
@@ -2354,7 +2365,7 @@ class StageBatchedProcessor(BatchProcessor):
         except BaseException:
             if runtime_loaded or active_pages:
                 try:
-                    self._release_inpainter_before_gemma(
+                    self._release_inpainter_before_render(
                         pages,
                         start_gemma=False,
                         handoff_outcome="aborted",
@@ -2367,7 +2378,7 @@ class StageBatchedProcessor(BatchProcessor):
                     )
             raise
         if runtime_loaded:
-            self._release_inpainter_before_gemma(
+            self._release_inpainter_before_render(
                 pages,
                 start_gemma=False,
             )
@@ -2546,7 +2557,7 @@ class StageBatchedProcessor(BatchProcessor):
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
-            self.emit_progress(index, total_images, 3, 10, False)
+            self.emit_progress(index, total_images, 3, 10, False, stage_name='inpaint-all')
             if ctx.no_text_detected:
                 ctx.inpaint_input_img = ctx.image
                 ctx.patches = []
@@ -3053,7 +3064,37 @@ class StageBatchedProcessor(BatchProcessor):
                 )
         return runtime_loaded
 
-    def _release_inpainter_before_gemma(
+    def _release_gemma_before_inpainter(self) -> None:
+        """인페인팅 전에 Router 컨테이너를 확실히 내린다.
+
+        번역 단계는 정상 종료 시 이미 Gemma 를 정지한다. 이 함수는 그 뒤에도 남아
+        있는 경우를 위한 확실한 마감이다. 컨테이너가 열려 있으면 아무 모델이 없어도
+        CUDA 컨텍스트로 약 278 MiB 를 붙들고, 그만큼 LaMa 가 못 쓴다. 예전 순서에서는
+        그 상태로 인페인팅 sweep 전체(실측 467초)를 지났다.
+        """
+
+        runtime_manager = getattr(
+            self.main_page, "local_translation_runtime_manager", None
+        )
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            return
+        try:
+            self._shutdown_runtime_with_retry(
+                "Gemma",
+                runtime_manager,
+                context="translation-to-inpaint handoff",
+                raise_on_failure=False,
+                service="gemma",
+            )
+        except Exception:
+            # 인페인팅을 막지 않는다. 남은 컨텍스트는 VRAM 여유를 줄일 뿐이고,
+            # 실제로 부족하면 인페인터 적재가 그 사실을 드러낸다.
+            logger.warning(
+                "Could not stop the Gemma runtime before inpainting; continuing.",
+                exc_info=True,
+            )
+
+    def _release_inpainter_before_render(
         self,
         pages: list[StagePageContext],
         *,
@@ -3381,7 +3422,7 @@ class StageBatchedProcessor(BatchProcessor):
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
-            self.emit_progress(index, total_images, 7, 10, False)
+            self.emit_progress(index, total_images, 7, 10, False, stage_name='translate-all')
             if ctx.no_text_detected:
                 self.main_page.image_ctrl.mark_processing_stage(
                     ctx.image_path,
@@ -3631,7 +3672,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._shutdown_runtime_with_retry(
                 "Gemma",
                 runtime_manager,
-                context="translation-to-render handoff",
+                context="translation-to-inpaint handoff",
                 raise_on_failure=True,
                 service="gemma",
             )
@@ -4119,7 +4160,7 @@ class StageBatchedProcessor(BatchProcessor):
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
-            self.emit_progress(index, total_images, 9, 10, False)
+            self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
             self._write_json_exports(
                 ctx.directory,
                 ctx.export_token,
@@ -4499,40 +4540,6 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 batch_completed = True
                 return
-            with self._measure_performance(
-                stage="inpaint",
-                operation="stage_window",
-                workload={"page_count": total_images, "block_count": ocr_blocks},
-                node_id="stage.inpaint",
-                dependencies=("stage.ocr",),
-                service="inpainter",
-            ):
-                self._inpaint_all(pages)
-            mask_pixels = sum(
-                int(np.count_nonzero(ctx.mask))
-                for ctx in pages
-                if getattr(ctx, "mask", None) is not None
-            )
-            inpaint_roi_count = sum(
-                len(
-                    list(
-                        dict(getattr(ctx, "inpaint_diagnostics", {}) or {}).get(
-                            "model_call_diagnostics",
-                            [],
-                        )
-                        or []
-                    )
-                )
-                for ctx in pages
-            )
-            self._record_performance_workload(
-                "inpaint",
-                page_count=total_images,
-                mask_pixel_count=mask_pixels,
-                roi_count=inpaint_roi_count,
-            )
-            self._sample_performance_resources("inpaint_stage_end")
-            self._raise_if_cancelled()
             for ctx in pages:
                 if getattr(ctx, "failed_stage", "") or getattr(
                     ctx,
@@ -4567,7 +4574,7 @@ class StageBatchedProcessor(BatchProcessor):
                     "source_character_count": source_character_count,
                 },
                 node_id="stage.translate",
-                dependencies=("stage.inpaint",),
+                dependencies=("stage.ocr",),
                 service="gemma",
             ):
                 self._translate_all(pages)
@@ -4579,6 +4586,45 @@ class StageBatchedProcessor(BatchProcessor):
             )
             self._sample_performance_resources("translate_stage_end")
             self._raise_if_cancelled()
+            # 번역이 끝나면 Router 컨테이너를 완전히 정지한다. 예전에는 OCR sweep
+            # 뒤에도 컨테이너를 살려둔 채 인페인팅 sweep 전체(실측 467초)를 지나서,
+            # 아무 모델도 없는 컨테이너가 CUDA 컨텍스트로 약 278 MiB 를 붙들고
+            # 있었다. LaMa 가 그만큼 못 쓴다.
+            self._release_gemma_before_inpainter()
+            with self._measure_performance(
+                stage="inpaint",
+                operation="stage_window",
+                workload={"page_count": total_images, "block_count": ocr_blocks},
+                node_id="stage.inpaint",
+                dependencies=("stage.translate",),
+                service="inpainter",
+            ):
+                self._inpaint_all(pages)
+            mask_pixels = sum(
+                int(np.count_nonzero(ctx.mask))
+                for ctx in pages
+                if getattr(ctx, "mask", None) is not None
+            )
+            inpaint_roi_count = sum(
+                len(
+                    list(
+                        dict(getattr(ctx, "inpaint_diagnostics", {}) or {}).get(
+                            "model_call_diagnostics",
+                            [],
+                        )
+                        or []
+                    )
+                )
+                for ctx in pages
+            )
+            self._record_performance_workload(
+                "inpaint",
+                page_count=total_images,
+                mask_pixel_count=mask_pixels,
+                roi_count=inpaint_roi_count,
+            )
+            self._sample_performance_resources("inpaint_stage_end")
+            self._raise_if_cancelled()
             with self._measure_performance(
                 stage="render",
                 operation="stage_window",
@@ -4588,7 +4634,7 @@ class StageBatchedProcessor(BatchProcessor):
                     "source_megapixels": source_pixels / 1_000_000.0,
                 },
                 node_id="stage.render",
-                dependencies=("stage.translate",),
+                dependencies=("stage.inpaint",),
                 service="cpu_render",
             ):
                 self._render_all(pages)
@@ -4644,4 +4690,4 @@ class StageBatchedProcessor(BatchProcessor):
                 **ctx.page_ocr_metrics,
             )
             self._log_page_done(index, total_images, ctx.image_path)
-            self.emit_progress(index, total_images, 10, 10, False)
+            self.emit_progress(index, total_images, 10, 10, False, stage_name='save-and-finish')

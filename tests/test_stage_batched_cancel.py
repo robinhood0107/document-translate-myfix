@@ -1218,7 +1218,9 @@ class StageBatchedCancellationTests(unittest.TestCase):
             ocr_non_empty_block_count=1,
         )
         processor._log_page_done.assert_called_once_with(0, 2, "success.png")
-        processor.emit_progress.assert_called_once_with(0, 2, 10, 10, False)
+        processor.emit_progress.assert_called_once_with(
+            0, 2, 10, 10, False, stage_name='save-and-finish'
+        )
 
     def test_stage_transition_continues_after_verified_stop_retry(self) -> None:
         processor = self._processor(cancelled=False)

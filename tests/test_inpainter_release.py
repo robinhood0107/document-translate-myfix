@@ -71,7 +71,7 @@ class InpainterReleaseTests(unittest.TestCase):
             ],
             "model_ready",
         )
-        processor._release_inpainter_before_gemma([], start_gemma=False)
+        processor._release_inpainter_before_render([], start_gemma=False)
         snapshot = processor._runtime_resource_arbiter().snapshot()
         self.assertIsNone(snapshot.active_model)
         self.assertEqual(snapshot.states["inpainter"], "stopped")
@@ -109,7 +109,7 @@ class InpainterReleaseTests(unittest.TestCase):
                 RuntimeError,
                 "VRAM release was not confirmed",
             ):
-                processor._release_inpainter_before_gemma(
+                processor._release_inpainter_before_render(
                     [],
                     start_gemma=False,
                 )
@@ -241,7 +241,7 @@ class InpainterReleaseTests(unittest.TestCase):
             return renderer.render_to_image().tobytes()
 
         rendered_before = render_page()
-        processor._release_inpainter_before_gemma([page])
+        processor._release_inpainter_before_render([page])
         rendered_after = render_page()
 
         self.assertEqual(
@@ -289,7 +289,7 @@ class InpainterReleaseTests(unittest.TestCase):
         # 기본값은 강건성 우선이다. VRAM 확인에 실패해도 게이트에서 멈추지 않고
         # 번역 단계로 넘어간다. (이 페이지에는 번역 블록이 없어 예열까지 가지 않는
         # 것이 정상이며, 여기서 확인하려는 것은 게이트가 중단시키지 않는다는 점이다.)
-        processor._release_inpainter_before_gemma([page])
+        processor._release_inpainter_before_render([page])
 
         # 강제를 켜면 예전처럼 차단한다.
         with mock.patch(
@@ -299,7 +299,7 @@ class InpainterReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "VRAM release was not confirmed"
             ):
-                processor._release_inpainter_before_gemma([page])
+                processor._release_inpainter_before_render([page])
         self.assertFalse(started)
 
     def test_aborted_inpaint_releases_resources_without_starting_gemma(self) -> None:
@@ -308,7 +308,7 @@ class InpainterReleaseTests(unittest.TestCase):
         processor._inpaint_pages = lambda _pages: (_ for _ in ()).throw(
             RuntimeError("inpaint aborted")
         )
-        processor._release_inpainter_before_gemma = (
+        processor._release_inpainter_before_render = (
             lambda _pages, **kwargs: events.append(
                 f"release:{kwargs['handoff_outcome']}:{kwargs['start_gemma']}"
             )
@@ -425,7 +425,7 @@ class InpainterReleaseTests(unittest.TestCase):
                 }
 
             before_hashes = materialize("before")
-            processor._release_inpainter_before_gemma([page])
+            processor._release_inpainter_before_render([page])
             after_hashes = materialize("after")
 
         self.assertEqual(after_hashes, before_hashes)

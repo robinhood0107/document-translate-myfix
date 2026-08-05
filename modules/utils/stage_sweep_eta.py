@@ -38,8 +38,8 @@ from dataclasses import dataclass, field
 DEFAULT_STAGE_WEIGHTS: dict[str, float] = {
     "detect-all": 1.0,
     "ocr-all": 1.0,
-    "inpaint-all": 6.6,
     "translate-all": 3.0,
+    "inpaint-all": 6.6,
     "render-all": 1.5,
     "save-and-finish": 0.2,
 }
@@ -48,8 +48,8 @@ DEFAULT_STAGE_WEIGHTS: dict[str, float] = {
 DEFAULT_STAGE_ORDER: tuple[str, ...] = (
     "detect-all",
     "ocr-all",
-    "inpaint-all",
     "translate-all",
+    "inpaint-all",
     "render-all",
     "save-and-finish",
 )
