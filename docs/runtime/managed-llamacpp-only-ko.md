@@ -36,12 +36,14 @@ MangaLMM full-page는 기본 OCR이 아니다. 사용자 화면에서는
 |---|---|---|
 | PaddleOCR VL (최적값의 일본어·한국어·영어) | `comic-translate-router-crop-v2` | 18000, 18080 |
 | PaddleOCR VL Spotting | `comic-translate-router-spotting-v2` | 18002, 18080 |
+| HunyuanOCR (최적값의 중국어) | `comic-translate-router-hunyuan-v2` | 28080, 18080 |
 | MangaLMM(실험용, 느림) | `comic-translate-router-mangalmm-v2` | 28081, 18080 |
-| HunyuanOCR (최적값의 중국어) | 없음 — separate-server | 28080 |
 
-HunyuanOCR은 아직 준비 볼륨 계약이 없어 Router pair가 아니다. Router는 SHA로
-검증된 external volume과 ready manifest를 요구하는데, HunyuanOCR Compose는
-`../testmodel` bind mount를 쓴다.
+Router는 요청의 `model` 필드로만 대상 모델을 고른다. 따라서 OCR 엔진이 추론
+요청에 넣는 모델명, pair의 `ocr_alias`, preset 섹션명이 **완전히 같아야** 한다.
+어긋나면 컨테이너와 모델은 정상 적재되지만 추론이 400으로 거부되거나 GPU 귀속
+증거를 찾지 못해 기동이 실패한다. `tests/test_router_model_identity_alignment.py`가
+세 이름을 계약으로 고정한다.
 
 Router는 모델을 fingerprint된 정적 preset(`router-models.ini`)으로 구성하고
 Compose 환경변수를 쓰지 않는다. 따라서 separate-server 경로가 노출하는 조정
@@ -58,9 +60,11 @@ separate-server 컨테이너와 정확히 같은 호스트 포트를 쓴다.
 |---|---|
 | `comic-translate-router-crop-v2` | 18000, 18080 |
 | `comic-translate-router-spotting-v2` | 18002, 18080 |
+| `comic-translate-router-hunyuan-v2` | 28080, 18080 |
 | `comic-translate-router-mangalmm-v2` | 28081, 18080 |
 | `paddleocr-llamacpp` | 18000 |
 | `paddleocr-spotting-llamacpp` | 18002 |
+| `hunyuanocr-local-server` | 28080 |
 | `mangalmm-local-server` | 28081 |
 | `gemma-local-server` | 18080 |
 

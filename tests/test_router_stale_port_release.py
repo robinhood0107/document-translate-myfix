@@ -64,7 +64,8 @@ class RouterPairLookupTests(unittest.TestCase):
         self.assertEqual(crop.gemma_port, 18080)
 
     def test_unknown_engine_key_has_no_pair(self) -> None:
-        self.assertIsNone(router_pair_for_engine_key("HunyuanOCR"))
+        self.assertIsNone(router_pair_for_engine_key("Microsoft OCR"))
+        self.assertIsNone(router_pair_for_engine_key("Default"))
         self.assertIsNone(router_pair_for_engine_key(""))
         self.assertIsNone(router_pair_for_engine_key(None))
 

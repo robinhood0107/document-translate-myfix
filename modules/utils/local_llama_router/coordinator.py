@@ -467,14 +467,13 @@ class LocalLlamaRouterCoordinator:
         *,
         cancel_checker: Callable[[], bool] | None = None,
     ) -> tuple[str, ...]:
-        """Free a Router pair's host ports for the separate-server path.
+        """separate-server 경로를 위해 Router pair의 호스트 포트를 비운다.
 
-        A Router container left behind by an earlier process keeps the OCR and
-        Gemma host ports, so the separate-server containers can never bind them.
-        This releases only Router-owned containers and leaves every other
-        listener alone, including the separate-server container the caller is
-        about to reuse.  Reclaiming the ports while this coordinator still owns a
-        container would corrupt its state machine, so that case is refused.
+        이전 프로세스가 남긴 Router 컨테이너는 OCR과 Gemma 호스트 포트를 계속 쥐고
+        있어 separate-server 컨테이너가 절대 바인딩할 수 없다. 여기서는 Router 소유
+        컨테이너만 정지하고, 호출자가 곧 재사용할 separate-server 컨테이너를 포함한
+        다른 모든 listener는 건드리지 않는다. 이 코디네이터가 아직 컨테이너를 소유한
+        상태에서 포트를 회수하면 state machine이 깨지므로 그 경우는 거부한다.
         """
 
         with self._command_lock:

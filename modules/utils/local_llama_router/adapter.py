@@ -73,8 +73,8 @@ class RouterContainerInspection:
             str(self.labels.get(ROUTER_OWNER_LABEL, "")) == ROUTER_OWNER_VALUE
             and str(self.labels.get(ROUTER_PROJECT_LABEL, ""))
             == ROUTER_PROJECT_NAME
-            # Derive the accepted pair labels from the pair enum so a new pair
-            # is never misread as a foreign container.
+            # 허용 pair label을 pair 열거형에서 파생시켜, 새 pair의 컨테이너가
+            # 외부 컨테이너로 잘못 읽히지 않게 한다.
             and str(self.labels.get(ROUTER_PAIR_LABEL, "")) in _ROUTER_PAIR_LABEL_VALUES
         )
 
@@ -537,17 +537,16 @@ class DockerRouterCommandAdapter:
         reject_foreign: bool = True,
         require_ports_free: bool = True,
     ) -> tuple[str, ...]:
-        """Free a Router pair's host ports, stopping only Router-owned containers.
+        """Router pair의 호스트 포트를 비우되 Router 소유 컨테이너만 정지한다.
 
-        This works from the pair alone so the separate-server path can reclaim a
-        Router container left behind by an earlier process, where no prepared
-        contract exists yet.
+        준비된 contract가 아직 없는 상황에서도 separate-server 경로가 이전
+        프로세스의 Router 컨테이너를 회수할 수 있도록, pair 정보만으로 동작한다.
 
-        With ``reject_foreign`` the Router route refuses to bind a port held by
-        anything it does not own.  The separate-server route clears
-        ``reject_foreign`` and ``require_ports_free`` because the container it is
-        about to reuse legitimately holds that port; only a Router leftover has
-        to be released there.
+        ``reject_foreign``이 켜진 Router 경로는 자신이 소유하지 않은 컨테이너가 쥔
+        포트를 바인딩하지 않는다. separate-server 경로는 곧 재사용할 자기 컨테이너가
+        그 포트를 정당하게 쥐고 있으므로 ``reject_foreign``과
+        ``require_ports_free``를 끈다. 그 경로에서 풀어야 하는 것은 Router 잔여물뿐
+        이다.
         """
 
         occupants: dict[str, RouterContainerInspection] = {}

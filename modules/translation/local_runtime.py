@@ -187,12 +187,12 @@ class LocalGemmaRuntimeManager:
         )
 
     def release_separate_server_for_router(self) -> bool:
-        """Stop this product's separate-server Gemma container before the Router.
+        """Router보다 먼저 이 제품의 separate-server Gemma 컨테이너를 정지한다.
 
-        The Router publishes 18080, which the separate-server Gemma container
-        also owns.  Only the exact product container is stopped, and only when
-        Docker reports it running, so a foreign listener still surfaces as the
-        Router adapter's explicit ownership error.
+        Router는 18080을 publish하고, separate-server Gemma 컨테이너도 같은 포트를
+        쥔다. 제품 컨테이너만, 그리고 Docker가 실행 중이라고 보고할 때만 정지하므로
+        제품 소유가 아닌 listener는 여전히 Router adapter의 명시적 ownership 오류로
+        드러난다.
         """
 
         with self._lock:
@@ -215,19 +215,18 @@ class LocalGemmaRuntimeManager:
         *,
         cancel_checker: Callable[[], bool] | None,
     ) -> None:
-        """Reclaim a leftover Router container holding the Gemma host port.
+        """Gemma 호스트 포트를 쥔 남은 Router 컨테이너를 회수한다.
 
-        The Router publishes 18080 as well as its OCR port, so a container left
-        by an earlier process blocks the separate-server Gemma compose from ever
-        binding.  Only the exact default Gemma port is reclaimed, and only from
-        Router-owned containers.
+        Router는 OCR 포트와 함께 18080도 publish하므로, 이전 프로세스가 남긴
+        컨테이너는 separate-server Gemma compose의 바인딩을 영구히 막는다. 정확한
+        기본 Gemma 포트만, 그리고 Router 소유 컨테이너에서만 회수한다.
         """
 
         coordinator = self._router_coordinator
         if coordinator is None or self._router_pair is not None:
             return
-        # Every pair publishes the one shared Gemma host port, so reclaiming any
-        # pair's ports also releases another pair's leftover Gemma listener.
+        # 모든 pair가 하나의 공유 Gemma 호스트 포트를 publish하므로, 어느 pair의
+        # 포트를 회수해도 다른 pair가 남긴 Gemma listener까지 함께 풀린다.
         pair = router_pair_for_engine_key("PaddleOCR VL")
         if pair is None:
             return

@@ -28,10 +28,11 @@ ROUTER_SERVICE_NAME = "llama-router"
 
 DEFAULT_CROP_ROUTER_ENDPOINT = "http://127.0.0.1:18000/v1/chat/completions"
 DEFAULT_SPOTTING_ROUTER_ENDPOINT = "http://127.0.0.1:18002/v1/chat/completions"
+DEFAULT_HUNYUAN_ROUTER_ENDPOINT = "http://127.0.0.1:28080/v1"
 DEFAULT_MANGALMM_ROUTER_ENDPOINT = "http://127.0.0.1:28081/v1"
 DEFAULT_GEMMA_ROUTER_ENDPOINT = "http://127.0.0.1:18080/v1"
-# Every pair publishes this one Gemma host port, so releasing any pair's ports
-# also reclaims another pair's leftover Gemma listener.
+# 모든 pair가 이 하나의 Gemma 호스트 포트를 publish하므로, 어느 pair의 포트를
+# 풀어도 다른 pair가 남긴 Gemma listener까지 함께 회수된다.
 ROUTER_GEMMA_HOST_PORT = 18080
 DEFAULT_GEMMA_ROUTER_MODEL = "gemma-4-26B-IQ4_NL.gguf"
 DEFAULT_ROUTER_IMAGE = (
@@ -43,6 +44,7 @@ DEFAULT_ROUTER_IMAGE = (
 class RouterPairKind(str, Enum):
     CROP = "crop"
     SPOTTING = "spotting"
+    HUNYUAN = "hunyuan"
     MANGALMM = "mangalmm"
 
 
@@ -115,9 +117,26 @@ _ROUTER_PAIRS: tuple[RouterPair, ...] = (
         container_name="comic-translate-router-spotting-v2",
     ),
     RouterPair(
+        kind=RouterPairKind.HUNYUAN,
+        ocr_engine_key="HunyuanOCR",
+        ocr_alias="HunyuanOCR.Q8_0.gguf",
+        ocr_endpoint=DEFAULT_HUNYUAN_ROUTER_ENDPOINT,
+        gemma_endpoint=DEFAULT_GEMMA_ROUTER_ENDPOINT,
+        ocr_port=28080,
+        gemma_port=ROUTER_GEMMA_HOST_PORT,
+        compose_file=(
+            _ROOT_DIR / "hunyuanocr_docker_files" / "docker-compose.router.yaml"
+        ),
+        preset_file=_ROOT_DIR / "hunyuanocr_docker_files" / "router-models.ini",
+        container_name="comic-translate-router-hunyuan-v2",
+    ),
+    RouterPair(
         kind=RouterPairKind.MANGALMM,
         ocr_engine_key="MangaLMM",
-        ocr_alias="MangaLMM",
+        # 라우터는 명시적 모델명을 요구하고, MangaLMM 엔진은 추론 요청에
+        # 파일명을 그대로 보낸다. preset 섹션명·pair alias·엔진이 보내는 값이
+        # 모두 같아야 추론이 400으로 거부되지 않는다.
+        ocr_alias="MangaLMM.Q8_0.gguf",
         ocr_endpoint=DEFAULT_MANGALMM_ROUTER_ENDPOINT,
         gemma_endpoint=DEFAULT_GEMMA_ROUTER_ENDPOINT,
         ocr_port=28081,
@@ -185,11 +204,11 @@ def router_pair_for_ocr_endpoint(
 
 
 def router_pair_for_engine_key(engine_key: Any) -> RouterPair | None:
-    """Return the Router pair an OCR engine belongs to, ignoring endpoints.
+    """endpoint를 보지 않고 OCR 엔진이 속한 Router pair를 반환한다.
 
-    The separate-server path needs the pair's host ports to reclaim a Router
-    container left behind by an earlier process, which happens before any
-    endpoint can be classified as a Router route.
+    separate-server 경로는 이전 프로세스가 남긴 Router 컨테이너를 회수하기 위해
+    pair의 호스트 포트를 알아야 하는데, 이 시점은 어떤 endpoint도 아직 Router
+    경로로 분류될 수 없는 단계다.
     """
 
     normalized_engine = str(engine_key or "").strip()

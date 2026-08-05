@@ -27,7 +27,7 @@ class MangaLMMRouterPairContractTests(unittest.TestCase):
         self.assertIsNotNone(self.pair)
         self.assertEqual(self.pair.kind, RouterPairKind.MANGALMM)
         self.assertEqual(self.pair.ocr_port, 28081)
-        self.assertEqual(self.pair.ocr_alias, "MangaLMM")
+        self.assertEqual(self.pair.ocr_alias, "MangaLMM.Q8_0.gguf")
         self.assertEqual(self.pair.container_name, "comic-translate-router-mangalmm-v2")
 
     def test_every_pair_shares_the_one_gemma_host_port(self) -> None:
@@ -50,7 +50,7 @@ class MangaLMMRouterPairContractTests(unittest.TestCase):
 
     def test_preset_declares_both_models_and_no_autoload(self) -> None:
         text = Path(self.pair.preset_file).read_text(encoding="utf-8")
-        self.assertIn("[MangaLMM]", text)
+        self.assertIn(f"[{self.pair.ocr_alias}]", text)
         self.assertIn(f"[{GEMMA_MODEL}]", text)
         self.assertEqual(text.count("load-on-startup = false"), 3)
 
@@ -74,7 +74,7 @@ class MangaLMMRouterPairContractTests(unittest.TestCase):
                 "MANGALMM_LLAMA_GPU_LAYERS"
             ],
         }
-        section = text.split("[MangaLMM]", 1)[1].split("[gemma", 1)[0]
+        section = text.split(f"[{self.pair.ocr_alias}]", 1)[1].split("[gemma", 1)[0]
         for key, value in expected.items():
             self.assertIn(f"{key} = {value}", section)
 
