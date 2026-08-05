@@ -32,7 +32,6 @@ from app.path_materialization import ensure_path_materialized
 
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
-from modules.utils.pipeline_config import validate_settings
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
@@ -2287,22 +2286,15 @@ class ComicTranslate(ComicTranslateUI):
         reset_output_reservations = getattr(self, "reset_automatic_output_reservations", None)
         if callable(reset_output_reservations):
             reset_output_reservations()
-        # 사전 검사는 (원본 언어, 대상 언어) 조합에만 의존한다. 그런데 이 검사는
-        # Docker 를 여러 번 호출해 한 번에 약 0.8초가 걸리므로, 페이지마다 돌리면
-        # 366장 아카이브에서 GUI 스레드가 5분 가까이 멈추고 Windows 가 "응답하지
-        # 않습니다"를 띄운다. 조합마다 한 번만 검사한다. '모두 번역'은 모든 페이지에
-        # 같은 언어를 적용하므로 보통 한 번으로 끝난다.
-        validated_language_pairs: set[tuple[str, str]] = set()
-
+        # 사전 검사로 실행을 막지 않는다. 게이트가 만든 피해가 그것이 막아준 문제보다
+        # 컸다. 설정이 맞는데도 시작이 거부되고, 모달이 뜨고, 검사 자체가 GUI 스레드를
+        # 멈췄다. 페이지 상태만 준비하고 바로 파이프라인으로 넘긴다.
+        #
+        # 빠진 설정은 실행을 취소할 이유가 아니라 보고할 사실이다. 런타임 오류는
+        # 파이프라인이 작업 스레드에서 진행 패널과 배치 리포트에 남기고, 폰트가 비어
+        # 있으면 렌더가 시스템 기본 폰트로 대체한다.
         for path in selected_paths:
-            page_state = self.image_ctrl.ensure_page_state(path)
-            tgt = page_state['target_lang']
-            src = page_state['source_lang']
-            if (src, tgt) in validated_language_pairs:
-                continue
-            if not validate_settings(self, tgt, source_lang=src):
-                return False
-            validated_language_pairs.add((src, tgt))
+            self.image_ctrl.ensure_page_state(path)
 
         prepare_preview_run = getattr(self, "_prepare_intermediate_preview_run", None)
         if callable(prepare_preview_run):

@@ -2430,7 +2430,16 @@ class ProjectController:
         if saved_font_family:
             self.main.set_font(saved_font_family)
         else:
-            self.main.font_dropdown.setCurrentText('')
+            # 저장된 값이 없다고 콤보를 비우면, 콤보 위젯이 자체적으로 표시하는
+            # 글꼴 이름과 `currentText()` 가 어긋난다. 화면에는 글꼴이 보이는데
+            # 렌더는 빈 값을 받는 상태가 되고, 사용자에게는 "분명히 골랐는데
+            # 적용되지 않는" 것으로 보인다. 콤보가 실제로 들고 있는 글꼴을 그대로
+            # 채택하고 저장해서, 표시와 값이 처음부터 일치하게 한다.
+            current_family = str(self.main.font_dropdown.currentText() or '').strip()
+            if not current_family:
+                current_family = QtWidgets.QApplication.font().family()
+            self.main.set_font(current_family)
+            self.main.text_ctrl.persist_render_font_family(current_family)
         min_font_size = settings.value('min_font_size', 5)  # Default value is 5
         max_font_size = settings.value('max_font_size', 40) # Default value is 40
         self.main.settings_page.ui.min_font_spinbox.setValue(int(min_font_size))

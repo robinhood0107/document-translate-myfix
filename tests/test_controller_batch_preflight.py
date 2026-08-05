@@ -109,17 +109,20 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         controller.webtoon_mode = False
         return controller
 
-    def test_start_batch_validates_once_per_language_pair(self) -> None:
-        """사전 검사는 Docker 를 호출하므로 페이지마다 반복하면 UI 가 멈춘다."""
+    def test_start_batch_never_blocks_on_settings(self) -> None:
+        """사전 검사는 실행을 막지 않는다.
+
+        게이트가 만든 피해가 그것이 막아준 문제보다 컸다. 설정이 맞는데도 시작이
+        거부되고, 모달이 뜨고, 검사 자체가 Docker 를 호출해 GUI 스레드를 멈췄다.
+        빠진 설정은 파이프라인이 작업 스레드에서 보고하고, 폰트가 비면 렌더가 시스템
+        기본 폰트로 대체한다.
+        """
 
         controller = self._build_controller()
-        calls: list[tuple[str, str]] = []
 
-        def _validate(_main, target_lang, *, source_lang=None):
-            calls.append((source_lang, target_lang))
-            return True
-
-        with mock.patch("controller.validate_settings", side_effect=_validate):
+        with mock.patch(
+            "modules.utils.pipeline_config.validate_settings"
+        ) as validate_settings:
             result = ComicTranslate._start_batch_process_for_paths(
                 controller,
                 ["page-a.png", "page-b.png", "page-c.png"],
@@ -127,8 +130,24 @@ class ControllerBatchPreflightTests(unittest.TestCase):
             )
 
         self.assertTrue(result)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0], "Japanese")
+        validate_settings.assert_not_called()
+
+    def test_every_selected_page_still_gets_its_state(self) -> None:
+        """게이트를 지웠어도 페이지 상태 준비는 남아야 한다."""
+
+        controller = self._build_controller()
+        prepared: list[str] = []
+        controller.image_ctrl.ensure_page_state = lambda path: (
+            prepared.append(path) or {"source_lang": "Japanese", "target_lang": "Korean"}
+        )
+
+        ComicTranslate._start_batch_process_for_paths(
+            controller,
+            ["page-a.png", "page-b.png"],
+            run_type="batch",
+        )
+
+        self.assertEqual(prepared, ["page-a.png", "page-b.png"])
 
     def test_one_page_auto_process_uses_batch_entrypoint(self) -> None:
         controller = self._build_controller()
