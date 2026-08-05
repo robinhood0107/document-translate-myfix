@@ -26,6 +26,32 @@ MangaLMM full-page는 기본 OCR이 아니다. 사용자 화면에서는
 동일한 검증 결과를 기준으로 고정됐다. 사용자가 직접 지정한 과거
 `/layout-parsing` endpoint는 unmanaged 호환 경로로만 남는다.
 
+## Router와 separate-server 호스트 포트 인계
+
+Router 컨테이너는 OCR 포트와 Gemma 포트 `18080`을 함께 publish하므로
+separate-server 컨테이너와 정확히 같은 호스트 포트를 쓴다.
+
+| 컨테이너 | 호스트 포트 |
+|---|---|
+| `comic-translate-router-crop-v2` | 18000, 18080 |
+| `comic-translate-router-spotting-v2` | 18002, 18080 |
+| `paddleocr-llamacpp` | 18000 |
+| `paddleocr-spotting-llamacpp` | 18002 |
+| `gemma-local-server` | 18080 |
+
+따라서 두 경로는 상대 경로의 컨테이너를 서로 인계받아야 한다.
+
+- separate-server 경로는 관리형 기본 포트일 때만, 그리고 Router 소유 label이
+  붙은 컨테이너만 정지해 포트를 회수한다. custom 포트와 외부 프로세스는
+  건드리지 않는다.
+- Router 경로는 자신이 바인딩할 포트를 쥔 이 제품의 separate-server OCR·Gemma
+  컨테이너를 먼저 정지한다. 제품 소유가 아닌 listener는 계속 adapter의 명시적
+  ownership 오류로 남는다.
+- 회수는 이전 프로세스가 남긴 컨테이너까지 대상으로 한다. in-process Router
+  상태만 보고 판단하면 앱을 다시 켠 뒤 컨테이너가 계속 생성·실패를 반복한다.
+- 코디네이터가 컨테이너를 소유한 동안의 포트 회수는 state machine을 깨뜨리므로
+  거부한다.
+
 ## 강제 장치
 
 - 과거 vLLM backend QSettings 값은 version 1 마이그레이션에서 한 번만

@@ -155,6 +155,15 @@ class RouterCommandAdapter(Protocol):
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None: ...
 
+    def stop_owned_pair_ports(
+        self,
+        pair: RouterPair,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+        reject_foreign: bool = True,
+        require_ports_free: bool = True,
+    ) -> tuple[str, ...]: ...
+
     def owned_gpu_process_ids(
         self,
         contract: RouterRuntimeContract,
@@ -512,8 +521,32 @@ class DockerRouterCommandAdapter:
         *,
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
+        self.stop_owned_pair_ports(contract.pair, cancel_checker=cancel_checker)
+
+    def stop_owned_pair_ports(
+        self,
+        pair: RouterPair,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+        reject_foreign: bool = True,
+        require_ports_free: bool = True,
+    ) -> tuple[str, ...]:
+        """Free a Router pair's host ports, stopping only Router-owned containers.
+
+        This works from the pair alone so the separate-server path can reclaim a
+        Router container left behind by an earlier process, where no prepared
+        contract exists yet.
+
+        With ``reject_foreign`` the Router route refuses to bind a port held by
+        anything it does not own.  The separate-server route clears
+        ``reject_foreign`` and ``require_ports_free`` because the container it is
+        about to reuse legitimately holds that port; only a Router leftover has
+        to be released there.
+        """
+
         occupants: dict[str, RouterContainerInspection] = {}
-        for port in (contract.pair.ocr_port, contract.pair.gemma_port):
+        released: list[str] = []
+        for port in (pair.ocr_port, pair.gemma_port):
             for inspection in self._containers_publishing_port(port):
                 occupants[inspection.name] = inspection
         for inspection in occupants.values():
@@ -522,16 +555,21 @@ class DockerRouterCommandAdapter:
                 # recreate our own stopped container without mutating it here.
                 continue
             if not inspection.owned_by_router():
-                raise RouterAdapterOwnershipError(
-                    "Router port is held by a foreign container; it will not be stopped: "
-                    f"{inspection.name}"
-                )
+                if reject_foreign:
+                    raise RouterAdapterOwnershipError(
+                        "Router port is held by a foreign container; it will not be stopped: "
+                        f"{inspection.name}"
+                    )
+                continue
             self._stop_inspection(inspection, cancel_checker=cancel_checker)
-        for port in (contract.pair.ocr_port, contract.pair.gemma_port):
-            self._assert_host_port_available(
-                port,
-                cancel_checker=cancel_checker,
-            )
+            released.append(inspection.name)
+        if require_ports_free:
+            for port in (pair.ocr_port, pair.gemma_port):
+                self._assert_host_port_available(
+                    port,
+                    cancel_checker=cancel_checker,
+                )
+        return tuple(released)
 
     def _assert_host_port_available(
         self,

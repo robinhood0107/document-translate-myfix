@@ -461,6 +461,42 @@ class LocalLlamaRouterCoordinator:
             allow_foreign_owner_teardown=allow_foreign_owner_teardown,
         )
 
+    def release_owned_pair_ports(
+        self,
+        pair: RouterPair,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> tuple[str, ...]:
+        """Free a Router pair's host ports for the separate-server path.
+
+        A Router container left behind by an earlier process keeps the OCR and
+        Gemma host ports, so the separate-server containers can never bind them.
+        This releases only Router-owned containers and leaves every other
+        listener alone, including the separate-server container the caller is
+        about to reuse.  Reclaiming the ports while this coordinator still owns a
+        container would corrupt its state machine, so that case is refused.
+        """
+
+        with self._command_lock:
+            with self._state_lock:
+                if self._contract is not None or self._pair is not None:
+                    raise RouterStateError(
+                        "Router ports cannot be reclaimed while this coordinator owns a container."
+                    )
+            try:
+                return tuple(
+                    self._adapter.stop_owned_pair_ports(
+                        pair,
+                        cancel_checker=cancel_checker,
+                        reject_foreign=False,
+                        require_ports_free=False,
+                    )
+                )
+            except RouterAdapterOwnershipError as exc:
+                raise RouterOwnershipError(str(exc)) from exc
+            except RouterAdapterError as exc:
+                raise RouterSetupError(str(exc)) from exc
+
     @contextmanager
     def inference_lease(
         self,

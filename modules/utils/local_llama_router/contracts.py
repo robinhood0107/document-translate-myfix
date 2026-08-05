@@ -165,6 +165,23 @@ def router_pair_for_ocr_endpoint(
     return None
 
 
+def router_pair_for_engine_key(engine_key: Any) -> RouterPair | None:
+    """Return the Router pair an OCR engine belongs to, ignoring endpoints.
+
+    The separate-server path needs the pair's host ports to reclaim a Router
+    container left behind by an earlier process, which happens before any
+    endpoint can be classified as a Router route.
+    """
+
+    normalized_engine = str(engine_key or "").strip()
+    if not normalized_engine:
+        return None
+    for pair in _ROUTER_PAIRS:
+        if normalized_engine == pair.ocr_engine_key:
+            return pair
+    return None
+
+
 def classify_router_pair(
     engine_key: Any,
     ocr_endpoint: Any,

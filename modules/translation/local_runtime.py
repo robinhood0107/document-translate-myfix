@@ -44,6 +44,7 @@ from modules.utils.local_llama_router import (
     RouterPair,
     RouterRuntimeSpec,
 )
+from modules.utils.local_llama_router.contracts import router_pair_for_engine_key
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
     inspect_llama_cpp_runtime,
@@ -181,6 +182,72 @@ class LocalGemmaRuntimeManager:
             and coordinator is not None
             and coordinator.snapshot().pair == pair.kind.value
         )
+
+    def release_separate_server_for_router(self) -> bool:
+        """Stop this product's separate-server Gemma container before the Router.
+
+        The Router publishes 18080, which the separate-server Gemma container
+        also owns.  Only the exact product container is stopped, and only when
+        Docker reports it running, so a foreign listener still surfaces as the
+        Router adapter's explicit ownership error.
+        """
+
+        with self._lock:
+            if self._router_pair is not None:
+                return False
+            if not self._inspect_managed_container_running():
+                return False
+            self._stop_managed_container()
+            self._managed_active = False
+            self._managed_start_attempted = False
+            self._readiness_cache.clear()
+            logger.info(
+                "Stopped the separate-server Gemma container so the Router can bind port 18080."
+            )
+            return True
+
+    def _release_stale_router_gemma_port(
+        self,
+        api_base_url: str,
+        *,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        """Reclaim a leftover Router container holding the Gemma host port.
+
+        The Router publishes 18080 as well as its OCR port, so a container left
+        by an earlier process blocks the separate-server Gemma compose from ever
+        binding.  Only the exact default Gemma port is reclaimed, and only from
+        Router-owned containers.
+        """
+
+        coordinator = self._router_coordinator
+        if coordinator is None or self._router_pair is not None:
+            return
+        pair = router_pair_for_engine_key("PaddleOCR VL")
+        if pair is None:
+            return
+        try:
+            configured_port = urlparse(str(api_base_url or "").strip()).port
+        except ValueError:
+            return
+        if configured_port != pair.gemma_port:
+            return
+        try:
+            released = coordinator.release_owned_pair_ports(
+                pair,
+                cancel_checker=cancel_checker,
+            )
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(str(exc)) from exc
+        if released:
+            logger.info(
+                "Released leftover Router container(s) %s so the separate-server "
+                "Gemma runtime can bind port %s.",
+                ", ".join(released),
+                pair.gemma_port,
+            )
 
     def _finish_router_for_selection_change(
         self,
@@ -340,6 +407,11 @@ class LocalGemmaRuntimeManager:
             api_base_url, model_name = self._resolve_credentials(settings_page)
             if not api_base_url:
                 raise self._build_setup_error("Endpoint URL is empty.")
+
+            self._release_stale_router_gemma_port(
+                api_base_url,
+                cancel_checker=cancel_checker,
+            )
 
             managed = self.should_manage_server(settings_page)
             if self._is_cancelled(cancel_checker):

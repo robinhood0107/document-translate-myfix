@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
 from typing import TYPE_CHECKING, Callable
 
@@ -7,6 +8,8 @@ from PySide6 import QtCore
 from PySide6.QtCore import QCoreApplication
 
 from app.thread_worker import GenericWorker
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -67,14 +70,26 @@ class TaskRunnerController:
         operation = self.operation_queue.popleft()
 
         def enhanced_finished_callback():
-            if operation["finished_callback"]:
-                operation["finished_callback"]()
-            QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
+            # The queue must advance even when a caller-supplied callback raises;
+            # otherwise every later operation waits behind a task that already
+            # ended.  The failure is logged instead of escaping into the Qt event
+            # loop, where it would be lost and could abort the process.
+            try:
+                if operation["finished_callback"]:
+                    operation["finished_callback"]()
+            except Exception:
+                logger.exception("Finished callback failed for a queued operation.")
+            finally:
+                QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_error_callback(error_tuple):
-            if operation["error_callback"]:
-                operation["error_callback"](error_tuple)
-            QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
+            try:
+                if operation["error_callback"]:
+                    operation["error_callback"](error_tuple)
+            except Exception:
+                logger.exception("Error callback failed for a queued operation.")
+            finally:
+                QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_result_callback(result):
             if operation["result_callback"]:
@@ -152,6 +167,9 @@ class TaskRunnerController:
 
     def clear_operation_queue(self):
         self.operation_queue.clear()
+        # A cleared queue has nothing left to drain, so the busy flag must not
+        # survive; a stale flag strands every later operation in the queue.
+        self.is_processing_queue = False
 
     def cancel_current_task(self):
         if self.main.current_worker:

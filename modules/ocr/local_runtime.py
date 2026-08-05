@@ -75,6 +75,7 @@ from modules.utils.local_llama_router import (
     RouterPair,
     RouterRuntimeSpec,
 )
+from modules.utils.local_llama_router.contracts import router_pair_for_engine_key
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
@@ -257,6 +258,76 @@ class LocalOCRRuntimeManager:
             return coordinator.inference_lease(
                 pair=pair,
                 model_alias=pair.ocr_alias,
+            )
+
+    def _release_separate_server_for_router(self, engine_key: str) -> bool:
+        """Stop this product's separate-server OCR container before the Router.
+
+        Both routes publish the same OCR host port, so a separate-server
+        container left running by an earlier process blocks the Router from ever
+        binding it.  Only the exact bundled container for the requested engine is
+        stopped; a foreign listener remains the adapter's ownership error.
+        """
+
+        if not self._running_managed_container_names(engine_key):
+            return False
+        self._stop_engine(engine_key)
+        if self._active_engine == engine_key:
+            self._active_engine = None
+        if self._managed_start_attempted_engine == engine_key:
+            self._managed_start_attempted_engine = None
+        self._readiness_cache.clear()
+        if engine_key == "PaddleOCR VL":
+            self._paddle_idle_released = False
+        logger.info(
+            "Stopped the separate-server %s container so the Router can bind its port.",
+            engine_key,
+        )
+        return True
+
+    def _release_stale_router_ports_for_engine(
+        self,
+        engine_key: str,
+        server_url: str,
+        *,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        """Reclaim a leftover Router container before the separate-server path.
+
+        The Router publishes both the OCR port and 18080, so a container left
+        by an earlier process makes the separate-server compose fail to bind
+        forever.  The reclaim is limited to the exact managed port of a
+        Router-capable engine; a custom port stays untouched.
+        """
+
+        coordinator = self._router_coordinator
+        if coordinator is None:
+            return
+        pair = router_pair_for_engine_key(engine_key)
+        if pair is None:
+            return
+        try:
+            configured_port = urlparse(str(server_url or "").strip()).port
+        except ValueError:
+            return
+        if configured_port != pair.ocr_port:
+            return
+        try:
+            released = coordinator.release_owned_pair_ports(
+                pair,
+                cancel_checker=cancel_checker,
+            )
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(engine_key, str(exc)) from exc
+        if released:
+            logger.info(
+                "Released leftover Router container(s) %s so the separate-server "
+                "%s runtime can bind port %s.",
+                ", ".join(released),
+                engine_key,
+                pair.ocr_port,
             )
 
     def _is_gemma_translator_selected(self, settings_page: Any) -> bool:
@@ -624,6 +695,14 @@ class LocalOCRRuntimeManager:
                 self._deactivate_active_engine()
                 return
 
+            # A Router container from an earlier process still publishes this
+            # engine's port, so reclaim it before Compose tries to bind.
+            self._release_stale_router_ports_for_engine(
+                engine_key,
+                self._resolve_server_url(engine_key, settings_page),
+                cancel_checker=cancel_checker,
+            )
+
             cache_key = self._readiness_cache_key(engine_key, settings_page, managed=True)
             if self._is_cancelled(cancel_checker):
                 self._readiness_cache.discard(cache_key)
@@ -706,6 +785,28 @@ class LocalOCRRuntimeManager:
             # A foreign process at a default port remains the adapter's
             # explicit ownership error and is never guessed/stopped here.
             self._deactivate_active_engine()
+        # The separate-server containers publish the same host ports as the
+        # Router, so release this product's own OCR and Gemma containers before
+        # the Router reserves them.  A foreign listener stays the adapter's
+        # explicit ownership error.
+        try:
+            self._release_separate_server_for_router(engine_key)
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(engine_key, str(exc)) from exc
+        release_gemma = getattr(
+            self._router_gemma_manager,
+            "release_separate_server_for_router",
+            None,
+        )
+        if callable(release_gemma):
+            try:
+                release_gemma()
+            except OperationCancelledError:
+                raise
+            except Exception as exc:
+                raise self._build_setup_error(engine_key, str(exc)) from exc
         spec = self._router_runtime_spec(engine_key, settings_page, pair)
         service = runtime_service or (
             "paddleocr_vl"
