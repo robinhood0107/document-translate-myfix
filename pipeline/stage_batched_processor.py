@@ -223,6 +223,19 @@ class StagePageContext:
 
 
 class StageBatchedProcessor(BatchProcessor):
+    # stage-batched 파이프라인은 단계가 전체 페이지를 훑는다. 레거시 지도는 "한
+    # 페이지가 여러 단계를 지난다"는 전제라서 여기서는 이름이 전부 어긋난다.
+    # 실제로 step 3 은 인페인팅인데 레거시 이름은 pre-inpaint-setup 이었고, 그 이름이
+    # 366 줄 내내 찍혔다.
+    STAGE_NAMES_BY_STEP = {
+        0: 'detect-all',
+        2: 'ocr-all',
+        3: 'inpaint-all',
+        7: 'translate-all',
+        9: 'render-all',
+        10: 'save-and-finish',
+    }
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._timestamp: str = ""
@@ -355,7 +368,9 @@ class StageBatchedProcessor(BatchProcessor):
             release_report = runtime_manager.shutdown(
                 resource_arbiter=self._runtime_resource_arbiter(),
                 runtime_service=service,
-                cancel_checker=self._prewarm_cancel_checker,
+                # 이미 취소된 적재를 되돌리는 정리다. 취소 검사기를 넘기면 정리
+                # 자체가 즉시 취소되어 컨테이너가 남는다.
+                cancel_checker=self._cleanup_cancel_checker,
             )
         else:
             release_report = runtime_manager.shutdown()
@@ -416,6 +431,19 @@ class StageBatchedProcessor(BatchProcessor):
             return bool(checker()) if callable(checker) else bool(self._is_cancelled())
         except Exception:
             return bool(self._is_cancelled())
+
+    @staticmethod
+    def _cleanup_cancel_checker() -> bool:
+        """런타임 정리는 절대 취소되지 않는다.
+
+        정리는 실행이 끝났거나 취소된 뒤에 돈다. 그 시점에는 일반 취소 검사기가
+        이미 True이고(`_shutdown_prewarm_executor`가 취소 이벤트를 설정한 직후에
+        정리가 시작된다), 그것을 그대로 넘기면 컨테이너 정지가 자기 자신을 취소해
+        `Router terminal cleanup failed: Router operation cancelled` 로 끝난다.
+        그러면 컨테이너와 GPU가 그대로 남는다. 정리에는 취소가 없어야 한다.
+        """
+
+        return False
 
     def _reset_prewarm_lifecycle(self) -> None:
         cancel_event = getattr(self, "_prewarm_cancel_event", None)
@@ -743,6 +771,7 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                     service=(ocr_service if label == "OCR" else "gemma"),
                     allow_foreign_owner_teardown=bool(failures),
+                    cancellable=False,
                 )
             except Exception as exc:
                 failures.append(exc)
@@ -759,8 +788,17 @@ class StageBatchedProcessor(BatchProcessor):
         release_for_handoff: bool = False,
         service: str = "",
         allow_foreign_owner_teardown: bool = False,
+        cancellable: bool = True,
     ) -> None:
         service = str(service or label or "runtime").strip().lower() or "runtime"
+        # 실행 도중의 핸드오프는 사용자가 취소하면 멈춰야 한다. 반대로 종료 정리는
+        # 취소 신호가 이미 켜진 뒤에 돌기 때문에, 같은 검사기를 쓰면 정리가 스스로를
+        # 취소하고 컨테이너와 GPU 를 남긴다.
+        cancel_checker = (
+            self._prewarm_cancel_checker
+            if cancellable
+            else self._cleanup_cancel_checker
+        )
         self._record_runtime_transition(
             service=service,
             to_state="releasing",
@@ -793,7 +831,7 @@ class StageBatchedProcessor(BatchProcessor):
                             release_report = release(
                                 resource_arbiter=self._runtime_resource_arbiter(),
                                 runtime_service=service,
-                                cancel_checker=self._prewarm_cancel_checker,
+                                cancel_checker=cancel_checker,
                             )
                         else:
                             release_report = release()
@@ -810,7 +848,7 @@ class StageBatchedProcessor(BatchProcessor):
                             release_report = runtime_manager.shutdown(
                                 resource_arbiter=self._runtime_resource_arbiter(),
                                 runtime_service=service,
-                                cancel_checker=self._prewarm_cancel_checker,
+                                cancel_checker=cancel_checker,
                                 allow_foreign_owner_teardown=(
                                     allow_foreign_owner_teardown
                                 ),

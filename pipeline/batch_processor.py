@@ -378,20 +378,22 @@ class BatchProcessor:
         except Exception:
             logger.debug("Failed to forward automatic progress payload.", exc_info=True)
 
+    # 레거시 페이지별 파이프라인의 단계 이름. 한 페이지가 이 단계들을 차례로 지난다.
+    STAGE_NAMES_BY_STEP = {
+        0: 'start-image',
+        1: 'text-block-detection',
+        2: 'ocr-processing',
+        3: 'pre-inpaint-setup',
+        4: 'generate-mask',
+        5: 'inpainting',
+        7: 'translation',
+        9: 'text-rendering-prepare',
+        10: 'save-and-finish',
+    }
+
     def emit_progress(self, index, total, step, steps, change_name):
         """Wrapper around main_page.progress_update.emit that logs current batch position with ETA."""
-        stage_map = {
-            0: 'start-image',
-            1: 'text-block-detection',
-            2: 'ocr-processing',
-            3: 'pre-inpaint-setup',
-            4: 'generate-mask',
-            5: 'inpainting',
-            7: 'translation',
-            9: 'text-rendering-prepare',
-            10: 'save-and-finish',
-        }
-        stage_name = stage_map.get(step, f'stage-{step}')
+        stage_name = self.STAGE_NAMES_BY_STEP.get(step, f'stage-{step}')
         image_name = os.path.basename(self._progress_image_path) if self._progress_image_path else '-'
         run_elapsed = (time.monotonic() - self._run_started_at) if self._run_started_at is not None else None
         page_elapsed = (time.monotonic() - self._page_started_at) if self._page_started_at is not None else None
