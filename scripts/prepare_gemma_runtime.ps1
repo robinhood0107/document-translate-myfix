@@ -24,11 +24,12 @@ $ErrorActionPreference = 'Stop'
 $PreparationVersion = 2
 $ManifestSchemaVersion = 2
 $ReadyManifestName = '.comic-translate-gemma-ready-v2.json'
-$ImageRef = (
-    'ghcr.io/ggml-org/llama.cpp@sha256:' +
-    '22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
+$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
+$SupportedImageRefs = @(
+    'ghcr.io/ggml-org/llama.cpp:server-cuda13',
+    'ghcr.io/ggml-org/llama.cpp:server-cuda'
 )
-$ImageDigest = 'sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
 $ManagedContainerName = 'gemma-local-server'
 
 if ($VolumeName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
@@ -228,9 +229,6 @@ $ModelSpecs = @(
 )
 
 $ImageId = Get-PinnedImageId
-if ($ImageId -ne $ImageDigest) {
-    throw "Pinned image ID mismatch: expected=$ImageDigest, actual=$ImageId"
-}
 
 if ($Mode -eq 'Verify') {
     $VolumeInspect = Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)
@@ -258,8 +256,8 @@ if ($Mode -eq 'Verify') {
         [int]$Manifest.preparation_version -ne $PreparationVersion -or
         [string]$Manifest.runtime -ne 'Gemma' -or
         [string]$Manifest.volume_name -ne $VolumeName -or
-        [string]$Manifest.source_image_ref -ne $ImageRef -or
-        [string]$Manifest.source_image_digest -ne $ImageDigest -or
+        $SupportedImageRefs -notcontains [string]$Manifest.source_image_ref -or
+        [string]$Manifest.source_image_digest -ne $ImageId -or
         [string]$Manifest.source_image_id -ne $ImageId -or
         [string]$Manifest.default_model -ne 'gemma-4-26B-IQ4_NL.gguf' -or
         $Manifest.ready -ne $true -or
@@ -589,7 +587,7 @@ $Manifest = [ordered]@{
     volume_name = $VolumeName
     ready = $true
     source_image_ref = $ImageRef
-    source_image_digest = $ImageDigest
+    source_image_digest = $ImageId
     source_image_id = $ImageId
     default_model = 'gemma-4-26B-IQ4_NL.gguf'
     runtime_configuration = [ordered]@{

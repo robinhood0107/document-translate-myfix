@@ -20,6 +20,9 @@ from modules.ocr.paddle_llamacpp_runtime_contract import (
 )
 
 
+_IMAGE_ID = "sha256:" + ("1" * 64)
+
+
 def _manifest_payload() -> dict:
     return {
         "schema_version": 1,
@@ -28,7 +31,7 @@ def _manifest_payload() -> dict:
         "volume_name": DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
         "ready": True,
         "source_image_ref": DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
-        "source_image_id": DEFAULT_PADDLE_LLAMA_CPP_IMAGE.rsplit("@", 1)[-1],
+        "source_image_id": _IMAGE_ID,
         "smoke_test": {
             "passed": True,
             "device": "CPU",
@@ -69,7 +72,7 @@ class PaddleLlamaRuntimeContractTests(unittest.TestCase):
             },
             volume_name=DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
             llama_image_ref=DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
-            llama_image_id=DEFAULT_PADDLE_LLAMA_CPP_IMAGE.rsplit("@", 1)[-1],
+            llama_image_id=_IMAGE_ID,
             compose_file=compose_file,
             environment=environment,
         )
