@@ -23,7 +23,7 @@ def postprocess_span(tagger, text: str) -> str:
     """
 
     # First, strip punctuations
-    text = text.strip("""!"\#$&'()*+,\-./:;<=>?@\^_‘{|}~《》""")
+    text = text.strip(r"""!"\#$&'()*+,\-./:;<=>?@\^_‘{|}~《》""")
 
     # Complete imbalanced parentheses pair
     if text.count("(") == text.count(")") + 1:
