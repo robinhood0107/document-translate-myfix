@@ -11,6 +11,12 @@ param(
     # Leave empty to fall back to the repository's testmodel/PaddleOCR-VL-1.6-GGUF.
     [string]$ModelDirectory = '',
 
+    # Fetch the registered official source only when no verified local copy exists.
+    [switch]$AllowDownload,
+
+    # Where downloaded sources land. Empty means the repository's testmodel/.
+    [string]$DownloadDirectory = '',
+
     [string]$VolumeName = (
         'comic-translate-paddleocr-vl-spotting-llamacpp-models-v2'
     ),
@@ -69,6 +75,12 @@ $ModelSpecs = @(
         )
         Role = 'vlm'
         DerivedFromSha256 = ''
+        # 공식 PaddleOCR-VL 1.6 GGUF. Spotting 대상 GGUF 는 crop VLM 과 바이트가
+        # 같으므로 같은 원본을 쓴다.
+        DownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF.gguf'
+        )
     }
     [pscustomobject][ordered]@{
         Name = 'PaddleOCR-VL-1.6-Spotting-mmproj.gguf'
@@ -82,6 +94,12 @@ $ModelSpecs = @(
         Role = 'vision-projector'
         DerivedFromSha256 = (
             '204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a'
+        )
+        # 이 항목은 파생물이다. 원본은 공식 crop projector 이고, 위
+        # DerivedFromSha256 이 그 원본의 해시다.
+        SourceDownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF-mmproj.gguf'
         )
     }
 )
@@ -555,21 +573,34 @@ New-Item -ItemType Directory -Force -Path $TemporaryRoot | Out-Null
 try {
     $PreparedSources = @()
     if (-not $IsReseal) {
-        $ResolvedDirectory = (Resolve-Path -LiteralPath $ModelDirectory).Path
+        # The target GGUF is byte-identical to the official crop VLM, so an
+        # already-renamed Spotting copy and the upstream name both satisfy the
+        # contract. Try the explicit names first, then fall back to the shared
+        # resolver, which can also fetch the registered official source.
+        $ResolvedDirectory = ''
+        if (-not [string]::IsNullOrWhiteSpace($ModelDirectory)) {
+            $ResolvedDirectory = (Resolve-Path -LiteralPath $ModelDirectory).Path
+        }
         $TargetSpec = $ModelSpecs[0]
         $TargetSourcePath = $null
-        foreach ($Candidate in $TargetSpec.SourceNames) {
-            $CandidatePath = Join-Path $ResolvedDirectory $Candidate
-            if (Test-Path -LiteralPath $CandidatePath -PathType Leaf) {
-                $TargetSourcePath = $CandidatePath
-                break
+        if (-not [string]::IsNullOrWhiteSpace($ResolvedDirectory)) {
+            foreach ($Candidate in $TargetSpec.SourceNames) {
+                $CandidatePath = Join-Path $ResolvedDirectory $Candidate
+                if (Test-Path -LiteralPath $CandidatePath -PathType Leaf) {
+                    $TargetSourcePath = $CandidatePath
+                    break
+                }
             }
         }
         if ($null -eq $TargetSourcePath) {
-            throw (
-                'PaddleOCR-VL target GGUF was not found. Expected one of: ' +
-                ($TargetSpec.SourceNames -join ', ')
-            )
+            $TargetSourcePath = (Resolve-ManagedRuntimeModelSource `
+                -FileName $TargetSpec.SourceNames[-1] `
+                -Bytes $TargetSpec.Bytes `
+                -Sha256 $TargetSpec.Sha256 `
+                -RequestedPath $ModelDirectory `
+                -DownloadUrl ([string]$TargetSpec.DownloadUrl) `
+                -DownloadDirectory $DownloadDirectory `
+                -AllowDownload:$AllowDownload).Path
         }
         $TargetHash = (
             Get-FileHash -LiteralPath $TargetSourcePath -Algorithm SHA256
@@ -585,12 +616,28 @@ try {
             )
         }
 
+        # The Spotting projector is derived locally from the official crop
+        # projector, so the source is pinned by DerivedFromSha256 rather than by
+        # the derived file's own hash.
         $ProjectorSpec = $ModelSpecs[1]
-        $CropProjectorPath = Join-Path (
-            $ResolvedDirectory
-        ) $ProjectorSpec.SourceNames[0]
-        if (-not (Test-Path -LiteralPath $CropProjectorPath -PathType Leaf)) {
-            throw "Official crop OCR projector was not found: $CropProjectorPath"
+        $CropProjectorPath = $null
+        if (-not [string]::IsNullOrWhiteSpace($ResolvedDirectory)) {
+            $CropCandidate = Join-Path (
+                $ResolvedDirectory
+            ) $ProjectorSpec.SourceNames[0]
+            if (Test-Path -LiteralPath $CropCandidate -PathType Leaf) {
+                $CropProjectorPath = $CropCandidate
+            }
+        }
+        if ($null -eq $CropProjectorPath) {
+            $CropProjectorPath = (Resolve-ManagedRuntimeModelSource `
+                -FileName $ProjectorSpec.SourceNames[0] `
+                -Bytes $ProjectorSpec.Bytes `
+                -Sha256 $ProjectorSpec.DerivedFromSha256 `
+                -RequestedPath $ModelDirectory `
+                -DownloadUrl ([string]$ProjectorSpec.SourceDownloadUrl) `
+                -DownloadDirectory $DownloadDirectory `
+                -AllowDownload:$AllowDownload).Path
         }
         $DerivedProjectorPath = Join-Path $TemporaryRoot $ProjectorSpec.Name
         $Derive = Invoke-NativeResult `

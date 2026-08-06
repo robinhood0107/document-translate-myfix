@@ -68,9 +68,21 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 실행에서 정상 원본으로 오인되지 않습니다. 이미 받다 만 파일이 있으면 Range
 요청으로 이어받습니다.
 
-현재 다운로드 원본이 등록된 모델은 Gemma 제품 기본 모델
-(`gemma-4-26B-IQ4_NL.gguf`)뿐입니다. 나머지 런타임은 로컬에 원본이 있어야
-하며, 없으면 어떤 파일을 어디에 두어야 하는지 명시하는 오류를 냅니다.
+### 등록된 원본
+
+각 파일의 SHA-256이 계약값과 정확히 같음을 확인한 출처입니다.
+
+| 런타임 | Hugging Face 저장소 |
+| --- | --- |
+| Gemma | `Vastopian/gemma-4-26B-A4B-it-abliterated-GGUF` |
+| HunyuanOCR | `ggml-org/HunyuanOCR-GGUF` |
+| MangaLMM | `mradermacher/MangaLMM-GGUF` |
+| PaddleOCR-VL | `PaddlePaddle/PaddleOCR-VL-1.6-GGUF` |
+| PaddleOCR-VL Spotting | `PaddlePaddle/PaddleOCR-VL-1.6-GGUF` (대상 GGUF는 crop VLM과 동일 파일, projector는 공식 crop projector에서 로컬 파생) |
+
+HunyuanOCR은 업스트림 파일명(`HunyuanOCR-Q8_0.gguf`,
+`mmproj-HunyuanOCR-Q8_0.gguf`)이 볼륨 안 이름과 다릅니다. 받는 쪽에서 계약
+이름으로 저장하므로 사용자가 이름을 바꿀 필요는 없습니다.
 
 ## 스스로 고쳐지지 않는 상태
 
