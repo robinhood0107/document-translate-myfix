@@ -25,11 +25,12 @@ $PreparationVersion = 1
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-hunyuanocr-ready-v1.json'
 $RuntimeName = 'HunyuanOCR-llama.cpp'
-$ImageRef = (
-    'ghcr.io/ggml-org/llama.cpp@sha256:' +
-    '22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
+$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
+$SupportedImageRefs = @(
+    'ghcr.io/ggml-org/llama.cpp:server-cuda13',
+    'ghcr.io/ggml-org/llama.cpp:server-cuda'
 )
-$ImageDigest = 'sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
 $ManagedContainerName = 'hunyuanocr-local-server'
 $ModelAlias = 'HunyuanOCR.Q8_0.gguf'
 
@@ -265,8 +266,8 @@ function Assert-ManifestContract {
         [int]$Manifest.preparation_version -ne $PreparationVersion -or
         [string]$Manifest.runtime -ne $RuntimeName -or
         [string]$Manifest.volume_name -ne $VolumeName -or
-        [string]$Manifest.source_image_ref -ne $ImageRef -or
-        [string]$Manifest.source_image_id -ne $ImageDigest -or
+        $SupportedImageRefs -notcontains [string]$Manifest.source_image_ref -or
+        [string]$Manifest.source_image_id -ne $ImageId -or
         $Manifest.ready -ne $true -or
         $Manifest.smoke_test.passed -ne $true -or
         [string]$Manifest.smoke_test.device -ne 'CUDA' -or
@@ -292,9 +293,6 @@ function Assert-ManifestContract {
 }
 
 $ImageId = Get-PinnedImageId
-if ($ImageId -ne $ImageDigest) {
-    throw "Pinned image ID mismatch: expected=$ImageDigest, actual=$ImageId"
-}
 
 if ($Mode -eq 'Verify') {
     if (
@@ -542,7 +540,7 @@ $Manifest = [ordered]@{
     volume_name = $VolumeName
     ready = $true
     source_image_ref = $ImageRef
-    source_image_digest = $ImageDigest
+    source_image_digest = $ImageId
     source_image_id = $ImageId
     model_alias = $ModelAlias
     runtime_configuration = [ordered]@{

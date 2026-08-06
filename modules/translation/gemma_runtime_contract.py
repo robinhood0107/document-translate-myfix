@@ -7,15 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from modules.utils.llama_cpp_runtime import (
+    DEFAULT_LLAMA_CPP_IMAGE,
+    is_supported_llama_cpp_image,
+)
+
 
 GEMMA_RUNTIME_MANIFEST_SCHEMA_VERSION = 2
 GEMMA_RUNTIME_PREPARATION_VERSION = 2
 DEFAULT_GEMMA_MODEL_VOLUME = "comic-translate-gemma-models-v2"
 DEFAULT_GEMMA_READY_MANIFEST = ".comic-translate-gemma-ready-v2.json"
-DEFAULT_GEMMA_LLAMA_CPP_IMAGE = (
-    "ghcr.io/ggml-org/llama.cpp@sha256:"
-    "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
-)
+DEFAULT_GEMMA_LLAMA_CPP_IMAGE = DEFAULT_LLAMA_CPP_IMAGE
 DEFAULT_GEMMA_LLAMA_CPP_PULL_POLICY = "missing"
 
 GEMMA_RUNTIME_FINGERPRINT_LABEL = "comic-translate.runtime-fingerprint"
@@ -280,7 +282,6 @@ def _validate_manifest(
         "runtime": "Gemma",
         "preparation_version": GEMMA_RUNTIME_PREPARATION_VERSION,
         "volume_name": volume_name,
-        "source_image_ref": image_ref,
         "source_image_digest": image_id,
         "source_image_id": image_id,
     }
@@ -290,6 +291,17 @@ def _validate_manifest(
             raise GemmaRuntimeContractError(
                 f"Gemma ready manifest mismatch for {key}: expected={expected!r}, actual={actual!r}"
             )
+    # 이미지 참조는 지원 태그 목록으로 검사한다.  CUDA 12 태그로 준비한 볼륨을
+    # CUDA 13 기본값으로 올려도 계약은 그대로 성립해야 하고, 실제 동일성은 위의
+    # image id 비교가 보장한다.
+    manifest_image_ref = payload.get("source_image_ref")
+    if manifest_image_ref != image_ref and not is_supported_llama_cpp_image(
+        manifest_image_ref
+    ):
+        raise GemmaRuntimeContractError(
+            "Gemma ready manifest mismatch for source_image_ref: "
+            f"expected a supported llama.cpp image, actual={manifest_image_ref!r}"
+        )
     if payload.get("ready") is not True:
         raise GemmaRuntimeContractError("Gemma ready manifest is not marked ready.")
     if payload.get("default_model") != DEFAULT_GEMMA_PREPARED_MODEL:

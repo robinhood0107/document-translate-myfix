@@ -47,7 +47,7 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
@@ -64,7 +64,7 @@ Then choose `Custom Local Server(Gemma)` in the app. The managed runtime mounts 
 ### HunyuanOCR local runtime
 
 - Compose file: `/hunyuanocr_docker_files/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
 - Runtime/model references:
   - [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)

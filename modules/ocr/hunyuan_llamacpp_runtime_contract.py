@@ -2,8 +2,8 @@
 
 다른 관리형 엔진과 같은 규약을 따른다. 즉 모델은 SHA-256으로 검증된 external
 volume에 준비되고, 그 volume은 스모크 테스트를 통과한 ready manifest를 담으며,
-런타임은 부동 태그가 아니라 고정 digest 이미지로만 뜬다. 이 계약이 있어야
-HunyuanOCR이 Router pair가 될 수 있다. Router는 OCR과 Gemma가 동일한 고정
+런타임은 지원 목록에 있는 llama.cpp CUDA 서버 이미지로만 뜬다. 이 계약이 있어야
+HunyuanOCR이 Router pair가 될 수 있다. Router는 OCR과 Gemma가 동일한
 이미지를 쓰고 양쪽 모델이 검증된 volume에 있다는 증거를 요구한다.
 """
 
@@ -16,15 +16,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from modules.utils.llama_cpp_runtime import (
+    DEFAULT_LLAMA_CPP_IMAGE,
+    is_supported_llama_cpp_image,
+)
+
 
 HUNYUAN_OCR_RUNTIME_MANIFEST_SCHEMA_VERSION = 1
 HUNYUAN_OCR_RUNTIME_PREPARATION_VERSION = 1
 DEFAULT_HUNYUAN_OCR_MODEL_VOLUME = "comic-translate-hunyuanocr-models-v2"
 DEFAULT_HUNYUAN_OCR_READY_MANIFEST = ".comic-translate-hunyuanocr-ready-v1.json"
-DEFAULT_HUNYUAN_OCR_LLAMA_CPP_IMAGE = (
-    "ghcr.io/ggml-org/llama.cpp@sha256:"
-    "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
-)
+DEFAULT_HUNYUAN_OCR_LLAMA_CPP_IMAGE = DEFAULT_LLAMA_CPP_IMAGE
 
 HUNYUAN_OCR_MODEL_NAME = "HunyuanOCR.Q8_0.gguf"
 HUNYUAN_OCR_MMPROJ_NAME = "HunyuanOCR.mmproj-Q8_0.gguf"
@@ -250,7 +252,6 @@ def build_hunyuan_ocr_runtime_contract(
         "preparation_version": HUNYUAN_OCR_RUNTIME_PREPARATION_VERSION,
         "volume_name": safe_volume,
         "ready": True,
-        "source_image_ref": llama_image_ref,
         "source_image_id": llama_image_id,
     }
     for key, expected in required_header.items():
@@ -258,6 +259,16 @@ def build_hunyuan_ocr_runtime_contract(
             raise HunyuanOCRRuntimeContractError(
                 f"HunyuanOCR manifest 항목 {key!r}이 런타임 계약과 다릅니다."
             )
+    # CUDA 12 태그로 준비한 volume도 CUDA 13 기본값에서 그대로 통과해야 한다.
+    # 실제 이미지 동일성은 위의 source_image_id 비교가 지킨다.
+    manifest_image_ref = manifest.get("source_image_ref")
+    if manifest_image_ref != llama_image_ref and not is_supported_llama_cpp_image(
+        manifest_image_ref
+    ):
+        raise HunyuanOCRRuntimeContractError(
+            "HunyuanOCR manifest 항목 'source_image_ref'가 지원되는 "
+            "llama.cpp 이미지가 아닙니다."
+        )
     smoke_test = manifest.get("smoke_test")
     if not isinstance(smoke_test, dict) or smoke_test.get("passed") is not True:
         raise HunyuanOCRRuntimeContractError(

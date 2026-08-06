@@ -115,13 +115,15 @@ batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같�
 이 명시적 command 계약이 처음 적용될 때 기존 번역 result-cache 항목은
 삭제되지 않지만 이전 runtime fingerprint라서 재사용되지 않습니다.
 
-현재 pinned llama.cpp에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
+현재 llama.cpp 런타임 이미지에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
 
-## 고정 runtime image
+## runtime image
 
-- Image: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- Image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - 관측 image label version: `b10133`
 - Pull policy: `missing`
+- 태그는 moving tag이므로, 이미지가 바뀌면 ready manifest에 기록된 image ID와
+  달라집니다. 그때는 준비 스크립트를 다시 실행해야 합니다.
 
 벤치마크 preset, raw 결과, 보고서, 차트는 제품 브랜치가 아니라 `benchmarking/lab` 또는 Git 밖의 검증 로그 폴더에서 관리합니다.
 

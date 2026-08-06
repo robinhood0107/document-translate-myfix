@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from modules.utils.llama_cpp_runtime import (
+    DEFAULT_LLAMA_CPP_IMAGE,
+    is_supported_llama_cpp_image,
+)
+
 from .transport import direct_transport_identity
 
 
@@ -21,10 +26,7 @@ DEFAULT_PADDLE_LLAMA_MODEL_VOLUME = (
 DEFAULT_PADDLE_LLAMA_READY_MANIFEST = (
     ".comic-translate-paddleocr-vl-llamacpp-ready-v1.json"
 )
-DEFAULT_PADDLE_LLAMA_CPP_IMAGE = (
-    "ghcr.io/ggml-org/llama.cpp@sha256:"
-    "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
-)
+DEFAULT_PADDLE_LLAMA_CPP_IMAGE = DEFAULT_LLAMA_CPP_IMAGE
 # Historical PaddleX relay image.  It is retained only so cleanup and audit
 # tooling can identify the exact retired asset; the active runtime never
 # starts or fingerprints this image.
@@ -277,7 +279,6 @@ def build_paddle_llama_runtime_contract(
         "preparation_version": PADDLE_LLAMA_RUNTIME_PREPARATION_VERSION,
         "volume_name": safe_volume,
         "ready": True,
-        "source_image_ref": llama_image_ref,
         "source_image_id": llama_image_id,
     }
     for key, expected in required_header.items():
@@ -286,6 +287,16 @@ def build_paddle_llama_runtime_contract(
                 f"PaddleOCR llama.cpp manifest field {key!r} does not "
                 f"match the runtime contract."
             )
+    # CUDA 12 태그로 준비한 볼륨도 CUDA 13 기본값에서 그대로 통과해야 한다.
+    # 실제 이미지 동일성은 위의 source_image_id 비교가 지킨다.
+    manifest_image_ref = manifest.get("source_image_ref")
+    if manifest_image_ref != llama_image_ref and not is_supported_llama_cpp_image(
+        manifest_image_ref
+    ):
+        raise PaddleLlamaRuntimeContractError(
+            "PaddleOCR llama.cpp manifest field 'source_image_ref' does not "
+            "name a supported llama.cpp image."
+        )
     smoke_test = manifest.get("smoke_test")
     if not isinstance(smoke_test, dict) or smoke_test.get("passed") is not True:
         raise PaddleLlamaRuntimeContractError(

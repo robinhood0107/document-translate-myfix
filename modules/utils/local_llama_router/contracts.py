@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
+
 
 ROUTER_CONTRACT_SCHEMA_VERSION = 2
 ROUTER_OWNER_LABEL = "com.comictranslate.local-llama-router-owner"
@@ -35,10 +37,7 @@ DEFAULT_GEMMA_ROUTER_ENDPOINT = "http://127.0.0.1:18080/v1"
 # 풀어도 다른 pair가 남긴 Gemma listener까지 함께 회수된다.
 ROUTER_GEMMA_HOST_PORT = 18080
 DEFAULT_GEMMA_ROUTER_MODEL = "gemma-4-26B-IQ4_NL.gguf"
-DEFAULT_ROUTER_IMAGE = (
-    "ghcr.io/ggml-org/llama.cpp@sha256:"
-    "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
-)
+DEFAULT_ROUTER_IMAGE = DEFAULT_LLAMA_CPP_IMAGE
 
 
 class RouterPairKind(str, Enum):

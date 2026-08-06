@@ -49,7 +49,7 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
@@ -67,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ### HunyuanOCR 로컬 런타임
 
 - compose 파일: `/hunyuanocr_docker_files/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - 참고 링크:
   - [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
