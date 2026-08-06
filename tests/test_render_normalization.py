@@ -589,9 +589,10 @@ class RenderNormalizationTests(unittest.TestCase):
             ["Ownglyph gumama3", "Malgun Gothic"],
         ]
 
+        # Qt6의 QFontDatabase는 전부 static이므로 클래스 자리를 직접 갈아끼운다.
         with mock.patch(
             "modules.rendering.render.QFontDatabase",
-            return_value=database,
+            database,
         ), mock.patch(
             "modules.rendering.render._register_render_fallback_system_fonts",
             return_value=("Malgun Gothic",),
