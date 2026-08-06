@@ -17,10 +17,28 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
+import imkit as imk
+
 from modules.rendering.render import TextRenderingSettings
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.textblock import TextBlock
+from pipeline.render_pool import QtRenderPool
 from pipeline.render_worker import RenderJobInput, run_render_job
+
+
+def _nonuniform_image(height: int = 48, width: int = 72) -> np.ndarray:
+    """검은 이미지로는 잡을 수 없는 회귀가 있다.
+
+    렌더 워커가 아무것도 그리지 않고 조용히 성공하면 결과는 통째로 검정이 된다.
+    입력이 `np.zeros` 면 그 실패와 정상 동작이 구분되지 않으므로, 픽셀마다
+    값이 다른 이미지를 쓴다.
+    """
+    ys, xs = np.mgrid[0:height, 0:width]
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    image[:, :, 0] = (ys * 5 + 40) % 256
+    image[:, :, 1] = (xs * 3 + 90) % 256
+    image[:, :, 2] = ((ys + xs) * 7 + 20) % 256
+    return np.ascontiguousarray(image)
 
 
 def _render_settings(**overrides) -> TextRenderingSettings:
@@ -145,6 +163,65 @@ class RenderWorkerPurityTests(unittest.TestCase):
             translation, _font_size, rendered_block = result.blk_rendered_events[0]
             self.assertEqual(translation.strip().lower(), "hello")
             self.assertIs(rendered_block, block)
+
+    def test_worker_thread_output_matches_main_thread_pixel_for_pixel(self) -> None:
+        """렌더 워커는 Qt 스레드에서 돌아야 한다 (회귀 가드).
+
+        `QGraphicsScene` 은 Qt 이벤트 디스패처가 있는 스레드를 요구한다.
+        `concurrent.futures.ThreadPoolExecutor` 가 만드는 plain Python 스레드
+        에서는 `addItem()` 의 지연 처리가 끝나지 않아 `scene.render()` 가
+        아무것도 그리지 않고 **조용히 성공**하고, 산출물이 통째로 검정이 된다
+        (예외도 Qt 경고도 없다). 그래서 결과를 파일 존재 여부가 아니라
+        메인 스레드 렌더와의 픽셀 일치로 확인한다.
+        """
+        image = _nonuniform_image()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            inline_job = _job(
+                tmp_dir,
+                image=image,
+                inpaint_input_img=image.copy(),
+                mask=np.zeros(image.shape[:2], dtype=np.uint8),
+                output_path=os.path.join(tmp_dir, "inline.png"),
+            )
+            inline_result = run_render_job(inline_job)
+
+            worker_job = _job(
+                tmp_dir,
+                image=image,
+                inpaint_input_img=image.copy(),
+                mask=np.zeros(image.shape[:2], dtype=np.uint8),
+                output_path=os.path.join(tmp_dir, "worker.png"),
+            )
+            pool = QtRenderPool(max_workers=1)
+            try:
+                worker_result = pool.submit(run_render_job, worker_job).result(timeout=120)
+            finally:
+                pool.shutdown(wait=True)
+
+            inline_pixels = imk.read_image(inline_result.final_output_path)
+            worker_pixels = imk.read_image(worker_result.final_output_path)
+
+            # 렌더가 통째로 비어 있으면(검정) 잡는다.
+            self.assertGreater(int(inline_pixels.astype(np.int64).sum()), 0)
+            self.assertGreater(int(worker_pixels.astype(np.int64).sum()), 0)
+            self.assertTrue(
+                np.array_equal(inline_pixels, worker_pixels),
+                "렌더 워커 산출물이 메인 스레드 산출물과 다르다",
+            )
+
+    def test_render_pool_propagates_worker_exception_to_future(self) -> None:
+        pool = QtRenderPool(max_workers=1)
+
+        def boom(_job):
+            raise RuntimeError("render exploded")
+
+        try:
+            future = pool.submit(boom, None)
+            with self.assertRaisesRegex(RuntimeError, "render exploded"):
+                future.result(timeout=120)
+        finally:
+            pool.shutdown(wait=True)
 
     def test_cancellation_mid_run_aborts_before_rasterize(self) -> None:
         calls = {"n": 0}

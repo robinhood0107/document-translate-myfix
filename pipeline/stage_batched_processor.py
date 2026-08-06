@@ -131,6 +131,7 @@ from modules.utils.textblock import ensure_text_block_id, sort_blk_list
 from modules.utils.translator_utils import get_raw_text, get_raw_translation
 
 from .batch_processor import BatchProcessor
+from .render_pool import QtRenderPool
 from .render_worker import RenderJobInput, RenderJobResult, run_render_job
 from .runtime_resource_arbiter import (
     RuntimeModelState,
@@ -343,7 +344,7 @@ class StageBatchedProcessor(BatchProcessor):
         # Phase 3a: 인페인팅 sweep 뒤에 렌더(약 300ms/page)를 숨기는 전용 단일
         # 워커. 렌더 워커는 순수 함수이므로 별도 실행기에 둔다 — 공유
         # QThreadPool/prewarm 실행기와 절대 섞지 않는다.
-        self._render_executor: ThreadPoolExecutor | None = None
+        self._render_executor: QtRenderPool | None = None
         self._render_cancel_event = threading.Event()
         self._pending_render_jobs: list[_PendingRenderJob] = []
         self._render_context_cache: tuple[Any, str] | None = None
@@ -1398,12 +1399,12 @@ class StageBatchedProcessor(BatchProcessor):
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
-    def _ensure_render_executor(self) -> ThreadPoolExecutor:
+    def _ensure_render_executor(self) -> QtRenderPool:
         if self._render_executor is None:
-            self._render_executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix="ct-render-worker",
-            )
+            # plain Python 스레드가 아니라 Qt 스레드여야 한다. 이유는
+            # `pipeline/render_pool.py` 의 모듈 주석 참고 — 디스패처 없는
+            # 스레드에서는 `scene.render()` 가 조용히 빈 이미지를 만든다.
+            self._render_executor = QtRenderPool(max_workers=1)
         return self._render_executor
 
     def _shutdown_render_executor(self) -> None:
@@ -1417,7 +1418,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._render_executor = None
             self._pending_render_jobs = []
             if executor is not None:
-                executor.shutdown(wait=True, cancel_futures=True)
+                executor.shutdown(wait=True)
         except Exception:
             logger.warning(
                 "렌더 워커 실행기 정리 중 예외가 발생했지만 무시합니다.",
