@@ -53,14 +53,20 @@ $ModelSpecs = @(
         Bytes = [int64]8098524160
         Sha256 = '55e42d513ee22ab1a301b5fa8f04a2812b69d6b351e7d34efdff2b8d8e8fa01a'
         Role = 'vlm'
-        DownloadUrl = ''
+        DownloadUrl = (
+            'https://huggingface.co/mradermacher/MangaLMM-GGUF/resolve/main/' +
+            'MangaLMM.Q8_0.gguf'
+        )
     }
     [pscustomobject][ordered]@{
         Name = 'MangaLMM.mmproj-Q8_0.gguf'
         Bytes = [int64]853119744
         Sha256 = '24f43da26996b54bf5764177a954e49b24ec38a53de34d8231764747b0dcd8d7'
         Role = 'vision-projector'
-        DownloadUrl = ''
+        DownloadUrl = (
+            'https://huggingface.co/mradermacher/MangaLMM-GGUF/resolve/main/' +
+            'MangaLMM.mmproj-Q8_0.gguf'
+        )
     }
 )
 

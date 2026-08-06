@@ -378,6 +378,24 @@ class PrepareScriptContractTests(unittest.TestCase):
                 self.assertIn("$NormalizedArguments", script)
                 self.assertIn('-replace "`r`n", "`n"', script)
 
+    def test_every_contracted_model_has_a_registered_download_source(self) -> None:
+        # 원본이 없으면 자가복구가 볼륨을 채울 수 없다. 등록된 출처를 계약으로 고정해
+        # 새 모델을 추가할 때 URL 을 빠뜨리지 않게 한다.
+        expected = {
+            "prepare_gemma_runtime.ps1": 1,
+            "prepare_hunyuanocr_llamacpp_runtime.ps1": 2,
+            "prepare_mangalmm_llamacpp_runtime.ps1": 2,
+            "prepare_paddleocr_llamacpp_runtime.ps1": 2,
+            # Spotting 은 대상 GGUF 하나와, 파생 전 원본 projector 하나를 등록한다.
+            "prepare_paddleocr_spotting_llamacpp_runtime.ps1": 2,
+        }
+        for name, count in expected.items():
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertNotIn("DownloadUrl = ''", script)
+                registered = script.count("https://huggingface.co/")
+                self.assertEqual(registered, count)
+
     def test_reseal_never_creates_a_volume(self) -> None:
         for name in PREPARE_SCRIPTS:
             with self.subTest(script=name):

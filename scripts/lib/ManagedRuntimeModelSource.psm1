@@ -17,6 +17,11 @@
 
 Set-StrictMode -Version Latest
 
+# Windows PowerShell 5.1 은 System.Net.Http 를 기본으로 올리지 않는다. 명시적으로
+# 올리지 않으면 내려받기가 "Unable to find type [System.Net.Http.HttpClient]" 로
+# 죽는다. 이미 올라와 있으면 아무 일도 일어나지 않는다.
+Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+
 function Get-ManagedRuntimeRepositoryRoot {
     <#
     .SYNOPSIS

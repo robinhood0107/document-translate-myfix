@@ -53,14 +53,22 @@ $ModelSpecs = @(
         Bytes = [int64]577949408
         Sha256 = 'cdafc794cafeae377868d7a40a70e282a737e39abe77c0d8b73614447b364a21'
         Role = 'vlm'
-        DownloadUrl = ''
+        # 공식 llama.cpp 배포판. 업스트림 파일명이 볼륨 안 이름과 다르므로 URL 을
+        # 그대로 두고 받는 쪽에서 계약 이름으로 저장한다.
+        DownloadUrl = (
+            'https://huggingface.co/ggml-org/HunyuanOCR-GGUF/resolve/main/' +
+            'HunyuanOCR-Q8_0.gguf'
+        )
     }
     [pscustomobject][ordered]@{
         Name = 'HunyuanOCR.mmproj-Q8_0.gguf'
         Bytes = [int64]732938240
         Sha256 = 'b77913164ff73d4c0dc4d994e236ed72bacbbe5c5db1ec9b2828627b46c32804'
         Role = 'vision-projector'
-        DownloadUrl = ''
+        DownloadUrl = (
+            'https://huggingface.co/ggml-org/HunyuanOCR-GGUF/resolve/main/' +
+            'mmproj-HunyuanOCR-Q8_0.gguf'
+        )
     }
 )
 
