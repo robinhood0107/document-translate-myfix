@@ -268,6 +268,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.inpainter_device_combo = self.tools_page.inpainter_device_combo
         self.inpainter_precision_combo = self.tools_page.inpainter_precision_combo
         self.inpaint_strategy_combo = self.tools_page.inpaint_strategy_combo
+        self.hd_strategy_performance_mode_checkbox = (
+            self.tools_page.hd_strategy_performance_mode_checkbox
+        )
         self.resize_spinbox = self.tools_page.resize_spinbox
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
         self.crop_trigger_spinbox = self.tools_page.crop_trigger_spinbox

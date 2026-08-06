@@ -783,11 +783,33 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         self.assertFalse(manager.should_manage_engine("HunyuanOCR", settings_page))
         self.assertFalse(manager.should_manage_engine("MangaLMM", settings_page))
 
-    def test_hunyuan_env_defaults_are_applied(self) -> None:
+    def test_hunyuan_env_comes_from_the_prepared_volume_contract(self) -> None:
+        """HunyuanOCR도 다른 관리형 엔진처럼 준비 볼륨 계약으로 구성된다.
+
+        과거에는 Gemma와 이름이 겹치는 일반 ``LLAMA_*`` 값을 주입해서 한쪽을
+        조정하면 다른 엔진까지 바뀌었다. 이제는 엔진 전용 이름만 나온다.
+        """
+
         manager = LocalOCRRuntimeManager()
-        env = manager._build_env("HunyuanOCR")
+        contract = mock.Mock()
+        contract.compose_environment.return_value = {
+            "HUNYUAN_OCR_LLAMA_CPP_IMAGE": "pinned@sha256:deadbeef",
+            "HUNYUAN_OCR_MODEL_VOLUME": "comic-translate-hunyuanocr-models-v2",
+            "HUNYUAN_OCR_LLAMA_GPU_LAYERS": "80",
+        }
+        with mock.patch.object(
+            manager,
+            "_hunyuan_ocr_runtime_contract",
+            return_value=contract,
+        ):
+            env = manager._build_env("HunyuanOCR")
         self.assertEqual(env["LLAMA_CPP_IMAGE"], DEFAULT_LLAMA_CPP_IMAGE)
-        self.assertEqual(env["LLAMA_N_GPU_LAYERS"], "80")
+        self.assertEqual(env["HUNYUAN_OCR_LLAMA_GPU_LAYERS"], "80")
+        self.assertEqual(
+            env["HUNYUAN_OCR_MODEL_VOLUME"],
+            "comic-translate-hunyuanocr-models-v2",
+        )
+        self.assertNotIn("LLAMA_N_GPU_LAYERS", env)
 
     def test_validate_engine_requires_docker_for_managed_mode(self) -> None:
         manager = LocalOCRRuntimeManager()

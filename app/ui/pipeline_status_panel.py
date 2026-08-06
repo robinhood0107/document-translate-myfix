@@ -76,6 +76,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self._user_positioned = False
         self._positioning_from_anchor = False
         self._pipeline_active = False
+        self._closed_by_user = False
         self._preview_path = ""
         self._preview_pixmap = QtGui.QPixmap()
         self._output_root = ""
@@ -421,6 +422,9 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         return self._display_mode
 
     def prepare_for_new_run(self) -> None:
+        # 새 실행은 사용자가 이전에 닫아둔 의도를 초기화한다. 닫힘은 그 실행에만
+        # 적용되고, 다음 실행의 진행 상황은 다시 보여야 한다.
+        self._closed_by_user = False
         self.cancel_auto_close()
         self._user_positioned = False
         self.set_logs_visible(True)
@@ -869,6 +873,10 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             self.set_logs_visible(True)
 
     def close_panel(self) -> None:
+        # 사용자가 닫았다는 사실을 남긴다. 이후 진행 이벤트가 패널을 다시 띄우면
+        # 닫기 버튼이 듣지 않는 것처럼 보인다. 실제로 실패가 반복되는 동안 닫을
+        # 수가 없었다.
+        self._closed_by_user = True
         if self._pipeline_active and self._display_mode == self.WINDOW_MODE:
             self.showMinimized()
             return
@@ -951,13 +959,14 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         }
 
         self.cancel_auto_close()
-        if not self.isVisible():
-            self.show()
-        if self._display_mode == self.WINDOW_MODE:
-            if not self.isMinimized():
+        if not getattr(self, "_closed_by_user", False):
+            if not self.isVisible():
+                self.show()
+            if self._display_mode == self.WINDOW_MODE:
+                if not self.isMinimized():
+                    self.raise_()
+            else:
                 self.raise_()
-        else:
-            self.raise_()
 
         self.service_value.setText(service_map.get(service_key, service_key))
         if page_total > 0 and page_index is not None:

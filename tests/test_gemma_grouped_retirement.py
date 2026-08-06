@@ -21,6 +21,7 @@ class _FakeQSettings:
     def __init__(self, values: dict[str, object]) -> None:
         self.values = dict(values)
         self.writes: list[tuple[str, object]] = []
+        self.syncs = 0
 
     def value(self, key: str, default=None, type=None):
         value = self.values.get(key, default)
@@ -31,6 +32,10 @@ class _FakeQSettings:
     def setValue(self, key: str, value: object) -> None:
         self.values[key] = value
         self.writes.append((key, value))
+
+    def sync(self) -> None:
+        # 마커를 쓰고 sync 하지 않으면 크래시 시 마이그레이션이 다시 돈다.
+        self.syncs += 1
 
 
 class GemmaGroupedRetirementMigrationTests(unittest.TestCase):

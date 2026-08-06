@@ -159,6 +159,7 @@ def refine_bubble_residue_inpaint(
     blk_list: Iterable[TextBlock],
     inpainter,
     config,
+    page_label: str = "",
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     block_list = list(blk_list or [])
     if (
@@ -281,7 +282,11 @@ def refine_bubble_residue_inpaint(
                 text_free_kept_count += 1
             if component_count >= 120:
                 page_cap_hit = True
-                logger.info("residue pass reached page component cap (%d); using collected mask", component_count)
+                logger.info(
+                    "[%s] inpaint-residue-cleanup: 인페인팅 후처리 컴포넌트 상한(%d) 도달, 수집된 마스크 사용",
+                    page_label or "?/?",
+                    component_count,
+                )
                 break
 
         if local_components > 0:
@@ -310,7 +315,9 @@ def refine_bubble_residue_inpaint(
     merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
 
     logger.info(
-        "residue pass applied: blocks=%s components=%d bubble_kept=%d text_free_kept=%d",
+        "[%s] inpaint-residue-cleanup: 인페인팅 후처리(잔여 텍스트 재정리) blocks=%s components=%d "
+        "bubble_kept=%d text_free_kept=%d",
+        page_label or "?/?",
         touched_blocks,
         component_count,
         bubble_kept_count,

@@ -65,6 +65,28 @@ def resolve_docker_executable() -> str:
     return _find_executable_on_path("docker.exe", "docker") or "docker"
 
 
+def remove_named_container(name: str) -> None:
+    """이름이 같은 잔여 컨테이너를 조용히 제거한다.
+
+    프로브 컨테이너는 ``--rm``으로 뜨지만, 앱이 강제 종료되면 이름이 남아 다음
+    실행이 "name already in use"로 실패한다. 고정 이름을 쓰는 이점을 잃지 않도록
+    실행 전에 항상 정리한다. 없으면 아무 일도 일어나지 않는다.
+    """
+
+    normalized = str(name or "").strip()
+    if not normalized:
+        return
+    try:
+        run_docker_command(
+            ["docker", "rm", "-f", normalized],
+            check=False,
+            timeout_sec=30.0,
+        )
+    except Exception:
+        # 정리 실패는 진단 정보일 뿐이다. 실제 문제라면 이어지는 run 이 드러낸다.
+        logger.debug("Could not remove a leftover probe container: %s", normalized)
+
+
 def run_docker_command(
     cmd: list[str],
     *,
@@ -322,8 +344,23 @@ def inspect_llama_cpp_version_from_image(
     cancel_checker: Callable[[], bool] | None = None,
 ) -> str:
     normalized = normalize_llama_cpp_image(image_ref)
+    # 이름을 주지 않으면 Docker 가 임의 이름을 붙여, 사용자에게는 정체를 알 수 없는
+    # 컨테이너가 떴다 사라지는 것으로 보인다. 제품이 만드는 컨테이너는 모두 이름이
+    # 정해져 있어야 한다.
+    probe_name = "comic-translate-llamacpp-version-probe"
+    remove_named_container(probe_name)
     completed = run_docker_command(
-        ["docker", "run", "--rm", "--entrypoint", "/app/llama-server", normalized, "--version"],
+        [
+            "docker",
+            "run",
+            "--name",
+            probe_name,
+            "--rm",
+            "--entrypoint",
+            "/app/llama-server",
+            normalized,
+            "--version",
+        ],
         check=False,
         cancel_checker=cancel_checker,
     )

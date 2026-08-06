@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from contextlib import contextmanager
@@ -12,6 +13,7 @@ from typing import Any, Callable, Iterator
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.gpu_handoff import (
     DEFAULT_ROUTER_VRAM_RELEASE_TIMEOUT_SEC,
+    gpu_release_enforcement_enabled,
     router_gpu_process_set,
     wait_for_router_container_stop_release,
     wait_for_router_vram_release,
@@ -55,6 +57,9 @@ class RouterStateError(RuntimeError):
 
 class RouterSetupError(RouterStateError):
     pass
+
+
+logger = logging.getLogger(__name__)
 
 
 class RouterReleaseError(RouterStateError):
@@ -380,6 +385,15 @@ class LocalLlamaRouterCoordinator:
     ) -> RouterReleaseEvidence | None:
         """Finish normal work or terminally stop an owned pair after failure/cancel."""
 
+        # 컨테이너를 정지하는 호출은 정의상 종료 정리다. 이 시점의 취소 신호는 "정리
+        # 하라"는 뜻이지 "정리를 그만두라"는 뜻이 아니다. 취소 검사기를 그대로 아래로
+        # 넘기면 컨테이너 정지가 스스로 취소되어 RELEASE_FAILED 로 떨어지고, 그
+        # 상태는 소유권을 계속 붙들기 때문에 이후 모든 실행이 preflight 에서
+        # "Router is in RELEASE_FAILED" 로 실패한다. 즉 한 번의 취소가 앱을 영구히
+        # 막는다. 그래서 정지 경로에서는 취소를 받지 않는다.
+        if stop_container:
+            cancel_checker = None
+
         with self._state_lock:
             loaded_model = self._loaded_model
             state = self._state
@@ -460,6 +474,41 @@ class LocalLlamaRouterCoordinator:
             cancel_checker=cancel_checker,
             allow_foreign_owner_teardown=allow_foreign_owner_teardown,
         )
+
+    def release_owned_pair_ports(
+        self,
+        pair: RouterPair,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> tuple[str, ...]:
+        """separate-server 경로를 위해 Router pair의 호스트 포트를 비운다.
+
+        이전 프로세스가 남긴 Router 컨테이너는 OCR과 Gemma 호스트 포트를 계속 쥐고
+        있어 separate-server 컨테이너가 절대 바인딩할 수 없다. 여기서는 Router 소유
+        컨테이너만 정지하고, 호출자가 곧 재사용할 separate-server 컨테이너를 포함한
+        다른 모든 listener는 건드리지 않는다. 이 코디네이터가 아직 컨테이너를 소유한
+        상태에서 포트를 회수하면 state machine이 깨지므로 그 경우는 거부한다.
+        """
+
+        with self._command_lock:
+            with self._state_lock:
+                if self._contract is not None or self._pair is not None:
+                    raise RouterStateError(
+                        "Router ports cannot be reclaimed while this coordinator owns a container."
+                    )
+            try:
+                return tuple(
+                    self._adapter.stop_owned_pair_ports(
+                        pair,
+                        cancel_checker=cancel_checker,
+                        reject_foreign=False,
+                        require_ports_free=False,
+                    )
+                )
+            except RouterAdapterOwnershipError as exc:
+                raise RouterOwnershipError(str(exc)) from exc
+            except RouterAdapterError as exc:
+                raise RouterSetupError(str(exc)) from exc
 
     @contextmanager
     def inference_lease(
@@ -707,13 +756,17 @@ class LocalLlamaRouterCoordinator:
         *,
         model_alias: str,
     ) -> None:
-        """Wait until a loaded Router worker is observable on its exact GPU.
+        """적재된 Router worker가 해당 GPU에서 관측될 때까지 기다린다.
 
-        The Router model API can report ``loaded`` before Docker/WSL publishes
-        the worker in the driver process table. Publishing the inference lease
-        before that point would make a later unload impossible to attribute,
-        even if memory returned correctly. Treat missing attribution as a
-        startup failure before any HTTP inference can begin.
+        Router 모델 API는 Docker/WSL이 worker를 드라이버 프로세스 표에 올리기
+        전에 ``loaded``를 보고할 수 있다. 그 시점에 추론 lease를 공개하면 이후
+        unload를 귀속시킬 수 없다.
+
+        다만 귀속 증거가 없다는 것만으로 기동을 막지는 않는다. WSL의 NVML
+        호환 계층은 활성 compute 프로세스를 아예 보고하지 않는 경우가 있어,
+        정상 상태에서도 증거가 비어 있을 수 있다. 모델은 이미 적재됐고 응답도
+        가능하므로 기다린 뒤 경고만 남기고 진행한다. 진단 목적으로 다시
+        강제하려면 ``COMIC_TRANSLATE_ENFORCE_GPU_RELEASE=1``을 설정한다.
         """
 
         baseline_uuid, baseline_used = self._router_gpu_memory(model_baseline)
@@ -763,10 +816,13 @@ class LocalLlamaRouterCoordinator:
             if time.monotonic() >= deadline:
                 break
             time.sleep(self._GPU_ATTRIBUTION_POLL_SEC)
-        raise RouterSetupError(
-            "Router model loaded without attributable GPU worker evidence: "
+        detail = (
+            "Router 모델이 적재됐지만 귀속 가능한 GPU worker 증거가 없습니다: "
             + last_reason
         )
+        if gpu_release_enforcement_enabled():
+            raise RouterSetupError(detail)
+        logger.warning("%s 모델은 적재됐으므로 실행을 계속합니다.", detail)
 
     def _unload_locked(
         self,
@@ -841,16 +897,20 @@ class LocalLlamaRouterCoordinator:
             vram=vram,
             completed_at=time.time(),
         )
-        # Preserve failed proof data in the snapshot too. The caller still
-        # receives an exception and the Arbiter lease remains held, but a
-        # terminal unload failure cannot be obscured by later cleanup logs.
+        # 증거는 성공·실패와 무관하게 스냅샷에 남긴다. 나중의 정리 로그가 해제
+        # 실패 사실을 덮지 못하게 하기 위한 진단 자료다.
         with self._state_lock:
             self._last_release_evidence = evidence
         if not evidence.verified:
-            raise RouterReleaseError(
-                "Router model unload completed but GPU return was not proven: "
+            detail = (
+                "Router 모델 unload 후 GPU 반환을 증명하지 못했습니다: "
                 f"{vram.get('status', 'unknown')}"
             )
+            if gpu_release_enforcement_enabled():
+                raise RouterReleaseError(detail)
+            # 드라이버 보고 노이즈 하나로 실행 전체를 멈추지 않는다. 상태 전이는
+            # 계속하고, 실제 문제라면 다음 적재가 VRAM 부족으로 드러낸다.
+            logger.warning("%s 실행은 계속합니다.", detail)
         with self._state_lock:
             self._loaded_model = None
             self._model_load_baseline = None
@@ -925,10 +985,13 @@ class LocalLlamaRouterCoordinator:
             sampler=self._gpu_sampler,
         )
         if not bool(vram.get("observed", False)):
-            raise RouterReleaseError(
-                "Router zero-model container stop completed but GPU return was not proven: "
+            detail = (
+                "Router 컨테이너 정지 후 GPU 반환을 증명하지 못했습니다: "
                 f"{vram.get('status', 'unknown')}"
             )
+            if gpu_release_enforcement_enabled():
+                raise RouterReleaseError(detail)
+            logger.warning("%s 컨테이너는 이미 정지했으므로 계속합니다.", detail)
         evidence = RouterReleaseEvidence(
             model_alias="",
             container_stopped=True,
