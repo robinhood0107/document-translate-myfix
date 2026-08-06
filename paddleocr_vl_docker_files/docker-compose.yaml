@@ -1,6 +1,6 @@
 services:
   paddleocr-llamacpp:
-    image: ${PADDLEOCR_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb}
+    image: ${PADDLEOCR_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13}
     pull_policy: missing
     container_name: paddleocr-llamacpp
     restart: unless-stopped

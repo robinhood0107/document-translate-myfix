@@ -99,3 +99,20 @@ class NotificationSoundTests(unittest.TestCase):
             summary = notification_sound._current_tool_summary()
 
         self.assertEqual(summary["ocr"], "PaddleOCR VL Spotting")
+
+    def test_current_tool_summary_marks_mangalmm_experimental_and_slow(self) -> None:
+        settings = mock.Mock()
+        settings.value.side_effect = (
+            lambda key, default, **_kwargs: {
+                "tools/workflow_mode": "stage_batched_pipeline",
+                "tools/ocr": "mangalmm",
+                "tools/translator": "Custom Local Server(Gemma)",
+            }.get(key, default)
+        )
+        with mock.patch(
+            "modules.utils.notification_sound.QtCore.QSettings",
+            return_value=settings,
+        ):
+            summary = notification_sound._current_tool_summary()
+
+        self.assertEqual(summary["ocr"], "MangaLMM (Experimental, Slow)")

@@ -122,6 +122,10 @@
         <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>자동번역 진행 중</source>
         <translation>자동번역 진행 중</translation>
     </message>
@@ -1091,8 +1095,8 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
 <context>
     <name>MangaLMMOCRPage</name>
     <message>
-        <source>MangaLMM Settings</source>
-        <translation>MangaLMM 설정</translation>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
+        <translation>MangaLMM(실험용, 느림) 설정</translation>
     </message>
     <message>
         <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
@@ -1430,10 +1434,6 @@ Please check your internet connection.</source>
         <translation>{service} 설정 누락</translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation>{service} 런타임 준비 실패</translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation>Stage-Batched Pipeline은 현재 제품 모드에서 단일 런타임 OCR 경로만 지원합니다.</translation>
     </message>
@@ -1688,6 +1688,10 @@ PSD 기능을 사용하려면 설치하세요.</translation>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
         <translation>
         최적값 (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
     </message>
     <message>
         <source>Comic Translate</source>
@@ -2237,6 +2241,10 @@ detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 na
     <message>
         <source>Automatic</source>
         <translation>자동</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
     </message>
     <message>
         <source>Calculating</source>
@@ -3273,6 +3281,10 @@ Restart now?</source>
         <translation>PaddleOCR VL Spotting(전체 페이지)</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation>MangaLMM</translation>
     </message>
@@ -3303,10 +3315,6 @@ Restart now?</source>
     <message>
         <source>HunyuanOCR Settings</source>
         <translation>HunyuanOCR 설정</translation>
-    </message>
-    <message>
-        <source>MangaLMM Settings</source>
-        <translation>MangaLMM 설정</translation>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
@@ -3391,6 +3399,10 @@ Restart now?</source>
     <message>
         <source>Tools</source>
         <translation>도구</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
+        <translation>MangaLMM(실험용, 느림) 설정</translation>
     </message>
     <message>
         <source>Text Rendering</source>
@@ -3706,6 +3718,10 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     <message>
         <source>HD Strategy</source>
         <translation>HD 전략</translation>
+    </message>
+    <message>
+        <source>개발자/성능모드</source>
+        <translation>개발자/성능모드</translation>
     </message>
     <message>
         <source>Resize</source>
@@ -5338,16 +5354,16 @@ It may have been moved, renamed, or deleted.
         <translation>HunyuanOCR</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation>MangaLMM</translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>크기 조정</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>크롭</translation>
+        <source>Original</source>
+        <translation type="unfinished">원본</translation>
     </message>
 </context>
 <context>
@@ -5402,6 +5418,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>자르기</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">원본</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
