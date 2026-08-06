@@ -107,6 +107,9 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
 PADDLEOCR_LLAMA_CPP_IMAGE_REF = DEFAULT_PADDLE_LLAMA_CPP_IMAGE
+# 캐시 식별자로 쓰는 이미지 토큰이다. digest로 고정된 참조면 digest만, 태그
+# 참조면 태그 전체가 남는다. 어느 쪽이든 이미지를 바꾸면 값이 함께 바뀌므로
+# 캐시 무효화 목적에는 그대로 성립한다.
 PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
     -1
 ]

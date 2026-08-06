@@ -36,7 +36,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 
 ## 기준 요약
 
-- image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - pull policy: `always`
 - OpenAI-compatible endpoint: `/v1/chat/completions`
 - health endpoint: `/health`

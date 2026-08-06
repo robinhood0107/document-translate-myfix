@@ -283,9 +283,11 @@ miss 모두 정확히 한 번 적용하고, 사전 변경 시 소비 결과와 d
 
 현재 추적 중인 compose/runtime 이미지:
 
-- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
-- HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 추론: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+관리형 llama.cpp 런타임(Gemma, PaddleOCR VL, PaddleOCR VL Spotting, HunyuanOCR,
+MangaLMM, Router)은 모두 하나의 CUDA 서버 이미지를 씁니다.
+
+- 기본값: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
+- 함께 지원: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 
 ## 참고 설치 문서
 
