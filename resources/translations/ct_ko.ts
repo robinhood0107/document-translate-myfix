@@ -2520,6 +2520,25 @@ This folder is separate from Auto-Recover snapshots.</source>
     </message>
 </context>
 <context>
+    <name>SeriesBreadcrumbBar</name>
+    <message>
+        <source>Not Synced</source>
+        <translation>미반영</translation>
+    </message>
+    <message>
+        <source>This chapter has changes that are not written back to the series project yet.</source>
+        <translation>이 세부 프로젝트에 아직 시리즈 프로젝트로 반영되지 않은 변경이 있습니다.</translation>
+    </message>
+    <message>
+        <source>Back to the series board</source>
+        <translation>시리즈 보드로 돌아가기</translation>
+    </message>
+    <message>
+        <source>Back</source>
+        <translation>뒤로</translation>
+    </message>
+</context>
+<context>
     <name>SeriesImportDialog</name>
     <message>
         <source>Create Series Project</source>
@@ -3446,6 +3465,14 @@ Restart now?</source>
     <message>
         <source>Delete the currently selected text or block box.</source>
         <translation>현재 선택한 텍스트 상자 또는 블록 상자를 삭제합니다.</translation>
+    </message>
+    <message>
+        <source>Back to Series Board</source>
+        <translation>시리즈 보드로 돌아가기</translation>
+    </message>
+    <message>
+        <source>Leave the current series chapter and go back to the series board.</source>
+        <translation>현재 세부 프로젝트를 벗어나 시리즈 보드로 돌아갑니다.</translation>
     </message>
     <message>
         <source>Restore Text Blocks</source>
@@ -5148,6 +5175,12 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>No supported files were found in the selected folder.</source>
         <translation>선택한 폴더에서 지원되는 파일을 찾지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.
+현재 실행 중 항목은 고정되며, 변경은 실행 종료 후 가능합니다.</translation>
     </message>
     <message>
         <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
