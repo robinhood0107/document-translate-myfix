@@ -18,6 +18,56 @@ from ..utils.inpainting import (
 from .schema import Config, HDStrategy
 
 
+# 블록 하나가 만드는 float32 임시 배열의 목표 크기(바이트). 이미지 크기에 상한을
+# 두는 게 아니라 임시 배열 크기에만 상한을 둔다.
+_BLEND_CHUNK_WORKING_BYTES = 8 * 1024 * 1024
+
+
+def blend_with_mask(
+    result: np.ndarray,
+    image: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """``result*(mask/255) + image*(1-mask/255)`` 를 uint8 로 돌려준다.
+
+    원래 구현은 ``result * (mask / 255) + image * (1 - (mask / 255))`` 한 줄이었다.
+    ``mask`` 가 uint8 이라 ``mask / 255`` 가 float64 로 승격되고, 전체 크기 임시
+    배열이 여섯 개나 만들어졌다. 4K 페이지(2160x3840x3) 기준으로 임시 배열
+    하나가 190 MiB, 순간 사용량이 760 MiB 였고, 반환값마저 uint8(24 MiB)이 아니라
+    float64(190 MiB)로 남아 하류로 8배 부풀어 전파됐다. 실제로 아래 오류로 죽었다.
+
+        MemoryError: Unable to allocate 190. MiB for an array with
+        shape (2160, 3840, 3) and data type float64
+
+    여기서는 float32 로 계산하고 행 블록 단위로 잘라 쓴다. 임시 배열 크기가
+    이미지 크기와 무관하게 일정해지므로, 어떤 해상도에서도 같은 메모리로 돈다.
+    부드러운(0/255 가 아닌) 마스크의 의미는 그대로 보존한다.
+    """
+
+    image = np.asarray(image)
+    result = np.asarray(result)
+    mask = np.asarray(mask)
+    if mask.ndim == 2:
+        mask = mask[:, :, np.newaxis]
+
+    height = int(image.shape[0])
+    # 블록 하나에서 살아 있는 float32 임시 배열은 alpha 와 chunk 두 개다.
+    row_bytes = max(1, int(np.prod(image.shape[1:], dtype=np.int64)) * 4)
+    rows_per_chunk = max(1, _BLEND_CHUNK_WORKING_BYTES // row_bytes)
+    blended = np.empty(image.shape, dtype=np.uint8)
+    for start in range(0, height, rows_per_chunk):
+        stop = min(start + rows_per_chunk, height)
+        alpha = mask[start:stop].astype(np.float32, copy=False) / np.float32(255.0)
+        chunk = result[start:stop].astype(np.float32, copy=False) * alpha
+        chunk += image[start:stop].astype(np.float32, copy=False) * (
+            np.float32(1.0) - alpha
+        )
+        np.clip(chunk, 0.0, 255.0, out=chunk)
+        np.rint(chunk, out=chunk)
+        blended[start:stop] = chunk.astype(np.uint8, copy=False)
+    return blended
+
+
 class InpaintModel:
     name = "base"
     min_size: Optional[int] = None
@@ -68,9 +118,7 @@ class InpaintModel:
 
         result, image, mask = self.forward_post_process(result, image, mask, config)
 
-        mask = mask[:, :, np.newaxis]
-        result = result * (mask / 255) + image * (1 - (mask / 255))
-        return result
+        return blend_with_mask(result, image, mask)
 
     def forward_post_process(self, result, image, mask, config):
         return result, image, mask
