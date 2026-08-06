@@ -846,6 +846,70 @@ class LocalOCRRuntimeManager:
                 if engine_key == "PaddleOCR VL":
                     self._paddle_idle_released = False
 
+    def prepare_engine_container(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> bool:
+        """모델은 올리지 않고 Router 컨테이너만 미리 띄운다.
+
+        Router v2 는 `--models-max 1 --no-models-autoload` 로 뜬다. 즉 컨테이너 기동
+        자체는 어떤 모델도 적재하지 않는다. 그래서 이 작업은 검출 sweep 과 겹쳐도
+        모델 적재 baseline 을 오염시키지 않는다 — PR #242 가 예열을 검출 뒤로 미룬
+        이유는 검출기의 ONNX 세션이 **모델 적재** baseline 에 섞이는 것이었고, 여기서는
+        모델을 적재하지 않는다.
+
+        컨테이너 기동은 이미지 인출·컨테이너 생성·서버 부팅을 포함해 실측 6~8초다.
+        그만큼을 검출 뒤에서 앞으로 당긴다.
+
+        준비를 실제로 수행했으면 True. Router 경로가 아니거나 실패하면 False —
+        이것은 최적화일 뿐이므로 실패가 배치를 멈춰서는 안 된다.
+        """
+
+        with self._lock:
+            coordinator = self._router_coordinator
+            if coordinator is None:
+                return False
+            try:
+                pair = self.router_pair_for_engine(engine_key, settings_page)
+            except Exception:
+                return False
+            if pair is None:
+                return False
+            if self._router_pair is not None:
+                # 이미 어떤 쌍을 소유하고 있다. 여기서 쌍 전환을 벌이면 예열이 아니라
+                # 본 작업이 된다. 준비는 건너뛰고 정식 경로에 맡긴다.
+                return False
+            try:
+                self._release_separate_server_for_router(engine_key)
+                release_gemma = getattr(
+                    self._router_gemma_manager,
+                    "release_separate_server_for_router",
+                    None,
+                )
+                if callable(release_gemma):
+                    release_gemma()
+                spec = self._router_runtime_spec(engine_key, settings_page, pair)
+                coordinator.prepare(
+                    spec,
+                    arbiter=resource_arbiter,
+                    service=runtime_service or self._router_service_name(engine_key),
+                    cancel_checker=cancel_checker,
+                )
+            except OperationCancelledError:
+                raise
+            except Exception:
+                logger.info(
+                    "Router 컨테이너 사전 기동을 건너뜁니다. 정식 경로가 처리합니다.",
+                    exc_info=True,
+                )
+                return False
+            return True
+
     def _ensure_router_engine(
         self,
         engine_key: str,

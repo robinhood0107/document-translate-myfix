@@ -71,7 +71,7 @@ class InpainterReleaseTests(unittest.TestCase):
             ],
             "model_ready",
         )
-        processor._release_inpainter_before_render([], start_gemma=False)
+        processor._release_inpainter_before_render([])
         snapshot = processor._runtime_resource_arbiter().snapshot()
         self.assertIsNone(snapshot.active_model)
         self.assertEqual(snapshot.states["inpainter"], "stopped")
@@ -111,7 +111,6 @@ class InpainterReleaseTests(unittest.TestCase):
             ):
                 processor._release_inpainter_before_render(
                     [],
-                    start_gemma=False,
                 )
 
         snapshot = processor._runtime_resource_arbiter().snapshot()
@@ -185,7 +184,13 @@ class InpainterReleaseTests(unittest.TestCase):
             min_drop_mb=16.0,
         )
 
-    def test_stage_handoff_preserves_page_outputs_before_starting_gemma(self) -> None:
+    def test_stage_handoff_preserves_page_outputs_before_rendering(self) -> None:
+        """인페인터를 내려도 렌더가 쓸 페이지 산출물이 그대로 남아야 한다.
+
+        순서가 번역 → 인페인팅으로 바뀌면서 이 해제 다음은 번역이 아니라 렌더다.
+        예전에는 여기서 Gemma 예열을 시작했지만 그 훅은 도달할 수 없게 되어 걷어냈다.
+        """
+
         processor = object.__new__(StageBatchedProcessor)
         events: list[str] = []
         release_report = {
@@ -204,7 +209,6 @@ class InpainterReleaseTests(unittest.TestCase):
         )
         processor._emit_benchmark_event = lambda *_args, **_kwargs: events.append("telemetry")
         processor._raise_if_cancelled = lambda: events.append("cancel-check")
-        processor._start_gemma_prewarm = lambda: events.append("gemma-start")
 
         image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
         mask = np.array([[0, 255], [255, 0]], dtype=np.uint8)
@@ -244,10 +248,8 @@ class InpainterReleaseTests(unittest.TestCase):
         processor._release_inpainter_before_render([page])
         rendered_after = render_page()
 
-        self.assertEqual(
-            events,
-            ["release", "telemetry", "cancel-check", "gemma-start"],
-        )
+        # 해제와 그 기록만 일어난다. Gemma 기동은 이제 이 경로에 없다.
+        self.assertEqual(events, ["release", "telemetry"])
         self.assertIsNotNone(app)
         np.testing.assert_array_equal(page.inpaint_input_img, image_before)
         np.testing.assert_array_equal(page.mask, mask_before)
@@ -310,7 +312,7 @@ class InpainterReleaseTests(unittest.TestCase):
         )
         processor._release_inpainter_before_render = (
             lambda _pages, **kwargs: events.append(
-                f"release:{kwargs['handoff_outcome']}:{kwargs['start_gemma']}"
+                f"release:{kwargs['handoff_outcome']}"
             )
         )
         page = StagePageContext(
@@ -323,7 +325,7 @@ class InpainterReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "inpaint aborted"):
             processor._inpaint_all([page])
 
-        self.assertEqual(events, ["release:aborted:False"])
+        self.assertEqual(events, ["release:aborted"])
 
     def test_handoff_preserves_debug_patch_mask_and_final_png_hashes(self) -> None:
         processor = object.__new__(StageBatchedProcessor)

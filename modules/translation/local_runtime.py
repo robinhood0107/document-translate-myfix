@@ -65,6 +65,11 @@ DEFAULT_GEMMA_STARTUP_TIMEOUT_SEC = 420
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
 
+# 프리페치 전용 컨테이너. 이름을 고정해 임의 이름 컨테이너가 생기지 않게 한다.
+GEMMA_PAGE_CACHE_PREFETCH_CONTAINER = "comic-translate-gemma-cache-warm"
+# 크기를 알아내는 컨테이너. 프리페치와 이름을 나눠 서로 정리를 방해하지 않게 한다.
+GEMMA_MODEL_SIZE_PROBE_CONTAINER = "comic-translate-gemma-cache-warm-size"
+
 _RUNTIME_CONFIG = {
     "compose_file": ROOT_DIR / "docker-compose.yaml",
     "managed_url": DEFAULT_GEMMA_LOCAL_ENDPOINT,
@@ -73,6 +78,86 @@ _RUNTIME_CONFIG = {
     "settings_page_name": DEFAULT_GEMMA_SETTINGS_PAGE,
     "container_name": "gemma-local-server",
 }
+
+
+def _available_page_cache_bytes(
+    *,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> int:
+    """모델을 담을 수 있는 여유 메모리(바이트). 알 수 없으면 0.
+
+    호스트가 아니라 **Docker 가 도는 리눅스 쪽** 여유를 본다. Windows 에서 모델
+    페이지 캐시는 호스트 RAM 이 아니라 WSL VM 안에 잡히므로, 호스트 여유를 보면
+    엉뚱한 판단을 한다.
+    """
+
+    completed = run_docker_command(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            GEMMA_MODEL_SIZE_PROBE_CONTAINER + "-mem",
+            "--pull",
+            "never",
+            "--entrypoint",
+            "/bin/sh",
+            DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
+            "-ec",
+            "awk '/^MemAvailable:/ {print $2}' /proc/meminfo",
+        ],
+        check=False,
+        cancel_checker=cancel_checker,
+    )
+    if completed.returncode != 0:
+        return 0
+    try:
+        # /proc/meminfo 는 kB 단위다.
+        return int(str(completed.stdout or "").strip()) * 1024
+    except (TypeError, ValueError):
+        return 0
+
+
+def _volume_model_size_bytes(
+    *,
+    volume_name: str,
+    model_name: str,
+    image_ref: str,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> int:
+    """볼륨 안 모델 파일 크기(바이트). 알 수 없으면 0."""
+
+    from modules.utils.llama_cpp_runtime import remove_named_container
+
+    remove_named_container(GEMMA_MODEL_SIZE_PROBE_CONTAINER)
+    completed = run_docker_command(
+        [
+            "docker",
+            "run",
+            "--name",
+            GEMMA_MODEL_SIZE_PROBE_CONTAINER,
+            "--rm",
+            "--pull",
+            "never",
+            "-e",
+            f"MODEL_FILE={model_name}",
+            "--mount",
+            f"type=volume,source={volume_name},target=/models,readonly",
+            "--entrypoint",
+            "/bin/sh",
+            image_ref,
+            "-ec",
+            'stat -c %s "/models/$MODEL_FILE"',
+        ],
+        check=False,
+        cancel_checker=cancel_checker,
+    )
+    if completed.returncode != 0:
+        return 0
+    try:
+        return int(str(completed.stdout or "").strip())
+    except (TypeError, ValueError):
+        return 0
 
 
 def _normalize_url(url: str) -> str:
@@ -362,6 +447,122 @@ class LocalGemmaRuntimeManager:
                 "runtime_preparation_version": contract.preparation_version,
                 "runtime_options": dict(contract.runtime_options),
             }
+
+    def prefetch_model_into_page_cache(
+        self,
+        settings_page: Any,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """모델 파일을 순차로 읽어 호스트 페이지 캐시에 올린다. GPU 는 쓰지 않는다.
+
+        llama.cpp 는 mmap 으로 GGUF 를 읽는다. 즉 적재 시간은 페이지 폴트가 디스크를
+        때리느냐 캐시에 맞느냐로 갈린다. 실측(13.58 GB, Docker Desktop WSL VM):
+
+        * 캐시 미적중 순차 읽기 7.99초 (1,825 MB/s)
+        * 캐시 적중 순차 읽기 0.72~0.88초 (약 20 GB/s)
+        * 실제 Gemma 적재는 첫 실행 43.95초, 이후 4.53~12.28초
+
+        적재가 순차 읽기보다 5배 넘게 느린 이유는 mmap 페이지 폴트의 접근 패턴이
+        순차가 아니기 때문이다. 그래서 순차 읽기로 캐시를 먼저 채우면 폴트가 전부
+        캐시 적중이 되어 첫 실행 적재가 재실행 수준으로 내려간다.
+
+        이 작업은 디스크에서 RAM 으로만 옮기므로 OCR sweep 과 겹쳐도 VRAM 을 다투지
+        않는다. 기존 볼륨 프로브와 같은 기법을 쓴다 — 핀된 런타임 이미지,
+        ``--pull never``, 읽기 전용 볼륨 마운트.
+        """
+
+        with self._lock:
+            self._startup_cancel_checker = cancel_checker
+            try:
+                _endpoint, configured_model = self.router_credentials(settings_page)
+                model_name = validate_gemma_model_name(
+                    str(configured_model or DEFAULT_GEMMA_LOCAL_MODEL)
+                )
+                volume_name = self._configured_volume_name()
+                image_ref = DEFAULT_GEMMA_LLAMA_CPP_IMAGE
+            except Exception as exc:
+                logger.info("Gemma 페이지 캐시 프리페치를 건너뜁니다: %s", exc)
+                return {"performed": False, "reason": "contract-unavailable"}
+
+            headroom = _available_page_cache_bytes(cancel_checker=cancel_checker)
+            model_bytes = _volume_model_size_bytes(
+                volume_name=volume_name,
+                model_name=model_name,
+                image_ref=image_ref,
+                cancel_checker=cancel_checker,
+            )
+            if model_bytes and headroom and headroom < model_bytes:
+                # 여유보다 큰 파일을 읽어 캐시를 채우면 다른 단계가 쓰던 캐시를
+                # 밀어낸다. 이득보다 손해가 크다.
+                logger.info(
+                    "Gemma 페이지 캐시 프리페치를 건너뜁니다: 여유 %.1f GB < 모델 %.1f GB",
+                    headroom / 1e9,
+                    model_bytes / 1e9,
+                )
+                return {
+                    "performed": False,
+                    "reason": "insufficient-memory",
+                    "available_bytes": headroom,
+                    "model_bytes": model_bytes,
+                }
+
+            from modules.utils.llama_cpp_runtime import remove_named_container
+
+            remove_named_container(GEMMA_PAGE_CACHE_PREFETCH_CONTAINER)
+            started_at = time.perf_counter()
+            completed = run_docker_command(
+                [
+                    "docker",
+                    "run",
+                    "--name",
+                    GEMMA_PAGE_CACHE_PREFETCH_CONTAINER,
+                    "--rm",
+                    "--pull",
+                    "never",
+                    "-e",
+                    f"MODEL_FILE={model_name}",
+                    "--mount",
+                    f"type=volume,source={volume_name},target=/models,readonly",
+                    "--entrypoint",
+                    "/bin/sh",
+                    image_ref,
+                    "-ec",
+                    'test -f "/models/$MODEL_FILE" && '
+                    'cat "/models/$MODEL_FILE" > /dev/null',
+                ],
+                check=False,
+                cancel_checker=cancel_checker,
+            )
+            elapsed_sec = time.perf_counter() - started_at
+            if completed.returncode != 0:
+                # 프리페치는 최적화일 뿐이다. 실패해도 적재는 그대로 된다.
+                logger.info(
+                    "Gemma 페이지 캐시 프리페치가 실패했습니다(코드 %s). 계속 진행합니다.",
+                    completed.returncode,
+                )
+                return {
+                    "performed": False,
+                    "reason": "docker-failed",
+                    "elapsed_sec": elapsed_sec,
+                }
+            logger.info(
+                "Gemma 페이지 캐시 프리페치 완료: %.2f초, %.1f GB",
+                elapsed_sec,
+                (model_bytes or 0) / 1e9,
+            )
+            return {
+                "performed": True,
+                "elapsed_sec": elapsed_sec,
+                "model_bytes": model_bytes,
+            }
+
+    def _configured_volume_name(self) -> str:
+        volume_name = str(
+            os.environ.get("GEMMA_MODEL_VOLUME", DEFAULT_GEMMA_MODEL_VOLUME)
+            or DEFAULT_GEMMA_MODEL_VOLUME
+        ).strip()
+        return validate_gemma_volume_name(volume_name)
 
     def ensure_server(
         self,

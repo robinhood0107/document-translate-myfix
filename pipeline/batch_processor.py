@@ -385,6 +385,39 @@ class BatchProcessor:
             panel_message_level="success",
         )
 
+    def _report_residue_cleanup(
+        self,
+        *,
+        index: int,
+        total: int,
+        image_path: str,
+        cleanup_stats: dict,
+    ) -> None:
+        """인페인팅 잔여 텍스트 재정리 결과를 파이프라인 상태 스트림에도 알린다.
+
+        residue pass 는 인페인팅 단계 안에서 도는 후처리라서, 그 사실이 로그에
+        드러나지 않으면 별개의 알 수 없는 단계처럼 보인다. inpaint-all 과 같은
+        stage_name 을 써서 이 로그가 인페인팅에 속한다는 걸 명시한다.
+        """
+
+        if not cleanup_stats or not cleanup_stats.get("applied"):
+            return
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="running",
+            step_key="inpaint-residue-cleanup",
+            stage_name="inpaint-all",
+            message=(
+                f"[{index + 1}/{total}] 인페인팅 후처리(잔여 텍스트 재정리): "
+                f"block={cleanup_stats.get('block_count', 0)} "
+                f"component={cleanup_stats.get('component_count', 0)}"
+            ),
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+        )
+
     def _report_runtime_progress(self, **payload):
         callback = getattr(self.main_page, "report_runtime_progress", None)
         if not callable(callback):
@@ -619,7 +652,10 @@ class BatchProcessor:
             status="running",
             step_key=f"preview_{stage_key}_disabled",
             stage_name=stage_key,
-            message=f"{stage_label} 미리보기: 디버그 export의 해당 체크가 꺼져 있어 생성하지 않습니다.",
+            message=(
+                f"[{index + 1}/{total}] {stage_label} 미리보기: 디버그 export의 해당 체크가 꺼져 있어 "
+                f"이번 실행(총 {total}페이지)에서는 생성하지 않습니다."
+            ),
             detail=f"{self._preview_export_key(stage_key) or stage_key}=False",
             page_index=index,
             page_total=total,
@@ -1863,6 +1899,13 @@ class BatchProcessor:
                         inpaint_blocks,
                         self.inpainting.inpainter_cache,
                         config,
+                        page_label=f"{index + 1}/{total_images}",
+                    )
+                    self._report_residue_cleanup(
+                        index=index,
+                        total=total_images,
+                        image_path=image_path,
+                        cleanup_stats=cleanup_stats,
                     )
                     (
                         inpaint_input_img,

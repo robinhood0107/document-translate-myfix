@@ -18,18 +18,45 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SEARCH_ROOTS = ("modules", "pipeline", "app", "controller.py")
 
 
-def _string_items(node: ast.AST) -> list[str] | None:
+def _module_string_constants(tree: ast.AST) -> dict[str, str]:
+    """모듈 최상단의 `NAME = "문자열"` 을 모은다.
+
+    컨테이너 이름을 상수로 두면 `docker run` 과 `remove_named_container` 가 같은
+    출처를 쓴다. 리터럴만 읽으면 그런 코드를 이름 없는 것으로 오판하므로, 상수도
+    풀어서 본다. 상수끼리 이어붙인 이름(`CONST + "-mem"`)도 해석한다.
+    """
+
+    constants: dict[str, str] = {}
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        resolved = _resolve_string(node.value, constants)
+        if resolved:
+            constants[target.id] = resolved
+    return constants
+
+
+def _resolve_string(node: ast.AST, constants: dict[str, str]) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id, "")
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _resolve_string(node.left, constants)
+        right = _resolve_string(node.right, constants)
+        return f"{left}{right}" if left and right else ""
+    return ""
+
+
+def _string_items(node: ast.AST, constants: dict[str, str]) -> list[str] | None:
     """리스트 리터럴에서 문자열 원소만 순서대로 뽑는다."""
 
     if not isinstance(node, (ast.List, ast.Tuple)):
         return None
-    items: list[str] = []
-    for element in node.elts:
-        if isinstance(element, ast.Constant) and isinstance(element.value, str):
-            items.append(element.value)
-        else:
-            items.append("")
-    return items
+    return [_resolve_string(element, constants) for element in node.elts]
 
 
 def _python_files() -> list[Path]:
@@ -51,8 +78,9 @@ class DockerContainerNameTests(unittest.TestCase):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
                 continue
+            constants = _module_string_constants(tree)
             for node in ast.walk(tree):
-                items = _string_items(node)
+                items = _string_items(node, constants)
                 if not items or len(items) < 2:
                     continue
                 if items[0] != "docker" or items[1] != "run":
@@ -76,8 +104,9 @@ class DockerContainerNameTests(unittest.TestCase):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
                 continue
+            constants = _module_string_constants(tree)
             for node in ast.walk(tree):
-                items = _string_items(node)
+                items = _string_items(node, constants)
                 if not items or len(items) < 2:
                     continue
                 if items[0] != "docker" or items[1] != "run":
@@ -104,8 +133,9 @@ class DockerContainerNameTests(unittest.TestCase):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
                 continue
+            constants = _module_string_constants(tree)
             for node in ast.walk(tree):
-                items = _string_items(node)
+                items = _string_items(node, constants)
                 if not items or len(items) < 2:
                     continue
                 if items[0] != "docker" or items[1] != "run":

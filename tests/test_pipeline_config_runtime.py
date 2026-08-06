@@ -11,7 +11,11 @@ from PySide6 import QtWidgets
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.utils.exceptions import LocalServiceSetupError
-from modules.utils.pipeline_config import validate_ocr, validate_translator
+from modules.utils.pipeline_config import (
+    get_config,
+    validate_ocr,
+    validate_translator,
+)
 
 
 class _FakeSettingsPage:
@@ -32,6 +36,13 @@ class _FakeSettingsPage:
         self._translator = "Custom Local Server(Gemma)"
         self._ocr = "Optimal (HunyuanOCR / PaddleOCR VL)"
         self._hunyuan_url = "http://127.0.0.1:28080/v1"
+        self._hd_strategy = {
+            "strategy": "Resize",
+            "resize_limit": 960,
+            "crop_margin": 512,
+            "crop_trigger_size": 512,
+            "developer_performance_mode": True,
+        }
 
     def get_tool_selection(self, key: str) -> str:
         if key == "ocr":
@@ -54,6 +65,9 @@ class _FakeSettingsPage:
 
     def get_all_settings(self) -> dict:
         return {"tools": {"translator": self._translator}}
+
+    def get_hd_strategy_settings(self) -> dict:
+        return self._hd_strategy
 
     def get_credentials(self, provider_name: str) -> dict:
         if provider_name == "Custom Local Server(Gemma)":
@@ -111,6 +125,19 @@ class PipelineConfigRuntimeTests(unittest.TestCase):
         validate_engine.assert_not_called()
         probe_managed_engine.assert_not_called()
         self.assertEqual(main.batch_report_ctrl.entries, [])
+
+    def test_get_config_forces_original_when_performance_mode_is_disabled(self) -> None:
+        settings_page = _FakeSettingsPage()
+        settings_page._hd_strategy = {
+            "strategy": "Crop",
+            "resize_limit": 1200,
+            "crop_margin": 333,
+            "crop_trigger_size": 444,
+            "developer_performance_mode": False,
+        }
+        config = get_config(settings_page)
+
+        self.assertEqual(config.hd_strategy, "Original")
 
     def test_validate_ocr_still_rejects_an_empty_server_url(self) -> None:
         """설정만으로 알 수 있는 결함은 계속 즉시 막는다."""

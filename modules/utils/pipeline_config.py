@@ -73,7 +73,10 @@ TRANSLATOR_REQUIREMENTS = {
 
 def get_config(settings_page: SettingsPage):
     strategy_settings = settings_page.get_hd_strategy_settings()
-    if strategy_settings['strategy'] == settings_page.ui.tr("Resize"):
+    if strategy_settings.get("developer_performance_mode") is False and "developer_performance_mode" in strategy_settings:
+        return Config(hd_strategy="Original")
+
+    if strategy_settings["strategy"] == settings_page.ui.tr("Resize"):
         return Config(hd_strategy="Resize", hd_strategy_resize_limit=strategy_settings['resize_limit'])
     if strategy_settings['strategy'] == settings_page.ui.tr("Crop"):
         return Config(
@@ -81,6 +84,8 @@ def get_config(settings_page: SettingsPage):
             hd_strategy_crop_margin=strategy_settings['crop_margin'],
             hd_strategy_crop_trigger_size=strategy_settings['crop_trigger_size'],
         )
+    if strategy_settings['strategy'] != settings_page.ui.tr("Original"):
+        return Config(hd_strategy="Original")
     return Config(hd_strategy="Original")
 
 

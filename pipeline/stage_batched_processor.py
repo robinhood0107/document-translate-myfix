@@ -328,6 +328,12 @@ class StageBatchedProcessor(BatchProcessor):
         self._timestamp: str = ""
         self._prewarm_executor: ThreadPoolExecutor | None = None
         self._prewarm_jobs: dict[str, Future] = {}
+        # 페이지 캐시 프리페치는 GPU 를 쓰지 않고 디스크만 읽는다. 런타임 명령 실행기
+        # (max_workers=1)를 8초 동안 붙들면 다음 런타임 명령이 그만큼 밀리므로,
+        # 별도 실행기에 둔다.
+        self._page_cache_executor: ThreadPoolExecutor | None = None
+        self._gemma_prefetch_job: Future | None = None
+        self._ocr_container_prewarm_job: Future | None = None
         self._prewarm_cancel_event = threading.Event()
         self._runtime_resource_arbiter_instance = RuntimeResourceArbiter()
         self._inpainter_runtime_lease_held = False
@@ -817,6 +823,12 @@ class StageBatchedProcessor(BatchProcessor):
             cancel_event.set()
         self._runtime_resource_arbiter().cancel_generation()
         jobs = list(self._prewarm_jobs.values())
+        # 컨테이너 사전 기동도 같은 실행기에 있다. 취소 대상에서 빠지면 teardown 이
+        # 그 작업이 끝날 때까지 기다린다.
+        container_job = getattr(self, "_ocr_container_prewarm_job", None)
+        if container_job is not None:
+            jobs.append(container_job)
+            self._ocr_container_prewarm_job = None
         for job in jobs:
             job.cancel()
         if executor is not None:
@@ -1234,6 +1246,150 @@ class StageBatchedProcessor(BatchProcessor):
             "HunyuanOCR": "hunyuanocr",
             "MangaLMM": "mangalmm",
         }.get(str(engine_key), str(engine_key).lower().replace(" ", "_"))
+
+    def _start_ocr_container_prewarm(self, policy: dict[str, Any]) -> None:
+        """OCR Router 컨테이너만 검출 sweep 과 겹쳐 미리 띄운다.
+
+        모델 적재는 지금처럼 검출이 끝난 뒤에 한다. PR #242 가 예열을 검출 뒤로 미룬
+        이유는 검출기의 ONNX 세션이 **모델 적재** baseline 에 섞이는 것이었는데,
+        Router v2 는 `--no-models-autoload` 로 떠서 컨테이너 기동만으로는 어떤 모델도
+        올리지 않는다. 그래서 이 부분만 앞으로 당길 수 있다.
+        """
+
+        if getattr(self, "_ocr_container_prewarm_job", None) is not None:
+            return
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+        prepare = getattr(runtime_manager, "prepare_engine_container", None)
+        if not callable(prepare):
+            return
+        engine_key = str(policy.get("primary_ocr_engine", "") or "")
+        if not engine_key:
+            return
+        settings_page = self.main_page.settings_page
+        service = self._ocr_runtime_service_name(engine_key)
+
+        def runner() -> bool:
+            if self._prewarm_cancel_checker():
+                return False
+            try:
+                return bool(
+                    prepare(
+                        engine_key,
+                        settings_page,
+                        resource_arbiter=self._runtime_resource_arbiter(),
+                        runtime_service=service,
+                        cancel_checker=self._prewarm_cancel_checker,
+                    )
+                )
+            except OperationCancelledError:
+                return False
+            except Exception:
+                # 컨테이너 사전 기동은 최적화일 뿐이다. 정식 경로가 처리한다.
+                logger.info(
+                    "OCR Router 컨테이너 사전 기동이 예외로 끝났습니다. 계속 진행합니다.",
+                    exc_info=True,
+                )
+                return False
+
+        self._ocr_container_prewarm_job = self._ensure_prewarm_executor().submit(runner)
+
+    def _await_ocr_container_prewarm(self) -> None:
+        """컨테이너 기동이 끝난 뒤에 모델 적재로 넘어간다.
+
+        같은 코디네이터를 두 스레드가 동시에 만지지 않게 한다. 여기까지 오면 검출
+        sweep 이 이미 지났으므로 대개 즉시 반환한다.
+        """
+
+        job = getattr(self, "_ocr_container_prewarm_job", None)
+        if job is None:
+            return
+        self._ocr_container_prewarm_job = None
+        try:
+            prepared = bool(job.result())
+        except Exception:
+            logger.info(
+                "OCR Router 컨테이너 사전 기동 결과를 읽지 못했습니다.",
+                exc_info=True,
+            )
+            return
+        if prepared:
+            self._emit_benchmark_event("ocr_container_prewarm", prepared=True)
+
+    def _start_gemma_page_cache_prefetch(self) -> None:
+        """Gemma GGUF 를 호스트 페이지 캐시로 미리 끌어올린다.
+
+        OCR sweep(실측 71초)과 겹쳐 돌린다. 디스크에서 RAM 으로만 옮기므로 OCR 이 쥔
+        VRAM 과 다투지 않는다. 실측으로 캐시 미적중 읽기가 8초이고, 이후 Gemma 적재가
+        44초에서 재실행 수준(약 5초)으로 내려간다.
+        """
+
+        if getattr(self, "_gemma_prefetch_job", None) is not None:
+            return
+        runtime_manager = getattr(
+            self.main_page,
+            "local_translation_runtime_manager",
+            None,
+        )
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+
+        def runner() -> dict[str, Any]:
+            if self._prewarm_cancel_checker():
+                return {"performed": False, "reason": "cancelled"}
+            try:
+                return runtime_manager.prefetch_model_into_page_cache(
+                    settings_page,
+                    cancel_checker=self._prewarm_cancel_checker,
+                )
+            except Exception:
+                # 프리페치는 최적화일 뿐이다. 실패가 배치를 멈춰서는 안 된다.
+                logger.info(
+                    "Gemma 페이지 캐시 프리페치가 예외로 끝났습니다. 계속 진행합니다.",
+                    exc_info=True,
+                )
+                return {"performed": False, "reason": "exception"}
+
+        if getattr(self, "_page_cache_executor", None) is None:
+            self._page_cache_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="ct-page-cache",
+            )
+        self._gemma_prefetch_job = self._page_cache_executor.submit(runner)
+
+    def _await_gemma_page_cache_prefetch(self) -> None:
+        """프리페치가 끝난 뒤에 Gemma 적재를 시작한다.
+
+        같은 파일을 프리페치와 mmap 이 동시에 읽으면 디스크를 두 배로 두드린다.
+        여기까지 오면 OCR sweep 이 이미 지났으므로 대개 즉시 반환한다.
+        """
+
+        job = getattr(self, "_gemma_prefetch_job", None)
+        if job is None:
+            return
+        self._gemma_prefetch_job = None
+        try:
+            result = job.result()
+        except Exception:
+            logger.info("Gemma 페이지 캐시 프리페치 결과를 읽지 못했습니다.", exc_info=True)
+            return
+        if isinstance(result, dict) and result.get("performed"):
+            self._emit_benchmark_event(
+                "gemma_page_cache_prefetch",
+                prefetch_elapsed_sec=float(result.get("elapsed_sec", 0.0) or 0.0),
+                prefetch_model_bytes=int(result.get("model_bytes", 0) or 0),
+            )
+
+    def _shutdown_page_cache_executor(self) -> None:
+        # 정리는 어떤 상황에서도 실패하면 안 된다. 생성자를 거치지 않은 객체에서도
+        # 안전하도록 속성 존재를 가정하지 않는다.
+        executor = getattr(self, "_page_cache_executor", None)
+        self._page_cache_executor = None
+        self._gemma_prefetch_job = None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _start_gemma_prewarm(self) -> None:
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
@@ -2367,7 +2523,6 @@ class StageBatchedProcessor(BatchProcessor):
                 try:
                     self._release_inpainter_before_render(
                         pages,
-                        start_gemma=False,
                         handoff_outcome="aborted",
                     )
                 except Exception:
@@ -2378,10 +2533,7 @@ class StageBatchedProcessor(BatchProcessor):
                     )
             raise
         if runtime_loaded:
-            self._release_inpainter_before_render(
-                pages,
-                start_gemma=False,
-            )
+            self._release_inpainter_before_render(pages)
         else:
             self._inpainter_release_gate = {
                 "required": False,
@@ -2962,6 +3114,13 @@ class StageBatchedProcessor(BatchProcessor):
                         inpaint_blocks,
                         self.inpainting.inpainter_cache,
                         config,
+                        page_label=f"{index + 1}/{total_images}",
+                    )
+                    self._report_residue_cleanup(
+                        index=index,
+                        total=total_images,
+                        image_path=ctx.image_path,
+                        cleanup_stats=ctx.cleanup_stats,
                     )
                     (
                         ctx.inpaint_input_img,
@@ -3098,9 +3257,14 @@ class StageBatchedProcessor(BatchProcessor):
         self,
         pages: list[StagePageContext],
         *,
-        start_gemma: bool = True,
         handoff_outcome: str = "completed",
     ) -> None:
+        """인페인팅이 끝나면 LaMa 를 내린다. 다음은 렌더다.
+
+        예전에는 여기서 Gemma 예열을 시작했다. 순서가 번역 → 인페인팅으로 바뀌면서
+        이 지점 다음은 번역이 아니라 렌더가 되었고, 그 훅은 도달할 수 없게 되었다.
+        두 호출부 모두 `start_gemma=False` 를 넘기고 있었으므로 매개변수째 걷어낸다.
+        """
         try:
             report = self.inpainting.release_inpainter_resources()
         except BaseException:
@@ -3136,21 +3300,9 @@ class StageBatchedProcessor(BatchProcessor):
                     )
                 )
             logger.warning(
-                "인페인터 VRAM 반환을 확인하지 못했습니다(status=%s). 번역 단계를 계속합니다.",
+                "인페인터 VRAM 반환을 확인하지 못했습니다(status=%s). 렌더 단계를 계속합니다.",
                 gate.get("status", "unknown"),
             )
-        if not start_gemma:
-            return
-        self._raise_if_cancelled()
-        for ctx in pages:
-            if ctx.failed_stage or ctx.no_text_detected:
-                ctx.translation_blocks = []
-                continue
-            ctx.translation_blocks = select_translate_inpaint_blocks(
-                ctx.blk_list
-            )
-        if any(ctx.translation_blocks for ctx in pages):
-            self._start_gemma_prewarm()
 
     def _build_project_translation_identity(
         self,
@@ -3413,6 +3565,9 @@ class StageBatchedProcessor(BatchProcessor):
                     "Gemma 기동을 계속합니다.",
                     gate.get("status", "unknown"),
                 )
+            # 프리페치가 아직 돌고 있으면 끝내고 적재한다. 같은 파일을 둘이 동시에
+            # 읽으면 디스크를 두 배로 두드린다.
+            self._await_gemma_page_cache_prefetch()
             self._start_gemma_prewarm()
             self._await_gemma_runtime()
             gemma_runtime_started = True
@@ -4470,6 +4625,10 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                 )
             self._raise_if_cancelled()
+            # 모델은 올리지 않고 OCR Router 컨테이너만 미리 띄운다. 검출 sweep 과
+            # 겹치며, `--no-models-autoload` 라서 모델 적재 baseline 을 오염시키지
+            # 않는다. 컨테이너 기동 6~8초를 검출 뒤에서 앞으로 당긴다.
+            self._start_ocr_container_prewarm(policy)
             with self._measure_performance(
                 stage="detect",
                 operation="stage_window",
@@ -4504,7 +4663,15 @@ class StageBatchedProcessor(BatchProcessor):
             # prewarm until it completes so the model-start baseline and the
             # exclusive runtime handoff are not contaminated by concurrent
             # detector inference.
+            # 컨테이너 기동이 끝난 뒤에 모델 적재로 넘어간다. 같은 코디네이터를 두
+            # 스레드가 동시에 만지지 않게 한다.
+            self._await_ocr_container_prewarm()
             self._start_ocr_prewarm(policy)
+            # Gemma GGUF 를 페이지 캐시로 끌어올리는 작업을 여기서 띄운다. OCR sweep
+            # 과 겹치며, 디스크에서 RAM 으로만 옮기므로 OCR 이 쥔 VRAM 과 다투지
+            # 않는다. 번역 단계에서 mmap 이 전부 캐시 적중이 되어 첫 실행 적재가
+            # 44초에서 재실행 수준으로 내려간다.
+            self._start_gemma_page_cache_prefetch()
             self._raise_if_cancelled()
             with self._measure_performance(
                 stage="ocr",
@@ -4659,6 +4826,7 @@ class StageBatchedProcessor(BatchProcessor):
             raise
         finally:
             self._persist_stage_rates()
+            self._shutdown_page_cache_executor()
             try:
                 self._shutdown_prewarm_executor()
             finally:
