@@ -56,14 +56,20 @@ $ModelSpecs = @(
         Bytes = [int64]935769056
         Sha256 = 'f3ae46ec885050acf4b3d31944431e1fd90d50664fb09126af4a3c050ba14ee8'
         Role = 'vlm'
-        DownloadUrl = ''
+        DownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF.gguf'
+        )
     }
     [pscustomobject][ordered]@{
         Name = 'PaddleOCR-VL-1.6-GGUF-mmproj.gguf'
         Bytes = [int64]881770560
         Sha256 = '204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a'
         Role = 'vision-projector'
-        DownloadUrl = ''
+        DownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF-mmproj.gguf'
+        )
     }
 )
 
