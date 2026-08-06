@@ -479,6 +479,11 @@ class ComicTranslate(ComicTranslateUI):
         self.series_workspace.open_series_settings_requested.connect(self.series_ctrl.edit_series_settings_dialog)
         self.series_workspace.global_settings_changed.connect(self.series_ctrl.request_global_settings_change)
 
+        # 자식 프로젝트 화면의 컨텍스트 표시줄. 보드 링크는 큐 실행 중에도
+        # 살아 있어야 하므로 `show_board_during_queue` 로 보낸다.
+        self.series_breadcrumb.board_requested.connect(self.series_ctrl.show_board_during_queue)
+        self.series_breadcrumb.back_requested.connect(self.series_ctrl.request_back)
+
     def _set_project_navigation_enabled(self, enabled: bool) -> None:
         widgets = [
             getattr(self, "new_project_button", None),
