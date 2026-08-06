@@ -65,6 +65,11 @@ SUPPORTED_SERIES_SOURCE_EXTS = {
 
 _UNSET = object()
 
+# "이 필드는 건드리지 않는다"를 뜻하는 sentinel 의 공개 이름. 호출자가 자기
+# 모듈에서 별도 `object()` 를 만들어 쓰면 sentinel 동일성 비교가 깨져,
+# 생략한 인자가 "빈 값이 주어졌다"로 잘못 해석된다.
+SERIES_FIELD_UNSET = _UNSET
+
 _TRANSLATOR_ALIASES = {
     "gemma_local": "Custom Local Server(Gemma)",
     "Custom Local Server": "Custom Local Server(Gemma)",
