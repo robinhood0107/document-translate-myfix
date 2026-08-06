@@ -151,6 +151,7 @@ class SettingsPageUI(QtWidgets.QWidget):
                 "paddleocr_vl_spotting"
             ),
             self.tr("HunyuanOCR"): "hunyuanocr",
+            self.tr("MangaLMM (Experimental, Slow)"): "mangalmm",
             self.tr("MangaLMM"): "mangalmm",
 
             # Workflow mode mappings
@@ -267,6 +268,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.inpainter_device_combo = self.tools_page.inpainter_device_combo
         self.inpainter_precision_combo = self.tools_page.inpainter_precision_combo
         self.inpaint_strategy_combo = self.tools_page.inpaint_strategy_combo
+        self.hd_strategy_performance_mode_checkbox = (
+            self.tools_page.hd_strategy_performance_mode_checkbox
+        )
         self.resize_spinbox = self.tools_page.resize_spinbox
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
         self.crop_trigger_spinbox = self.tools_page.crop_trigger_spinbox
@@ -440,7 +444,10 @@ class SettingsPageUI(QtWidgets.QWidget):
                 "avatar": MPixmap(".svg"),
             },
             {"title": self.tr("HunyuanOCR Settings"), "avatar": MPixmap(".svg")},
-            {"title": self.tr("MangaLMM Settings"), "avatar": MPixmap(".svg")},
+            {
+                "title": self.tr("MangaLMM (Experimental, Slow) Settings"),
+                "avatar": MPixmap(".svg"),
+            },
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},

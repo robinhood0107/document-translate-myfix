@@ -1,6 +1,7 @@
 from PySide6 import QtWidgets
 
 from ..dayu_widgets.check_box import MCheckBox
+from ..dayu_widgets.combo_box import MComboBox
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.spin_box import MSpinBox
 from .utils import create_title_and_combo, set_combo_box_width
@@ -83,9 +84,25 @@ class ToolsPage(QtWidgets.QWidget):
         inpainter_form.addRow(self.tr("device"), self.inpainter_device_combo)
         inpainter_form.addRow(self.tr("precision"), self.inpainter_precision_combo)
 
-        inpaint_strategy_widget, self.inpaint_strategy_combo = create_title_and_combo(self.tr("HD Strategy"), self.inpaint_strategy, h4=False)
+        self.hd_strategy_performance_mode_checkbox = MCheckBox(
+            self.tr("개발자/성능모드")
+        )
+        self.hd_strategy_performance_mode_checkbox.setChecked(False)
+
+        self.inpaint_strategy_widget = QtWidgets.QWidget()
+        self.inpaint_strategy_layout = QtWidgets.QVBoxLayout(self.inpaint_strategy_widget)
+        hd_strategy_title_bar = QtWidgets.QWidget()
+        hd_strategy_title_layout = QtWidgets.QHBoxLayout(hd_strategy_title_bar)
+        hd_strategy_title_layout.setContentsMargins(0, 0, 0, 0)
+        hd_strategy_title_layout.addWidget(MLabel(self.tr("HD Strategy")).h4())
+        hd_strategy_title_layout.addWidget(self.hd_strategy_performance_mode_checkbox)
+        hd_strategy_title_layout.addStretch()
+        self.inpaint_strategy_combo = MComboBox().small()
+        self.inpaint_strategy_combo.addItems(self.inpaint_strategy)
         set_combo_box_width(self.inpaint_strategy_combo, self.inpaint_strategy)
         self.inpaint_strategy_combo.setCurrentText(self.tr("Resize"))
+        self.inpaint_strategy_layout.addWidget(hd_strategy_title_bar)
+        self.inpaint_strategy_layout.addWidget(self.inpaint_strategy_combo)
 
         self.hd_strategy_widgets = QtWidgets.QWidget()
         self.hd_strategy_layout = QtWidgets.QVBoxLayout(self.hd_strategy_widgets)
@@ -139,6 +156,9 @@ class ToolsPage(QtWidgets.QWidget):
         self.hd_strategy_layout.addWidget(self.crop_widget)
         self.resize_widget.show()
         self.crop_widget.hide()
+        self.hd_strategy_performance_mode_checkbox.stateChanged.connect(
+            self._set_hd_strategy_performance_mode
+        )
         self.inpaint_strategy_combo.currentIndexChanged.connect(self._update_hd_strategy_widgets)
 
         self.use_gpu_checkbox = MCheckBox(self.tr("Use GPU"))
@@ -162,7 +182,7 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(inpainting_label)
         layout.addWidget(inpainter_widget)
         layout.addWidget(self.inpainter_runtime_widget)
-        layout.addWidget(inpaint_strategy_widget)
+        layout.addWidget(self.inpaint_strategy_widget)
         layout.addWidget(self.hd_strategy_widgets)
         layout.addSpacing(10)
         layout.addWidget(self.use_gpu_checkbox)
@@ -170,6 +190,7 @@ class ToolsPage(QtWidgets.QWidget):
 
         self._update_inpainter_runtime_widgets(self.inpainter_combo.currentIndex())
         self._update_hd_strategy_widgets(self.inpaint_strategy_combo.currentIndex())
+        self._set_hd_strategy_performance_mode(False)
 
     def _update_hd_strategy_widgets(self, index: int):
         strategy = self.inpaint_strategy_combo.itemText(index)
@@ -179,6 +200,16 @@ class ToolsPage(QtWidgets.QWidget):
             self.hd_strategy_widgets.setFixedHeight(0)
         else:
             self.hd_strategy_widgets.setFixedHeight(self.hd_strategy_widgets.sizeHint().height())
+
+    def _set_hd_strategy_performance_mode(self, enabled: bool):
+        if not bool(enabled):
+            self.inpaint_strategy_combo.setCurrentText(self.tr("Original"))
+
+        self.inpaint_strategy_combo.setEnabled(bool(enabled))
+        self.resize_spinbox.setEnabled(bool(enabled))
+        self.crop_margin_spinbox.setEnabled(bool(enabled))
+        self.crop_trigger_spinbox.setEnabled(bool(enabled))
+        self._update_hd_strategy_widgets(self.inpaint_strategy_combo.currentIndex())
 
     def _update_inpainter_runtime_widgets(self, index: int):
         key = self.inpainter_combo.itemText(index)

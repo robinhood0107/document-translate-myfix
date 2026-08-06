@@ -988,12 +988,34 @@ class TextController:
 
     # Formatting actions
     def on_font_dropdown_change(self, font_family: str):
+        # 고른 글꼴을 즉시 저장한다. 저장하지 않으면 앱을 다시 켤 때
+        # `projects.py` 의 복원 코드가 빈 값을 읽고 콤보를 비워버려서,
+        # 화면에는 글꼴 이름이 보이는데 `currentText()` 는 빈 문자열이 된다.
+        # 그 상태에서는 번역 결과가 사용자가 고른 글꼴로 렌더되지 않는다.
+        self.persist_render_font_family(font_family)
         if self._selected_text_items() and font_family:
             font_size = int(self.main.font_size_dropdown.currentText())
             self._apply_format_to_selected(
                 "change_text_font",
                 lambda item: item.set_font(font_family, font_size),
             )
+
+    @staticmethod
+    def persist_render_font_family(font_family: str) -> None:
+        """렌더 기본 글꼴을 전역 설정에 남긴다.
+
+        복원 코드가 이미 `text_rendering/font_family` 를 읽고 있었는데 쓰는 곳이
+        없었다. 그래서 값은 언제나 빈 문자열이었고 선택이 재시작을 넘기지 못했다.
+        """
+
+        normalized = str(font_family or "").strip()
+        if not normalized:
+            return
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("text_rendering")
+        settings.setValue("font_family", normalized)
+        settings.endGroup()
+        settings.sync()
 
     def on_font_size_change(self, font_size: str):
         if self._selected_text_items() and font_size:

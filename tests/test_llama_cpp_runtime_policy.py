@@ -9,6 +9,7 @@ from unittest import mock
 
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
+    SUPPORTED_LLAMA_CPP_IMAGES,
     normalize_llama_cpp_image,
     resolve_docker_compose_command,
     resolve_docker_executable,
@@ -47,9 +48,25 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         )
         self.assertEqual(normalize_llama_cpp_image(pinned), pinned)
 
-    def test_mutable_llama_cpp_tags_still_normalize_to_repository_default(self) -> None:
+    def test_repository_default_is_the_cuda13_server_tag(self) -> None:
         self.assertEqual(
-            normalize_llama_cpp_image("ghcr.io/ggml-org/llama.cpp:server-cuda"),
+            DEFAULT_LLAMA_CPP_IMAGE,
+            "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+        )
+        self.assertEqual(SUPPORTED_LLAMA_CPP_IMAGES[0], DEFAULT_LLAMA_CPP_IMAGE)
+
+    def test_supported_cuda_tags_are_preserved(self) -> None:
+        for supported in SUPPORTED_LLAMA_CPP_IMAGES:
+            with self.subTest(image=supported):
+                self.assertEqual(normalize_llama_cpp_image(supported), supported)
+
+    def test_unsupported_llama_cpp_tags_normalize_to_repository_default(self) -> None:
+        self.assertEqual(
+            normalize_llama_cpp_image("ghcr.io/ggml-org/llama.cpp:server"),
+            DEFAULT_LLAMA_CPP_IMAGE,
+        )
+        self.assertEqual(
+            normalize_llama_cpp_image("local/llama.cpp:latest"),
             DEFAULT_LLAMA_CPP_IMAGE,
         )
 

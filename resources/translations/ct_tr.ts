@@ -122,6 +122,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>자동번역 진행 중</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1071,7 +1075,7 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
 <context>
     <name>MangaLMMOCRPage</name>
     <message>
-        <source>MangaLMM Settings</source>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1397,10 +1401,6 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1654,6 +1654,10 @@ Install it to use PSD features.</source>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
         <translation>
         Optimal (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Comic Translate</source>
@@ -2196,6 +2200,10 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     <message>
         <source>Automatic</source>
         <translation>Otomatik</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Calculating</source>
@@ -3270,6 +3278,10 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3312,7 +3324,7 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>MangaLMM Settings</source>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3652,6 +3664,10 @@ Ekleme, silme, hariç tutma ve geri yükleme fırçalarında kullanılan boyutu 
     </message>
     <message>
         <source>precision</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>개발자/성능모드</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5270,16 +5286,16 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>Yeniden Boyutlandır</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>Kırp</translation>
+        <source>Original</source>
+        <translation type="unfinished">Orijinal</translation>
     </message>
 </context>
 <context>
@@ -5334,6 +5350,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>Kırp</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">Orijinal</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
