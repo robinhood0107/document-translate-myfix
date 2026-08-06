@@ -126,5 +126,5 @@ label을 먼저 확인한다. 두 컨테이너가 제거되고 다른 컨테이�
 ## 최종 검증 기록
 
 관리형 runtime 전환의 현재 적용 범위, 측정 결과와 보존·퇴역 기준은
-[Optimal++ v1.3.0 런타임·자산 판정](../performance-and-bugfix-audits/optimal-plus-v1.3.0/06-runtime-assets-and-llamacpp-retirement-ko.md)에
-정리한다. raw container 정보와 실행 로그는 추적하지 않는다.
+`benchmarking/lab`의 런타임·자산 판정 기록에 정리한다. raw container 정보와
+실행 로그는 추적하지 않는다.
