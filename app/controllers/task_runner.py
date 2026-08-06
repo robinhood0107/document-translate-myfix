@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
 from typing import TYPE_CHECKING, Callable
 
@@ -7,6 +8,8 @@ from PySide6 import QtCore
 from PySide6.QtCore import QCoreApplication
 
 from app.thread_worker import GenericWorker
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -67,14 +70,26 @@ class TaskRunnerController:
         operation = self.operation_queue.popleft()
 
         def enhanced_finished_callback():
-            if operation["finished_callback"]:
-                operation["finished_callback"]()
-            QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
+            # 호출자가 준 콜백이 예외를 던져도 큐는 계속 진행해야 한다. 그렇지
+            # 않으면 이후 모든 작업이 이미 끝난 작업 뒤에서 대기한다. 예외는 Qt
+            # 이벤트 루프로 빠져나가면 유실되고 프로세스를 죽일 수 있으므로 로그로
+            # 만 남긴다.
+            try:
+                if operation["finished_callback"]:
+                    operation["finished_callback"]()
+            except Exception:
+                logger.exception("Finished callback failed for a queued operation.")
+            finally:
+                QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_error_callback(error_tuple):
-            if operation["error_callback"]:
-                operation["error_callback"](error_tuple)
-            QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
+            try:
+                if operation["error_callback"]:
+                    operation["error_callback"](error_tuple)
+            except Exception:
+                logger.exception("Error callback failed for a queued operation.")
+            finally:
+                QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_result_callback(result):
             if operation["result_callback"]:
@@ -152,6 +167,9 @@ class TaskRunnerController:
 
     def clear_operation_queue(self):
         self.operation_queue.clear()
+        # 비운 큐에는 처리할 것이 남아 있지 않으므로 busy 플래그가 살아남으면 안
+        # 된다. 남은 플래그는 이후 모든 작업을 큐에 가둔다.
+        self.is_processing_queue = False
 
     def cancel_current_task(self):
         if self.main.current_worker:

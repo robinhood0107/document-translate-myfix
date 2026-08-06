@@ -140,6 +140,30 @@ Spotting 경로는 공식 `Spotting:` prompt, `--special` 좌표 token 모드,
 [/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md)를
 참고하세요.
 
+### HunyuanOCR 경로
+
+최적값의 중국어 분기가 쓰는 엔진입니다. 다른 관리형 엔진과 같은 규약으로
+versioned external model volume을 한 번 준비합니다. 필요한 파일은
+
+- `HunyuanOCR.Q8_0.gguf`
+- `HunyuanOCR.mmproj-Q8_0.gguf`
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_hunyuanocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\HunyuanOCR-GGUF'
+```
+
+준비 도구는 volume에 이미 있는 파일의 SHA-256이 일치하면 다시 복사하지 않고
+그대로 재사용합니다. 준비가 끝나면 CUDA 모델 적재 스모크를 실행하고 그 결과를
+ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 씁니다.
+
+과거 HunyuanOCR은 `testmodel` 폴더를 bind mount하고 Gemma와 이름이 겹치는
+`LLAMA_CTX_SIZE` 같은 일반 환경변수를 읽었습니다. 이제는 준비된 volume과
+`HUNYUAN_OCR_LLAMA_*` 전용 이름을 사용하므로, 한쪽을 조정해도 다른 엔진이
+바뀌지 않습니다.
+
 ## 4. 권장 앱 설정
 
 - 워크플로 모드: `Stage-Batched Pipeline (Recommended)`

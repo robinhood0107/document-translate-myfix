@@ -135,6 +135,31 @@ mode, and `1,605,632` projector pixel budget. The crop route keeps its original
 `1,003,520` projector. See
 [/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md).
 
+### HunyuanOCR route
+
+This is the engine the Optimal choice uses for Chinese. Prepare its versioned
+external model volume once, under the same contract as the other managed
+engines. Put these two files in one model directory:
+
+- `HunyuanOCR.Q8_0.gguf`
+- `HunyuanOCR.mmproj-Q8_0.gguf`
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_hunyuanocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\HunyuanOCR-GGUF'
+```
+
+The tool reuses a file already present in the volume when its SHA-256 matches
+instead of copying it again. It then runs a CUDA model-load smoke test and
+records the result in the ready manifest. Use `-Mode Verify` to re-check only.
+
+HunyuanOCR previously bind-mounted the `testmodel` folder and read generic
+environment names such as `LLAMA_CTX_SIZE`, which it shared with Gemma. It now
+uses the prepared volume and dedicated `HUNYUAN_OCR_LLAMA_*` names, so tuning
+one engine no longer changes another.
+
 ## 4. Recommended app settings
 
 - Workflow mode: `Stage-Batched Pipeline (Recommended)`
