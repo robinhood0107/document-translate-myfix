@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import tempfile
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
     from controller import ComicTranslate
 
 
+logger = logging.getLogger(__name__)
+
 _UNSET = object()
 
 
@@ -77,6 +80,10 @@ class SeriesController(QtCore.QObject):
         self._queue_retry_remaining: dict[str, int] = {}
         self._child_unsynced_dirty = False
         self._recovery_loaded = False
+        # 시리즈 전역 설정은 설정 페이지 위젯에 그대로 써 넣는다. 시리즈를 닫을
+        # 때 되돌리지 않으면 사용자의 앱 기본 설정이 그 시리즈 값으로 바뀐 채
+        # 남는다. 진입 시 한 번 찍어두고 컨텍스트 해제 때 복원한다.
+        self._main_globals_snapshot: dict[str, object] | None = None
 
     def has_series_loaded(self) -> bool:
         return bool(self.series_file)
@@ -107,6 +114,8 @@ class SeriesController(QtCore.QObject):
 
     def reset_series_context(self) -> None:
         self._clear_active_child_materialization()
+        # 시리즈 전역 설정으로 덮어썼던 앱 설정을 원래대로 돌린다.
+        self._restore_main_globals_snapshot()
         self.series_file = None
         self.series_manifest = {}
         self.series_items = []
@@ -400,13 +409,55 @@ class SeriesController(QtCore.QObject):
             source="series",
         )
 
-    def _clear_active_child_materialization(self) -> None:
+    def _clear_active_child_materialization(self, *, preserve_workdir: bool = False) -> None:
+        """자식 materialization 을 놓는다.
+
+        `preserve_workdir` 는 시리즈로 반영하지 못한 변경이 남았을 때만 쓴다.
+        작업 디렉터리를 지우면 그 변경이 복구 불가능하게 사라지므로, 반영에
+        실패한 경우에는 디스크에 남겨 두고 사용자에게 경로를 알린다.
+        """
         self.active_child_item_id = None
         self.active_child_project_path = None
         self._child_unsynced_dirty = False
-        if self.active_child_temp_dir and os.path.isdir(self.active_child_temp_dir):
+        if not preserve_workdir and self.active_child_temp_dir and os.path.isdir(self.active_child_temp_dir):
             shutil.rmtree(self.active_child_temp_dir, ignore_errors=True)
         self.active_child_temp_dir = None
+
+    def _sync_active_child_before_teardown(self) -> bool:
+        """자식 작업본을 버리기 전에 미반영 변경을 시리즈로 밀어 넣는다.
+
+        큐 종료·실패·일시정지 경로의 `_show_board(push_history=False)` 는
+        `_run_guarded_project_transition` 가드를 타지 않는다. 그 경로가
+        작업 디렉터리를 지우고 `set_project_clean()` 까지 부르기 때문에,
+        여기서 반영하지 못한 변경은 경고 없이 사라졌다.
+        """
+        if not self.is_child_project_active() or not self._child_unsynced_dirty:
+            return True
+        try:
+            self.sync_active_child_to_series()
+            return True
+        except Exception:
+            logger.warning(
+                "Failed to sync the active child project back into the series project.",
+                exc_info=True,
+            )
+            return False
+
+    def _warn_child_sync_failed(self, work_dir: str | None) -> None:
+        message = self.main.tr(
+            "Could not write this chapter's changes back to the series project."
+        )
+        if work_dir:
+            message += "\n" + self.main.tr(
+                "The working copy was kept so nothing is lost: {path}"
+            ).format(path=work_dir)
+        Messages.show_warning(
+            self.main,
+            message,
+            duration=None,
+            closable=True,
+            source="series",
+        )
 
     def _load_series_worker(self, file_name: str, recovery_loaded: bool = False) -> dict[str, object]:
         if recovery_loaded:
@@ -722,8 +773,52 @@ class SeriesController(QtCore.QObject):
             return None
         return str(item.get("display_name") or "").strip() or None
 
+    def _snapshot_main_global_settings(self) -> dict[str, object]:
+        """현재 설정 페이지 상태를 시리즈 global_settings 와 같은 스키마로 뜬다.
+
+        복원 경로가 `_apply_global_settings_to_main` 을 그대로 재사용할 수
+        있도록 스키마를 맞춘다.
+        """
+        settings_page = self.main.settings_page
+        return {
+            "source_language": self.main.lang_mapping.get(self.main.s_combo.currentText(), ""),
+            "target_language": self.main.lang_mapping.get(self.main.t_combo.currentText(), ""),
+            "ocr": settings_page.get_tool_selection("ocr"),
+            "translator": settings_page.get_tool_selection("translator"),
+            "workflow_mode": settings_page.get_workflow_mode(),
+            "use_gpu": bool(settings_page.ui.use_gpu_checkbox.isChecked()),
+            "export_settings": dict(settings_page.get_export_settings()),
+            "render_settings": self._series_render_settings_from_main(),
+        }
+
+    def _capture_main_globals_snapshot(self) -> None:
+        """시리즈 값이 위젯을 덮기 전에 원래 값을 한 번만 기록한다."""
+        if self._main_globals_snapshot is not None:
+            return
+        try:
+            self._main_globals_snapshot = self._snapshot_main_global_settings()
+        except Exception:
+            # 스냅샷 실패가 시리즈 열기를 막을 이유는 없다. 복원을 포기할 뿐이다.
+            self._main_globals_snapshot = None
+            logger.warning("Failed to snapshot main global settings.", exc_info=True)
+
+    def _restore_main_globals_snapshot(self) -> None:
+        snapshot = self._main_globals_snapshot
+        self._main_globals_snapshot = None
+        if not snapshot:
+            return
+        try:
+            self._apply_global_settings_to_main(snapshot)
+        except Exception:
+            logger.warning("Failed to restore main global settings.", exc_info=True)
+
     def _apply_series_globals_to_main(self) -> None:
-        global_settings = normalize_series_global_settings(self.series_manifest.get("global_settings"))
+        self._capture_main_globals_snapshot()
+        self._apply_global_settings_to_main(
+            normalize_series_global_settings(self.series_manifest.get("global_settings"))
+        )
+
+    def _apply_global_settings_to_main(self, global_settings: dict[str, object]) -> None:
         source_lang = global_settings.get("source_language")
         target_lang = global_settings.get("target_language")
         if source_lang:
@@ -937,8 +1032,15 @@ class SeriesController(QtCore.QObject):
             return
         if push_history:
             self._push_history()
+        # 작업본을 버리기 전에 미반영 변경을 시리즈로 밀어 넣는다. 실패하면
+        # 작업 디렉터리를 남겨 두고 경고한다 — 아래 `set_project_clean()` 이
+        # dirty 표시까지 지우기 때문에, 여기서 놓치면 조용히 사라진다.
+        stale_work_dir = self.active_child_temp_dir
+        sync_ok = self._sync_active_child_before_teardown()
         self.main.image_ctrl.clear_state()
-        self._clear_active_child_materialization()
+        self._clear_active_child_materialization(preserve_workdir=not sync_ok)
+        if not sync_ok:
+            self._warn_child_sync_failed(stale_work_dir)
         self.main.project_file = self.series_file
         self.main.project_kind = PROJECT_KIND_SERIES
         self._apply_workspace_state()
@@ -1540,7 +1642,15 @@ class SeriesController(QtCore.QObject):
         try:
             self.sync_active_child_to_series()
         except Exception:
-            # Keep the main batch flow stable even if the series sync fails.
+            # 배치 흐름 자체는 계속 살려 둔다. 다만 예전에는 아무 흔적도 남기지
+            # 않고 빠져나가서, 방금 번역한 결과가 시리즈에 반영되지 않았다는
+            # 사실을 사용자도 로그도 알 수 없었다.
+            logger.warning(
+                "Series sync after the batch run failed; the chapter result is not "
+                "written back to the series project yet.",
+                exc_info=True,
+            )
+            self._warn_child_sync_failed(self.active_child_temp_dir)
             return
 
         if not self._queue_active:
