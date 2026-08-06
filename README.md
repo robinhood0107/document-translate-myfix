@@ -4,7 +4,7 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-The fork's product release version is `1.4.0`. Upstream `2.7.1` is recorded
+The fork's product release version is `1.5.0`. Upstream `2.7.1` is recorded
 separately as the latest selective-backport lineage and is not this fork's
 product version.
 
