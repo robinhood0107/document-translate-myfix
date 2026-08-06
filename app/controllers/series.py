@@ -154,9 +154,35 @@ class SeriesController(QtCore.QObject):
                 can_back=bool(self.history_back),
                 can_forward=bool(self.history_forward),
             )
+        self._refresh_breadcrumb()
 
     def _current_series_display_name(self) -> str:
         return os.path.basename(self.series_file or "")
+
+    def breadcrumb_state(self) -> dict[str, object] | None:
+        """자식 컨텍스트 표시줄에 넘길 상태. 자식이 없으면 `None`."""
+        if not self.is_child_project_active():
+            return None
+        return {
+            "series_name": self._current_series_display_name(),
+            "child_name": self._active_child_display_name() or "",
+            "unsynced": bool(self._child_unsynced_dirty),
+            "can_back": bool(self.history_back),
+            "locked_reason": (
+                self.main.tr(
+                    "Queue changes are locked while automatic translation is running.\n"
+                    "The current running item stays fixed, and you can change the queue "
+                    "after the run finishes."
+                )
+                if self._queue_change_locked()
+                else ""
+            ),
+        }
+
+    def _refresh_breadcrumb(self) -> None:
+        refresh = getattr(self.main, "refresh_series_breadcrumb", None)
+        if callable(refresh):
+            refresh()
 
     def _set_series_window_title(self, child_name: str | None = None) -> None:
         series_name = self._current_series_display_name() or f"Series{SERIES_PROJECT_FILE_EXT}"
@@ -181,6 +207,10 @@ class SeriesController(QtCore.QObject):
                 self.main.tr("Series Project - {series}[*]").format(series=series_name)
                 + suffix
             )
+        # 창 제목이 갱신되는 지점은 곧 시리즈 컨텍스트가 바뀌는 지점이다.
+        # 커스텀 타이틀바는 폭이 좁으면 제목을 숨기므로 표시줄이 실질적인
+        # 컨텍스트 표시 수단이다.
+        self._refresh_breadcrumb()
 
     def notify_active_child_dirty(self) -> None:
         if not self.is_child_project_active():
@@ -1385,6 +1415,8 @@ class SeriesController(QtCore.QObject):
         loaded = load_series_project(self.series_file)
         self.series_manifest = dict(loaded["manifest"])
         self.series_items = list(loaded["items"])
+        # 큐 상태가 바뀌면 표시줄의 히스토리 잠금 사유도 함께 바뀐다.
+        self._refresh_breadcrumb()
 
     def pause_queue_translation(self) -> None:
         if not self.series_file or not self._queue_active:
