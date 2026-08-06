@@ -202,6 +202,9 @@ class ComicTranslateUI(
         self._center_stack.addWidget(self.settings_page)
 
         self._center_stack.setCurrentWidget(self.startup_home)
+        # 설정 페이지를 벗어나면 대기 중인 저장을 곧바로 확정한다. 250 ms 디바운스
+        # 안에서 페이지를 떠나면 마지막 변경이 그대로 사라졌다.
+        self._center_stack.currentChanged.connect(self._flush_settings_on_leave)
         self._set_document_tools_visible(False)
 
         self.main_layout.addWidget(self._center_stack)
@@ -265,6 +268,14 @@ class ComicTranslateUI(
 
     def show_home(self) -> None:
         self.show_home_screen()
+
+    def _flush_settings_on_leave(self, _index: int) -> None:
+        settings_page = getattr(self, "settings_page", None)
+        if settings_page is None:
+            return
+        if self._center_stack.currentWidget() is settings_page:
+            return
+        settings_page.flush_pending_save()
 
     def show_settings_page(self):
         if not self.settings_page:

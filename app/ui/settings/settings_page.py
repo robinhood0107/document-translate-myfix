@@ -133,6 +133,53 @@ PADDLE_SERVER_URL_KEY = "paddleocr_vl/server_url"
 PADDLE_LEGACY_RELAY_SERVER_URL = (
     "http://127.0.0.1:28118/layout-parsing"
 )
+TEXT_RENDERING_COLOR_KEY = "text_rendering/color"
+TEXT_RENDERING_OUTLINE_COLOR_KEY = "text_rendering/outline_color"
+# 설정 페이지에 존재하지 않는 위젯(`color_button`/`outline_color_button`)을 읽던 버그가
+# 저장할 때마다 이 두 값을 기본값으로 확정했다. 정확히 이 값일 때만 키를 지워서, 다음
+# 로드가 실제 위젯(`main.block_font_color_button`)의 값을 채우게 한다.
+TEXT_RENDERING_CLOBBERED_COLOR = "#000000"
+TEXT_RENDERING_CLOBBERED_OUTLINE_COLOR = "#ffffff"
+TEXT_RENDERING_COLOR_RECOVERY_VERSION = 1
+TEXT_RENDERING_COLOR_RECOVERY_VERSION_KEY = (
+    "text_rendering/color_recovery_version"
+)
+
+# 비어 있으면 "사용자가 지웠다"가 아니라 "아직 모른다"를 뜻하는 잎 키들.
+# 이런 키에 빈 값을 쓰면 선택이 조용히 사라진다. `font_family` 가 그렇게 사라졌고,
+# 콤보에 없는 이름이 저장돼 있으면 `translator` 도 같은 방식으로 지워진다.
+# 반대로 `extra_context` 나 `completion_sound_file` 처럼 빈 값이 정당한 키는 포함하지
+# 않는다 — 그쪽은 지우는 것이 사용자 의도다.
+NEVER_EMPTY_SETTING_KEYS = frozenset(
+    {
+        "language",
+        "theme",
+        "workflow_mode",
+        "translator",
+        "ocr",
+        "detector",
+        "inpainter",
+        "strategy",
+        "font_family",
+        "color",
+        "outline_color",
+    }
+)
+
+
+def should_write_setting_value(key: str, value: object) -> bool:
+    """이 값을 디스크에 써도 되는지 판단한다.
+
+    ``None`` 은 잘못된 QVariant 가 되므로 어떤 키에도 쓰지 않는다. 그 밖에는
+    :data:`NEVER_EMPTY_SETTING_KEYS` 에 속한 키의 빈 값만 거부한다. 위젯이 없거나
+    선택이 비어 있을 때 기본값이 디스크에 확정되는 경로를 이 한 규칙으로 막는다.
+    """
+
+    if value is None:
+        return False
+    if key in NEVER_EMPTY_SETTING_KEYS and not str(value).strip():
+        return False
+    return True
 
 
 def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
@@ -175,6 +222,53 @@ def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
         GEMMA_GROUPED_RETIREMENT_VERSION_KEY,
         GEMMA_GROUPED_RETIREMENT_VERSION,
     )
+    settings.sync()
+    return changed
+
+
+def migrate_clobbered_text_rendering_colors(settings: QSettings) -> bool:
+    """저장할 때마다 기본값으로 덮여 있던 본문 색 두 개를 1회 복구한다.
+
+    `get_text_rendering_settings` 가 설정 페이지에 없는 위젯을 읽어, 저장이 일어날
+    때마다 `color` 를 `#000000`, `outline_color` 를 `#ffffff` 로 확정했다. 그 값이
+    정확히 남아 있는 경우에만 키를 지워, 다음 로드가 실제 서식 도구모음 위젯의 값을
+    채우게 한다. 사용자가 진짜로 검정/흰색을 골랐다면 다음 저장이 곧바로 다시 쓴다.
+    """
+
+    try:
+        current_version = int(
+            settings.value(
+                TEXT_RENDERING_COLOR_RECOVERY_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= TEXT_RENDERING_COLOR_RECOVERY_VERSION:
+        return False
+
+    changed = False
+    for key, clobbered in (
+        (TEXT_RENDERING_COLOR_KEY, TEXT_RENDERING_CLOBBERED_COLOR),
+        (TEXT_RENDERING_OUTLINE_COLOR_KEY, TEXT_RENDERING_CLOBBERED_OUTLINE_COLOR),
+    ):
+        stored = settings.value(key, "", type=str)
+        if str(stored or "").strip().lower() == clobbered:
+            settings.remove(key)
+            changed = True
+    if changed:
+        logger.warning(
+            "Cleared text rendering colors that a missing-widget write had "
+            "forced back to the defaults."
+        )
+
+    settings.setValue(
+        TEXT_RENDERING_COLOR_RECOVERY_VERSION_KEY,
+        TEXT_RENDERING_COLOR_RECOVERY_VERSION,
+    )
+    settings.sync()
     return changed
 
 
@@ -478,6 +572,8 @@ class SettingsPage(QtWidgets.QWidget):
 
         self.ui = SettingsPageUI(self)
         self._loading_settings = False
+        # `load_settings` 밖에서 위젯을 채우는 구간의 깊이. 시작 시퀀스가 대표적이다.
+        self._external_load_depth = 0
         self._is_background_check = False
         self._current_language = None
         self._settings_save_timer = QTimer(self)
@@ -529,13 +625,57 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.notifications_page.test_ntfy_requested.connect(self.play_test_ntfy_notification)
         self._connect_live_save_signals()
 
+    @property
+    def _suppress_live_save(self) -> bool:
+        return self._loading_settings or self._external_load_depth > 0
+
+    def begin_external_load(self) -> None:
+        """설정 페이지 위젯을 밖에서 채우는 구간을 시작한다.
+
+        `load_settings` 는 자기 실행 동안만 자동저장을 막는다. 그런데 시작 시퀀스는
+        `load_main_page_settings()` 를 **먼저** 부르고, 그쪽이 설정 페이지의 스핀박스와
+        체크박스를 건드린다. 그 시점에는 아무 가드도 없어서 250 ms 타이머가 걸리고,
+        `load_settings` 가 끝난 뒤에 터져서 **그 순간의 위젯 상태 그대로 전체 저장**이
+        실행됐다. 로드가 위젯을 못 채운 항목은 그때 생성자 기본값이 디스크에 확정된다.
+        `min_font_size` 가 25 에서 9(생성자 기본값)로 바뀐 경로가 정확히 이것이다.
+
+        이 구간으로 시작 시퀀스 전체를 감싸고, 끝에서 대기 중인 타이머를 저장 없이
+        취소한다. 앱을 켰다 끄는 것만으로 저장된 설정이 바뀌어서는 안 된다.
+        """
+
+        self._external_load_depth += 1
+
+    def end_external_load(self) -> None:
+        if self._external_load_depth <= 0:
+            return
+        self._external_load_depth -= 1
+        if self._external_load_depth == 0:
+            self._settings_save_timer.stop()
+
+    def flush_pending_save(self) -> None:
+        """대기 중인 저장이 있으면 지금 디스크에 내린다.
+
+        250 ms 디바운스 안에서 페이지를 떠나거나 앱이 죽으면 마지막 변경이 사라진다.
+        설정 페이지를 벗어나는 순간 확정하면 그 구멍이 없어진다.
+        """
+
+        if not self._settings_save_timer.isActive():
+            return
+        self._settings_save_timer.stop()
+        if self._suppress_live_save:
+            return
+        self.save_settings()
+
+    def has_pending_save(self) -> bool:
+        return self._settings_save_timer.isActive()
+
     def _save_settings_if_not_loading(self, *_args):
-        if self._loading_settings:
+        if self._suppress_live_save:
             return
         self._settings_save_timer.start()
 
     def _flush_scheduled_settings_save(self):
-        if self._loading_settings:
+        if self._suppress_live_save:
             return
         self.save_settings()
 
@@ -570,6 +710,7 @@ class SettingsPage(QtWidgets.QWidget):
             widget.currentTextChanged.connect(self._save_settings_if_not_loading)
 
         checkbox_widgets = [
+            self.ui.hd_strategy_performance_mode_checkbox,
             self.ui.use_gpu_checkbox,
             self.ui.image_checkbox,
             self.ui.uppercase_checkbox,
@@ -1045,25 +1186,44 @@ class SettingsPage(QtWidgets.QWidget):
         return {service_name: self.get_credentials(service_name) for service_name in self.ui.credential_services}
 
     def get_hd_strategy_settings(self):
+        # 예전에는 활성 전략의 키만 저장했다. Resize↔Crop 을 오가면 반대편 값이 낡은
+        # 채로 남아, 전략을 되돌렸을 때 사용자가 마지막에 맞춘 값이 아니라 예전 값이
+        # 돌아왔다. 세 값을 항상 함께 저장한다 — 읽는 쪽은 그대로 전략별로 골라 쓴다.
         strategy = self.ui.inpaint_strategy_combo.currentText()
-        settings = {"strategy": strategy}
+        if not self.ui.hd_strategy_performance_mode_checkbox.isChecked():
+            strategy = self.ui.tr("Original")
 
-        if strategy == self.ui.tr("Resize"):
-            settings["resize_limit"] = self.ui.resize_spinbox.value()
-        elif strategy == self.ui.tr("Crop"):
-            settings["crop_margin"] = self.ui.crop_margin_spinbox.value()
-            settings["crop_trigger_size"] = self.ui.crop_trigger_spinbox.value()
-
-        return settings
+        return {
+            "strategy": strategy,
+            "resize_limit": self.ui.resize_spinbox.value(),
+            "crop_margin": self.ui.crop_margin_spinbox.value(),
+            "crop_trigger_size": self.ui.crop_trigger_spinbox.value(),
+            "developer_performance_mode": bool(
+                self.ui.hd_strategy_performance_mode_checkbox.isChecked()
+            ),
+        }
 
     @staticmethod
-    def _selected_color_name(widget, fallback: str) -> str:
+    def _selected_color_name(widget) -> str:
+        """위젯이 실제로 들고 있는 색. 알 수 없으면 빈 문자열."""
+
         value = widget.property("selected_color") if widget is not None else None
-        value = str(value or "").strip()
-        return value or fallback
+        return str(value or "").strip()
+
+    def _color_button(self, attribute: str):
+        """본문 색 버튼을 실제 소유자인 메인 윈도우에서 찾는다.
+
+        예전에는 `self.ui` 에서 `color_button` / `outline_color_button` 을 찾았는데
+        설정 페이지 UI 에는 그런 속성이 없다. `getattr` 이 `None` 을 돌려주고
+        기본값으로 떨어져, **저장할 때마다** 사용자가 고른 색이 검정/흰색으로
+        되돌아갔다. 진짜 위젯은 메인 윈도우의 서식 도구모음에 있다.
+        """
+
+        owner = self.window()
+        return getattr(owner, attribute, None)
 
     def get_text_rendering_settings(self) -> dict[str, object]:
-        return {
+        settings: dict[str, object] = {
             "min_font_size": int(self.ui.min_font_spinbox.value()),
             "max_font_size": int(self.ui.max_font_spinbox.value()),
             "auto_max_font_size": bool(self.ui.auto_max_font_checkbox.isChecked()),
@@ -1071,15 +1231,21 @@ class SettingsPage(QtWidgets.QWidget):
                 self.ui.auto_max_font_profile_combo.currentData() or "current"
             ),
             "upper_case": bool(self.ui.uppercase_checkbox.isChecked()),
-            "color": self._selected_color_name(
-                getattr(self.ui, "color_button", None),
-                "#000000",
-            ),
-            "outline_color": self._selected_color_name(
-                getattr(self.ui, "outline_color_button", None),
-                "#ffffff",
-            ),
         }
+
+        # 색은 읽을 수 있을 때만 넣는다. 읽지 못했다면 저장된 값을 그대로 두는 것이
+        # 기본값으로 덮는 것보다 언제나 옳다.
+        color = self._selected_color_name(
+            self._color_button("block_font_color_button")
+        )
+        if color:
+            settings["color"] = color
+        outline_color = self._selected_color_name(
+            self._color_button("outline_font_color_button")
+        )
+        if outline_color:
+            settings["outline_color"] = outline_color
+        return settings
 
     def get_all_settings(self):
         checkpoint_checkbox = getattr(
@@ -1125,7 +1291,7 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def on_shortcut_changed(self, shortcut_id: str, sequence: str) -> None:
-        if self._loading_settings:
+        if self._suppress_live_save:
             return
 
         settings = QSettings("ComicLabs", "ComicTranslate")
@@ -1162,20 +1328,6 @@ class SettingsPage(QtWidgets.QWidget):
             if loaded_families:
                 self.font_imported.emit(loaded_families[0])
 
-    def select_color(self, outline=False):
-        default_color = QtGui.QColor("#000000") if not outline else QtGui.QColor("#FFFFFF")
-        color_dialog = QtWidgets.QColorDialog()
-        color_dialog.setCurrentColor(default_color)
-
-        if color_dialog.exec() == QtWidgets.QDialog.Accepted:
-            color = color_dialog.selectedColor()
-            if color.isValid():
-                button = self.ui.color_button if not outline else self.ui.outline_color_button
-                button.setStyleSheet(
-                    f"background-color: {color.name()}; border: none; border-radius: 5px;"
-                )
-                button.setProperty("selected_color", color.name())
-
     def save_settings(self):
         settings = QSettings("ComicLabs", "ComicTranslate")
         all_settings = self.get_all_settings()
@@ -1190,6 +1342,9 @@ class SettingsPage(QtWidgets.QWidget):
                 settings_obj.endGroup()
             else:
                 mapped_value = self.ui.value_mappings.get(group_value, group_value)
+                if not should_write_setting_value(group_key, mapped_value):
+                    # 확신 없는 값으로 저장된 선택을 덮지 않는다.
+                    return
                 settings_obj.setValue(group_key, mapped_value)
 
         for key, value in all_settings.items():
@@ -1230,15 +1385,30 @@ class SettingsPage(QtWidgets.QWidget):
 
         credentials = self.get_credentials()
         save_keys = self.ui.save_keys_checkbox.isChecked()
+        # 켜짐 → 꺼짐 전이인지 먼저 판단한다. 예전에는 저장할 때마다 `remove("")` 로
+        # 그룹 전체를 지웠고, 방금 쓴 `save_keys` 와 레거시 `Custom*_*` 키까지 함께
+        # 날아갔다. 저장 자체는 사용자 의도가 아니므로, 지우는 것은 실제로 체크를
+        # 끄는 순간 한 번만 한다.
+        was_saving_keys = settings.value(
+            "credentials/save_keys",
+            False,
+            type=bool,
+        )
         settings.beginGroup("credentials")
-        settings.setValue("save_keys", save_keys)
         if save_keys:
             for service, cred in credentials.items():
                 translated_service = self._normalize_service_name(service)
                 for field in self.CREDENTIAL_FIELDS.get(translated_service, ("api_key",)):
-                    settings.setValue(f"{translated_service}_{field}", cred.get(field, ""))
-        else:
-            settings.remove("")
+                    value = cred.get(field, "")
+                    if value is None:
+                        # 위젯이 없으면 잘못된 QVariant 가 저장된다. 건드리지 않는다.
+                        continue
+                    settings.setValue(f"{translated_service}_{field}", value)
+        elif was_saving_keys:
+            for key in settings.childKeys():
+                if key != "save_keys":
+                    settings.remove(key)
+        settings.setValue("save_keys", save_keys)
         settings.endGroup()
 
     def load_settings(self):
@@ -1310,18 +1480,33 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.use_gpu_checkbox.setChecked(False)
 
         settings.beginGroup("hd_strategy")
-        strategy = settings.value("strategy", "Resize")
+        developer_performance_mode = settings.value(
+            "developer_performance_mode",
+            False,
+            type=bool,
+        )
+        self.ui.hd_strategy_performance_mode_checkbox.setChecked(
+            bool(developer_performance_mode)
+        )
+
+        strategy = settings.value("strategy", "Resize", type=str)
+        if not self.ui.hd_strategy_performance_mode_checkbox.isChecked():
+            strategy = self.ui.tr("Original")
         translated_strategy = self.ui.reverse_mappings.get(strategy, strategy)
         if self.ui.inpaint_strategy_combo.findText(translated_strategy) != -1:
             self.ui.inpaint_strategy_combo.setCurrentIndex(self.ui.inpaint_strategy_combo.findText(translated_strategy))
         else:
             self.ui.inpaint_strategy_combo.setCurrentIndex(0)
 
-        if strategy == "Resize":
-            self.ui.resize_spinbox.setValue(settings.value("resize_limit", 960, type=int))
-        elif strategy == "Crop":
-            self.ui.crop_margin_spinbox.setValue(settings.value("crop_margin", 512, type=int))
-            self.ui.crop_trigger_spinbox.setValue(settings.value("crop_trigger_size", 512, type=int))
+        # 저장 쪽이 세 값을 항상 함께 쓰므로 읽기도 대칭으로 셋 다 복원한다. 전략별로만
+        # 읽으면 반대편 스핀박스가 생성자 기본값으로 남고, 다음 저장이 그 기본값을
+        # 디스크에 확정한다.
+        self.ui.resize_spinbox.setValue(settings.value("resize_limit", 960, type=int))
+        self.ui.crop_margin_spinbox.setValue(settings.value("crop_margin", 512, type=int))
+        self.ui.crop_trigger_spinbox.setValue(settings.value("crop_trigger_size", 512, type=int))
+        self.ui.tools_page._set_hd_strategy_performance_mode(
+            self.ui.hd_strategy_performance_mode_checkbox.isChecked()
+        )
         settings.endGroup()
 
         runtime_defaults = inpainter_default_settings(inpainter)

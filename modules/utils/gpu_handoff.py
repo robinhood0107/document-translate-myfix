@@ -20,9 +20,36 @@ DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB = 512.0
 DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO = 0.85
 DEFAULT_ROUTER_VRAM_RELEASE_TIMEOUT_SEC = 30.0
 DEFAULT_ROUTER_CONTAINER_RESIDUAL_MB = 528.0
-DEFAULT_ROUTER_STOPPED_BASELINE_TOLERANCE_MB = 16.0
-DEFAULT_ROUTER_CONTAINER_RELEASE_RATIO = 0.85
-DEFAULT_ROUTER_STOPPED_RELEASE_RATIO = 0.90
+# WSL의 GPU 메모리 보고는 컨테이너를 정지한 뒤에도 기준선 위로 수십 MiB 표류한다.
+# 실측에서 모델 메모리는 2초 안에 전부 돌아왔는데도 사용량이 기준선 +30~40 MiB에
+# 머물렀다. 좁은 오차는 정상 해제를 실패로 읽으므로 그 노이즈보다 넉넉하게 둔다.
+DEFAULT_ROUTER_STOPPED_BASELINE_TOLERANCE_MB = 1024.0
+DEFAULT_ROUTER_CONTAINER_RELEASE_RATIO = 0.50
+DEFAULT_ROUTER_STOPPED_RELEASE_RATIO = 0.50
+
+# GPU 해제 증거를 강제할지 여부. 기본값은 강제하지 않는다.
+#
+# 증거 수집과 기록은 그대로 유지한다. 달라지는 것은 증거가 부족할 때의 처리다.
+# 강제하면 정상 동작 중에도 드라이버 보고 노이즈 하나로 OCR·번역 전체가 중단되는데,
+# 이 제품에서 그 대가는 너무 크다. 해제 실패는 다음 모델 적재가 VRAM 부족으로
+# 드러내주고, 컨테이너 정지 자체는 Docker가 보장한다. 따라서 증거는 진단 자료로
+# 남기고 실행은 계속한다.
+#
+# 진단이나 회귀 조사를 위해 다시 강제하려면 환경변수
+# `COMIC_TRANSLATE_ENFORCE_GPU_RELEASE=1`을 설정한다.
+GPU_RELEASE_ENFORCEMENT_ENV = "COMIC_TRANSLATE_ENFORCE_GPU_RELEASE"
+
+
+def gpu_release_enforcement_enabled(
+    environment: Any | None = None,
+) -> bool:
+    """GPU 해제 증거를 실패로 처리해야 하는지 반환한다."""
+
+    import os
+
+    source = environment if environment is not None else os.environ
+    raw_value = str(source.get(GPU_RELEASE_ENFORCEMENT_ENV, "") or "").strip()
+    return raw_value.lower() in {"1", "true", "yes", "on"}
 
 
 def estimate_torch_cuda_storage_mb(resource: Any) -> dict[str, Any]:

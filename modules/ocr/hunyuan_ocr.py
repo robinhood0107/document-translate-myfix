@@ -28,6 +28,7 @@ from modules.utils.ocr_debug import (
 from modules.utils.textblock import TextBlock
 
 from .base import OCREngine
+from .hunyuan_llamacpp_runtime_contract import HUNYUAN_OCR_MODEL_ALIAS
 
 
 logger = logging.getLogger(__name__)
@@ -297,6 +298,10 @@ class HunyuanOCREngine(OCREngine):
     def _request_ocr_text_for_prompt(self, image: np.ndarray, prompt: str) -> str:
         data_url = self._image_data_url(image)
         payload = {
+            # 관리형 라우터는 모델이 이미 적재돼 있어도 요청의 model 필드로만
+            # 대상을 고른다. 단일 모델 서버는 이 값을 무시하므로, 명시해도
+            # separate-server 경로의 동작은 달라지지 않는다.
+            "model": HUNYUAN_OCR_MODEL_ALIAS,
             "messages": [
                 {
                     "role": "user",
