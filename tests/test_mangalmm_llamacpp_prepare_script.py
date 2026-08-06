@@ -50,12 +50,7 @@ class MangaLMMPrepareScriptTests(unittest.TestCase):
         script = PREPARE_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn(DEFAULT_MANGALMM_MODEL_VOLUME, script)
-        image_repository, image_digest = DEFAULT_MANGALMM_LLAMA_CPP_IMAGE.split(
-            "@",
-            1,
-        )
-        self.assertIn(f"{image_repository}@sha256:", script)
-        self.assertIn(image_digest.removeprefix("sha256:"), script)
+        self.assertIn(f"$ImageRef = '{DEFAULT_MANGALMM_LLAMA_CPP_IMAGE}'", script)
         for name, spec in MANGALMM_MODEL_SPECS.items():
             self.assertIn(name, script)
             self.assertIn(str(spec["bytes"]), script)

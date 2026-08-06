@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from modules.ocr.paddle_crop.runtime import (
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
 )
+from modules.utils.llama_cpp_runtime import is_supported_llama_cpp_image
 from .image_policy import PADDLE_SPOTTING_OFFICIAL_IMAGE_MAX_PIXELS
 
 
@@ -317,7 +318,6 @@ def build_paddle_spotting_runtime_contract(
         "preparation_version": PADDLE_SPOTTING_RUNTIME_PREPARATION_VERSION,
         "volume_name": safe_volume,
         "ready": True,
-        "source_image_ref": llama_image_ref,
         "source_image_id": llama_image_id,
     }
     for key, expected in required_header.items():
@@ -326,6 +326,16 @@ def build_paddle_spotting_runtime_contract(
                 "PaddleOCR-VL Spotting manifest field "
                 f"{key!r} does not match the runtime contract."
             )
+    # CUDA 12 태그로 준비한 볼륨도 CUDA 13 기본값에서 그대로 통과해야 한다.
+    # 실제 이미지 동일성은 위의 source_image_id 비교가 지킨다.
+    manifest_image_ref = manifest.get("source_image_ref")
+    if manifest_image_ref != llama_image_ref and not is_supported_llama_cpp_image(
+        manifest_image_ref
+    ):
+        raise PaddleSpottingRuntimeContractError(
+            "PaddleOCR-VL Spotting manifest field 'source_image_ref' does not "
+            "name a supported llama.cpp image."
+        )
     spotting_contract = manifest.get("spotting_contract")
     if not isinstance(spotting_contract, dict) or {
         "prompt": spotting_contract.get("prompt"),
