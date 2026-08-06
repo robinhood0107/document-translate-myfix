@@ -7,7 +7,7 @@
 - `testmodel/` 폴더에 아래 두 파일을 둡니다.
   - `HunyuanOCR-BF16.gguf`
   - `mmproj-HunyuanOCR-BF16.gguf`
-- 현재 기준 Docker image는 `ghcr.io/ggml-org/llama.cpp:server-cuda`입니다.
+- 현재 기준 Docker image는 `ghcr.io/ggml-org/llama.cpp:server-cuda13`입니다. `:server-cuda`도 지원합니다.
 - 최신 이미지를 실제로 반영하려면 실행 전에 `docker compose pull --policy always`를 먼저 수행한 뒤 `up -d --force-recreate`를 사용하세요.
 - 구현 시점에 직접 확인한 내부 `llama-server --version`은 `8740`입니다. 이 값은 moving tag 특성상 앞으로 바뀔 수 있습니다.
 

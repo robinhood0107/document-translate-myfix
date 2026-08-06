@@ -46,10 +46,9 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ready manifest, 파일 크기, 이미지 ID, Compose·command·direct transport
 fingerprint만 빠르게 검사합니다.
 
-## 고정 런타임
+## 런타임
 
-- llama.cpp:
-  `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- llama.cpp: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - direct API: llama.cpp `/v1/chat/completions`, image-first PNG + `OCR:`
 - context: 4096
 - parallel slots: 1

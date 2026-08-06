@@ -12,11 +12,24 @@ from typing import Any, Callable
 from modules.utils.exceptions import OperationCancelledError
 
 
-DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda13"
+# CUDA 13 태그가 기본이지만, 드라이버가 CUDA 13 런타임을 받지 못하는 호스트가
+# 남아 있어 CUDA 12 태그도 그대로 인정한다.  두 태그 중 무엇으로 준비했든 같은
+# 런타임 계약을 통과해야 한다.
+SUPPORTED_LLAMA_CPP_IMAGES: tuple[str, ...] = (
+    "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+    "ghcr.io/ggml-org/llama.cpp:server-cuda",
+)
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
 DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC = 10
 DEFAULT_DOCKER_COMMAND_TIMEOUT_SEC = 600.0
 DOCKER_COMMAND_POLL_INTERVAL_SEC = 0.1
+
+
+def is_supported_llama_cpp_image(image_ref: Any = None) -> bool:
+    """Report whether a reference is one of the supported CUDA server tags."""
+
+    return str(image_ref or "").strip() in SUPPORTED_LLAMA_CPP_IMAGES
 
 
 def normalize_llama_cpp_image(image_ref: Any = None) -> str:
@@ -24,6 +37,8 @@ def normalize_llama_cpp_image(image_ref: Any = None) -> str:
     if not text:
         return DEFAULT_LLAMA_CPP_IMAGE
     if "@sha256:" in text:
+        return text
+    if is_supported_llama_cpp_image(text):
         return text
     if "ggml-org/llama.cpp" in text or "local/llama.cpp" in text:
         return DEFAULT_LLAMA_CPP_IMAGE
