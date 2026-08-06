@@ -3667,6 +3667,10 @@ Ekleme, silme, hariç tutma ve geri yükleme fırçalarında kullanılan boyutu 
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>개발자/성능모드</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HD Strategy</source>
         <translation>HD Stratejisi</translation>
     </message>
@@ -5290,12 +5294,8 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>Yeniden Boyutlandır</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>Kırp</translation>
+        <source>Original</source>
+        <translation type="unfinished">Orijinal</translation>
     </message>
 </context>
 <context>
@@ -5350,6 +5350,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>Kırp</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">Orijinal</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

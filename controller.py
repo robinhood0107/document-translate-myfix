@@ -247,8 +247,18 @@ class ComicTranslate(ComicTranslateUI):
         self.connect_ui_elements()
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
-        self.project_ctrl.load_main_page_settings()
-        self.settings_page.load_settings()
+        # 시작 시퀀스 전체를 로딩 구간으로 감싼다. `load_main_page_settings` 가 설정
+        # 페이지 위젯을 건드리는데, 감싸지 않으면 그것이 자동저장을 깨워 아직 채워지지
+        # 않은 위젯의 생성자 기본값을 디스크에 확정한다.
+        self.project_ctrl.connect_main_page_persistence()
+        self.settings_page.begin_external_load()
+        try:
+            self.project_ctrl.load_main_page_settings()
+            self.settings_page.load_settings()
+        finally:
+            self.settings_page.end_external_load()
+            # 로드 중 걸린 저장 예약은 사용자 변경이 아니므로 버린다.
+            self.project_ctrl.cancel_scheduled_main_page_settings_save()
         self.refresh_inpaint_tool_ui()
         self.refresh_box_delete_ui()
         self.project_ctrl.initialize_autosave()

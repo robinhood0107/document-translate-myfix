@@ -205,6 +205,13 @@ class StageRateHistoryTests(unittest.TestCase):
         from modules.utils.stage_sweep_eta import StageSweepEtaEstimator
 
         tracker = AutomaticProgressTracker()
+        # 이력은 중앙값이라, 실제 실행이 남긴 표본이 있으면 방금 쓴 값이 그대로
+        # 돌아오지 않는다. 이 테스트의 전제는 "빈 이력"이므로 여기서 만든다.
+        tracker.settings.beginGroup(tracker.STAGE_RATE_GROUP)
+        for key in list(tracker.settings.childKeys()):
+            tracker.settings.remove(key)
+        tracker.settings.endGroup()
+
         measured = {"ocr-all": 0.194, "inpaint-all": 1.276}
         tracker.record_stage_rates(measured)
         stored = tracker.read_stage_rates()

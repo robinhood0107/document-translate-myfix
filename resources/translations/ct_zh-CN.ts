@@ -3666,6 +3666,10 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>개발자/성능모드</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HD Strategy</source>
         <translation>高清策略</translation>
     </message>
@@ -5288,12 +5292,8 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>缩放</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>裁剪</translation>
+        <source>Original</source>
+        <translation type="unfinished">原始</translation>
     </message>
 </context>
 <context>
@@ -5348,6 +5348,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>裁剪</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">原始</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

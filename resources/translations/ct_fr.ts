@@ -3667,6 +3667,10 @@ Ajustez la taille utilisee par les pinceaux d&apos;ajout, d&apos;effacement, d&a
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>개발자/성능모드</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HD Strategy</source>
         <translation>Stratégie HD</translation>
     </message>
@@ -5290,12 +5294,8 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>Redimensionner</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>Rogner</translation>
+        <source>Original</source>
+        <translation type="unfinished">Original</translation>
     </message>
 </context>
 <context>
@@ -5350,6 +5350,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>Rogner</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">Original</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

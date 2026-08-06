@@ -3720,6 +3720,10 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
         <translation>HD 전략</translation>
     </message>
     <message>
+        <source>개발자/성능모드</source>
+        <translation>개발자/성능모드</translation>
+    </message>
+    <message>
         <source>Resize</source>
         <translation>크기 조정</translation>
     </message>
@@ -5358,12 +5362,8 @@ It may have been moved, renamed, or deleted.
         <translation>MangaLMM</translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>크기 조정</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>크롭</translation>
+        <source>Original</source>
+        <translation type="unfinished">원본</translation>
     </message>
 </context>
 <context>
@@ -5418,6 +5418,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>자르기</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">원본</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

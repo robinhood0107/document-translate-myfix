@@ -3667,6 +3667,10 @@ Ajusta el tamaño usado por los pinceles de añadir, borrar, excluir y restaurar
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>개발자/성능모드</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HD Strategy</source>
         <translation>Estrategia HD</translation>
     </message>
@@ -5291,12 +5295,8 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>Redimensionar</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>Recortar</translation>
+        <source>Original</source>
+        <translation type="unfinished">Original</translation>
     </message>
 </context>
 <context>
@@ -5351,6 +5351,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>Recortar</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">Original</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
