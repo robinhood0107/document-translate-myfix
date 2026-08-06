@@ -906,7 +906,7 @@ def _ensure_font_catalog() -> None:
     _font_catalog_built = True
 
     try:
-        db = QtGui.QFontDatabase()
+        db = QtGui.QFontDatabase
         for family in db.families():
             styles = db.styles(family) or [""]
             for style in styles:

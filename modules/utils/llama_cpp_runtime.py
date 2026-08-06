@@ -12,11 +12,24 @@ from typing import Any, Callable
 from modules.utils.exceptions import OperationCancelledError
 
 
-DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda13"
+# CUDA 13 태그가 기본이지만, 드라이버가 CUDA 13 런타임을 받지 못하는 호스트가
+# 남아 있어 CUDA 12 태그도 그대로 인정한다.  두 태그 중 무엇으로 준비했든 같은
+# 런타임 계약을 통과해야 한다.
+SUPPORTED_LLAMA_CPP_IMAGES: tuple[str, ...] = (
+    "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+    "ghcr.io/ggml-org/llama.cpp:server-cuda",
+)
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
 DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC = 10
 DEFAULT_DOCKER_COMMAND_TIMEOUT_SEC = 600.0
 DOCKER_COMMAND_POLL_INTERVAL_SEC = 0.1
+
+
+def is_supported_llama_cpp_image(image_ref: Any = None) -> bool:
+    """Report whether a reference is one of the supported CUDA server tags."""
+
+    return str(image_ref or "").strip() in SUPPORTED_LLAMA_CPP_IMAGES
 
 
 def normalize_llama_cpp_image(image_ref: Any = None) -> str:
@@ -24,6 +37,8 @@ def normalize_llama_cpp_image(image_ref: Any = None) -> str:
     if not text:
         return DEFAULT_LLAMA_CPP_IMAGE
     if "@sha256:" in text:
+        return text
+    if is_supported_llama_cpp_image(text):
         return text
     if "ggml-org/llama.cpp" in text or "local/llama.cpp" in text:
         return DEFAULT_LLAMA_CPP_IMAGE
@@ -63,6 +78,28 @@ def _find_executable_on_path(*names: str) -> str | None:
 
 def resolve_docker_executable() -> str:
     return _find_executable_on_path("docker.exe", "docker") or "docker"
+
+
+def remove_named_container(name: str) -> None:
+    """이름이 같은 잔여 컨테이너를 조용히 제거한다.
+
+    프로브 컨테이너는 ``--rm``으로 뜨지만, 앱이 강제 종료되면 이름이 남아 다음
+    실행이 "name already in use"로 실패한다. 고정 이름을 쓰는 이점을 잃지 않도록
+    실행 전에 항상 정리한다. 없으면 아무 일도 일어나지 않는다.
+    """
+
+    normalized = str(name or "").strip()
+    if not normalized:
+        return
+    try:
+        run_docker_command(
+            ["docker", "rm", "-f", normalized],
+            check=False,
+            timeout_sec=30.0,
+        )
+    except Exception:
+        # 정리 실패는 진단 정보일 뿐이다. 실제 문제라면 이어지는 run 이 드러낸다.
+        logger.debug("Could not remove a leftover probe container: %s", normalized)
 
 
 def run_docker_command(
@@ -322,8 +359,23 @@ def inspect_llama_cpp_version_from_image(
     cancel_checker: Callable[[], bool] | None = None,
 ) -> str:
     normalized = normalize_llama_cpp_image(image_ref)
+    # 이름을 주지 않으면 Docker 가 임의 이름을 붙여, 사용자에게는 정체를 알 수 없는
+    # 컨테이너가 떴다 사라지는 것으로 보인다. 제품이 만드는 컨테이너는 모두 이름이
+    # 정해져 있어야 한다.
+    probe_name = "comic-translate-llamacpp-version-probe"
+    remove_named_container(probe_name)
     completed = run_docker_command(
-        ["docker", "run", "--rm", "--entrypoint", "/app/llama-server", normalized, "--version"],
+        [
+            "docker",
+            "run",
+            "--name",
+            probe_name,
+            "--rm",
+            "--entrypoint",
+            "/app/llama-server",
+            normalized,
+            "--version",
+        ],
         check=False,
         cancel_checker=cancel_checker,
     )

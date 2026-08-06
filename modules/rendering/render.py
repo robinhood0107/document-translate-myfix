@@ -598,11 +598,10 @@ def _register_render_fallback_system_fonts() -> tuple[str, ...]:
 
 
 def _render_fallback_family_map() -> dict[str, str]:
-    database = QFontDatabase()
-    families = {family.casefold(): family for family in database.families()}
+    families = {family.casefold(): family for family in QFontDatabase.families()}
     if not any(candidate.casefold() in families for candidate in RENDER_SYMBOL_FALLBACK_FONT_CANDIDATES):
         _register_render_fallback_system_fonts()
-        families = {family.casefold(): family for family in QFontDatabase().families()}
+        families = {family.casefold(): family for family in QFontDatabase.families()}
     return families
 
 

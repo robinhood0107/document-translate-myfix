@@ -250,6 +250,10 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.mangalmm_ocr_max_pixels_spinbox.setValue(1500000)
         page.ui.mangalmm_ocr_max_long_side_spinbox.setValue(1408)
         page._set_ocr_mode("mangalmm")
+        self.assertEqual(
+            page.get_ocr_mode_label(),
+            "MangaLMM (Experimental, Slow)",
+        )
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
@@ -279,6 +283,85 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.save_settings()
         self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local")
 
+    def test_hd_strategy_defaults_to_original_and_controls_are_locked_when_performance_mode_off(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("tools")
+        settings.beginGroup("hd_strategy")
+        settings.setValue("strategy", "Resize")
+        settings.setValue("resize_limit", 1200)
+        settings.setValue("crop_margin", 333)
+        settings.setValue("crop_trigger_size", 666)
+        settings.endGroup()
+        settings.endGroup()
+        settings.sync()
+
+        page = self._make_page()
+        page.load_settings()
+
+        self.assertFalse(page.ui.hd_strategy_performance_mode_checkbox.isChecked())
+        self.assertEqual(page.ui.inpaint_strategy_combo.currentText(), "Original")
+        self.assertFalse(page.ui.inpaint_strategy_combo.isEnabled())
+        self.assertFalse(page.ui.resize_spinbox.isEnabled())
+        self.assertFalse(page.ui.crop_margin_spinbox.isEnabled())
+        self.assertFalse(page.ui.crop_trigger_spinbox.isEnabled())
+        self.assertEqual(page.ui.resize_spinbox.value(), 1200)
+        self.assertEqual(page.ui.crop_margin_spinbox.value(), 333)
+        self.assertEqual(page.ui.crop_trigger_spinbox.value(), 666)
+
+    def test_hd_strategy_settings_return_only_original_when_performance_mode_off(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        page.ui.hd_strategy_performance_mode_checkbox.setChecked(True)
+        page.ui.inpaint_strategy_combo.setCurrentText("Resize")
+        page.ui.resize_spinbox.setValue(1024)
+        page.ui.crop_margin_spinbox.setValue(111)
+        page.ui.crop_trigger_spinbox.setValue(222)
+        page.ui.hd_strategy_performance_mode_checkbox.setChecked(False)
+
+        hd_settings = page.get_hd_strategy_settings()
+        self.assertEqual(hd_settings["strategy"], page.ui.tr("Original"))
+        self.assertFalse(hd_settings["developer_performance_mode"])
+
+    def test_hd_strategy_on_state_saves_hd_settings(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        page.ui.hd_strategy_performance_mode_checkbox.setChecked(True)
+        page.ui.inpaint_strategy_combo.setCurrentText("Resize")
+        page.ui.resize_spinbox.setValue(1400)
+        page.ui.crop_margin_spinbox.setValue(256)
+        page.ui.crop_trigger_spinbox.setValue(384)
+        page.save_settings()
+
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        self.assertEqual(settings.value("tools/hd_strategy/developer_performance_mode", False, type=bool), True)
+        self.assertEqual(settings.value("tools/hd_strategy/strategy", "", type=str), "Resize")
+        self.assertEqual(settings.value("tools/hd_strategy/resize_limit", 0, type=int), 1400)
+        self.assertEqual(settings.value("tools/hd_strategy/crop_margin", 0, type=int), 256)
+        self.assertEqual(settings.value("tools/hd_strategy/crop_trigger_size", 0, type=int), 384)
+
+    def test_hd_strategy_off_state_forces_original_on_save(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        page.ui.hd_strategy_performance_mode_checkbox.setChecked(True)
+        page.ui.inpaint_strategy_combo.setCurrentText("Crop")
+        page.ui.resize_spinbox.setValue(1100)
+        page.ui.crop_margin_spinbox.setValue(250)
+        page.ui.crop_trigger_spinbox.setValue(500)
+        page.save_settings()
+
+        page.ui.hd_strategy_performance_mode_checkbox.setChecked(False)
+        page.save_settings()
+
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        self.assertEqual(settings.value("tools/hd_strategy/developer_performance_mode", False, type=bool), False)
+        self.assertEqual(settings.value("tools/hd_strategy/strategy", "", type=str), "Original")
+        self.assertEqual(settings.value("tools/hd_strategy/resize_limit", 0, type=int), 1100)
+        self.assertEqual(settings.value("tools/hd_strategy/crop_margin", 0, type=int), 250)
+        self.assertEqual(settings.value("tools/hd_strategy/crop_trigger_size", 0, type=int), 500)
+
     def test_runtime_settings_navigation_uses_titles_not_stale_indices(self) -> None:
         page = self._make_page()
 
@@ -286,7 +369,7 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
             "PaddleOCR VL Settings",
             "PaddleOCR VL Spotting Settings",
             "HunyuanOCR Settings",
-            "MangaLMM Settings",
+            "MangaLMM (Experimental, Slow) Settings",
             "Gemma Local Server Settings",
         ]
         expected_indices = [2, 3, 4, 5, 6]

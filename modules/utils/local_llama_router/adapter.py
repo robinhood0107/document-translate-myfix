@@ -32,6 +32,7 @@ from .contracts import (
     ROUTER_PROJECT_LABEL,
     ROUTER_SERVICE_NAME,
     RouterPair,
+    RouterPairKind,
     RouterRuntimeContract,
     RouterRuntimeSpec,
     build_router_contract,
@@ -39,6 +40,9 @@ from .contracts import (
     expected_router_server_args,
     router_environment,
 )
+
+
+_ROUTER_PAIR_LABEL_VALUES = frozenset(kind.value for kind in RouterPairKind)
 
 
 class RouterAdapterError(RuntimeError):
@@ -69,7 +73,9 @@ class RouterContainerInspection:
             str(self.labels.get(ROUTER_OWNER_LABEL, "")) == ROUTER_OWNER_VALUE
             and str(self.labels.get(ROUTER_PROJECT_LABEL, ""))
             == ROUTER_PROJECT_NAME
-            and str(self.labels.get(ROUTER_PAIR_LABEL, "")) in {"crop", "spotting"}
+            # 허용 pair label을 pair 열거형에서 파생시켜, 새 pair의 컨테이너가
+            # 외부 컨테이너로 잘못 읽히지 않게 한다.
+            and str(self.labels.get(ROUTER_PAIR_LABEL, "")) in _ROUTER_PAIR_LABEL_VALUES
         )
 
     def owned_by(self, contract: RouterRuntimeContract) -> bool:
@@ -154,6 +160,15 @@ class RouterCommandAdapter(Protocol):
         *,
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None: ...
+
+    def stop_owned_pair_ports(
+        self,
+        pair: RouterPair,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+        reject_foreign: bool = True,
+        require_ports_free: bool = True,
+    ) -> tuple[str, ...]: ...
 
     def owned_gpu_process_ids(
         self,
@@ -512,8 +527,31 @@ class DockerRouterCommandAdapter:
         *,
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
+        self.stop_owned_pair_ports(contract.pair, cancel_checker=cancel_checker)
+
+    def stop_owned_pair_ports(
+        self,
+        pair: RouterPair,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+        reject_foreign: bool = True,
+        require_ports_free: bool = True,
+    ) -> tuple[str, ...]:
+        """Router pair의 호스트 포트를 비우되 Router 소유 컨테이너만 정지한다.
+
+        준비된 contract가 아직 없는 상황에서도 separate-server 경로가 이전
+        프로세스의 Router 컨테이너를 회수할 수 있도록, pair 정보만으로 동작한다.
+
+        ``reject_foreign``이 켜진 Router 경로는 자신이 소유하지 않은 컨테이너가 쥔
+        포트를 바인딩하지 않는다. separate-server 경로는 곧 재사용할 자기 컨테이너가
+        그 포트를 정당하게 쥐고 있으므로 ``reject_foreign``과
+        ``require_ports_free``를 끈다. 그 경로에서 풀어야 하는 것은 Router 잔여물뿐
+        이다.
+        """
+
         occupants: dict[str, RouterContainerInspection] = {}
-        for port in (contract.pair.ocr_port, contract.pair.gemma_port):
+        released: list[str] = []
+        for port in (pair.ocr_port, pair.gemma_port):
             for inspection in self._containers_publishing_port(port):
                 occupants[inspection.name] = inspection
         for inspection in occupants.values():
@@ -522,16 +560,21 @@ class DockerRouterCommandAdapter:
                 # recreate our own stopped container without mutating it here.
                 continue
             if not inspection.owned_by_router():
-                raise RouterAdapterOwnershipError(
-                    "Router port is held by a foreign container; it will not be stopped: "
-                    f"{inspection.name}"
-                )
+                if reject_foreign:
+                    raise RouterAdapterOwnershipError(
+                        "Router port is held by a foreign container; it will not be stopped: "
+                        f"{inspection.name}"
+                    )
+                continue
             self._stop_inspection(inspection, cancel_checker=cancel_checker)
-        for port in (contract.pair.ocr_port, contract.pair.gemma_port):
-            self._assert_host_port_available(
-                port,
-                cancel_checker=cancel_checker,
-            )
+            released.append(inspection.name)
+        if require_ports_free:
+            for port in (pair.ocr_port, pair.gemma_port):
+                self._assert_host_port_available(
+                    port,
+                    cancel_checker=cancel_checker,
+                )
+        return tuple(released)
 
     def _assert_host_port_available(
         self,

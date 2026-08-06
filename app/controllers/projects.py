@@ -27,6 +27,7 @@ from app.controllers.psd_support import ensure_photoshopapi_available
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.save_renderer import ImageSaveRenderer
+from app.ui.main_window.constants import user_font_path  # 기본 글꼴 폴백에서만 쓴다
 from app.ui.export_chapters_dialog import ExportChaptersDialog, ExportChapterRow
 from app.projects.project_state import (
     close_state_store,
@@ -84,6 +85,18 @@ class ProjectController:
         self._autosave_save_pending = False
         self._autosave_retrigger_requested = False
         self._active_save_workers: list = []  # keeps Python refs alive until workers finish
+        # Phase 3a: 인페인팅+렌더 융합 sweep 동안은 페이지별 자동저장을 억제하고
+        # sweep 종료 시 1회로 합친다 (공유 QThreadPool 잠식 방지).
+        self._batch_autosave_deferred = False
+        # 본문 서식 설정을 변경 즉시 저장하기 위한 디바운스 타이머. 예전에는
+        # `save_main_page_settings` 가 정상 종료에서만 불렸고, 크래시나 강제 종료면
+        # 정렬·색·외곽선·굵기 같은 12개 키가 통째로 유실됐다.
+        self._main_page_save_timer = QtCore.QTimer(self.main)
+        self._main_page_save_timer.setSingleShot(True)
+        self._main_page_save_timer.setInterval(250)
+        self._main_page_save_timer.timeout.connect(
+            self._flush_scheduled_main_page_settings_save
+        )
 
     # Recent projects (persisted via QSettings)
 
@@ -389,6 +402,10 @@ class ProjectController:
         """
         if self._current_project_kind() == PROJECT_KIND_SERIES:
             return
+        if self._batch_autosave_deferred:
+            # 인페인팅+렌더 융합 sweep 이 진행 중이다 — sweep 종료 시
+            # `end_batch_autosave_deferral`이 1회 저장을 트리거할 것이다.
+            return
         autosave_enabled = bool(
             self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
         )
@@ -440,6 +457,21 @@ class ProjectController:
             lambda: QtCore.QTimer.singleShot(0, self.main, on_finished)
         )
         self.main.threadpool.start(worker)
+
+    def begin_batch_autosave_deferral(self) -> None:
+        """인페인팅+렌더 융합 sweep 시작 — 그동안 `_on_batch_page_done`이
+        `render_state_ready`마다 공유 QThreadPool에 저장 워커를 던져 풀을
+        잠식하지 않도록 억제한다. sweep 종료 후 `end_batch_autosave_deferral`이
+        1회만 저장한다. (대가: 중간 크래시 시 자동저장이 더 오래됨 — 승인됨.)
+        """
+        self._batch_autosave_deferred = True
+
+    def end_batch_autosave_deferral(self, image_path: str) -> None:
+        """sweep 종료 — 억제를 풀고 지금까지 쌓인 변경을 1회 저장한다."""
+        if not self._batch_autosave_deferred:
+            return
+        self._batch_autosave_deferred = False
+        self._on_batch_page_done(image_path)
 
     def notify_project_dirty_revision_changed(self):
         autosave_enabled = bool(
@@ -2363,9 +2395,16 @@ class ProjectController:
         self.process_group('text_rendering', self.main.render_settings(), settings)
 
         settings.beginGroup("main_page")
-        # Save languages in English
-        settings.setValue("source_language", self.main.lang_mapping[self.main.s_combo.currentText()])
-        settings.setValue("target_language", self.main.lang_mapping[self.main.t_combo.currentText()])
+        # 언어는 영어 표기로 저장한다. 콤보 텍스트가 매핑에 없으면(번역 파일이 바뀌었거나
+        # 콤보가 아직 비어 있는 순간) 예전 코드는 `KeyError` 로 저장 전체를 중단시켰다.
+        # 즉시 저장으로 바뀐 지금은 그 한 번의 예외가 나머지 값까지 함께 잃게 만든다.
+        for key, combo in (
+            ("source_language", self.main.s_combo),
+            ("target_language", self.main.t_combo),
+        ):
+            mapped = self.main.lang_mapping.get(combo.currentText())
+            if mapped:
+                settings.setValue(key, mapped)
 
         settings.setValue("mode", "manual" if self.main.manual_radio.isChecked() else "automatic")
 
@@ -2381,8 +2420,88 @@ class ProjectController:
         settings.setValue("state", self.main.saveState())
         settings.endGroup()
 
+        # 크래시로 잃지 않도록 즉시 디스크에 내린다.
+        settings.sync()
+
+    def _live_save_suppressed(self) -> bool:
+        """설정을 로드하는 동안 걸린 변경은 사용자 변경이 아니다."""
+
+        settings_page = getattr(self.main, "settings_page", None)
+        return bool(getattr(settings_page, "_suppress_live_save", False))
+
+    def schedule_main_page_settings_save(self, *_args) -> None:
+        if self._live_save_suppressed():
+            return
+        self._main_page_save_timer.start()
+
+    def cancel_scheduled_main_page_settings_save(self) -> None:
+        self._main_page_save_timer.stop()
+
+    def _flush_scheduled_main_page_settings_save(self) -> None:
+        if self._live_save_suppressed():
+            return
+        self.save_main_page_settings()
+
+    def connect_main_page_persistence(self) -> None:
+        """서식 도구모음 변경을 즉시 저장에 연결한다.
+
+        이 위젯들이 쓰는 `text_rendering` 12개 키(정렬·수직정렬·글꼴·본문색·강제색·
+        외곽선·외곽선폭·외곽선색·줄간격·굵게·기울임·밑줄)와 `main_page` 값들은
+        `save_main_page_settings` 만 기록하는데, 그 함수는 `closeEvent` 와 언어 변경
+        재시작에서만 불렸다. 즉 크래시·강제 종료·다른 재시작 경로에서는 전부 유실됐다.
+        변경 시그널에 직접 걸어 정상 종료에 의존하지 않게 한다.
+
+        `connect_ui_elements` 뒤에 불려야 한다. 색 버튼은 `clicked` 를 공유하는데,
+        색을 실제로 위젯 속성에 넣는 핸들러가 먼저 연결돼 있어야 우리가 나중에
+        읽을 수 있다. Qt 는 연결 순서대로 슬롯을 부른다.
+        """
+
+        main = self.main
+        save = self.schedule_main_page_settings_save
+
+        for combo_attr in (
+            "s_combo",
+            "t_combo",
+            "font_dropdown",
+            "line_spacing_dropdown",
+            "outline_width_dropdown",
+        ):
+            widget = getattr(main, combo_attr, None)
+            if widget is not None:
+                widget.currentTextChanged.connect(save)
+
+        for button_attr in (
+            "block_font_color_button",
+            "outline_font_color_button",
+            "bold_button",
+            "italic_button",
+            "underline_button",
+            "manual_radio",
+            "automatic_radio",
+        ):
+            widget = getattr(main, button_attr, None)
+            if widget is not None:
+                widget.clicked.connect(save)
+
+        for checkbox_attr in ("outline_checkbox", "force_font_color_checkbox"):
+            widget = getattr(main, checkbox_attr, None)
+            if widget is not None:
+                widget.stateChanged.connect(save)
+
+        for group_attr in ("alignment_tool_group", "vertical_alignment_tool_group"):
+            group = getattr(main, group_attr, None)
+            if group is not None:
+                group.sig_checked_changed.connect(save)
+
     def load_main_page_settings(self):
+        # UI 패키지를 모듈 최상단에서 끌어오면 순환 임포트가 된다.
+        from app.ui.settings.settings_page import (
+            migrate_clobbered_text_rendering_colors,
+        )
+
         settings = QSettings("ComicLabs", "ComicTranslate")
+        # 본문 색 두 개는 이 함수가 유일한 독자다. 그러니 복구도 여기서, 읽기 전에 한다.
+        migrate_clobbered_text_rendering_colors(settings)
         settings.beginGroup("main_page")
 
         # Load languages and convert back to current language
@@ -2430,7 +2549,33 @@ class ProjectController:
         if saved_font_family:
             self.main.set_font(saved_font_family)
         else:
-            self.main.font_dropdown.setCurrentText('')
+            # 저장된 값이 없다고 콤보를 비우면, 콤보 위젯이 자체적으로 표시하는
+            # 글꼴 이름과 `currentText()` 가 어긋난다. 화면에는 글꼴이 보이는데
+            # 렌더는 빈 값을 받는 상태가 되고, 사용자에게는 "분명히 골랐는데
+            # 적용되지 않는" 것으로 보인다. 콤보가 실제로 들고 있는 글꼴을 그대로
+            # 채택하고 저장해서, 표시와 값이 처음부터 일치하게 한다.
+            # --- 가져온 글꼴을 기본값으로 (이 블록만 지우면 원래 동작) ---
+            # 사용자가 직접 가져온 글꼴이 있으면 그것을 기본값으로 삼는다. 만화
+            # 번역에 시스템 UI 글꼴을 쓰는 사람은 없고, 글꼴을 가져왔다는 것 자체가
+            # 그 글꼴로 렌더하겠다는 뜻이다. 여러 개면 파일 이름 순 첫 번째 —
+            # 실행마다 달라지면 안 된다. 사용자가 UI 에서 고르면 그 값이 저장되어
+            # 이 경로는 다시 타지 않는다.
+            current_family = next(
+                (
+                    self.main.get_font_family(os.path.join(user_font_path, name))
+                    for name in sorted(os.listdir(user_font_path))
+                    if os.path.splitext(name)[1].lower()
+                    in ('.ttf', '.ttc', '.otf', '.woff', '.woff2')
+                ),
+                '',
+            ) if os.path.isdir(user_font_path) else ''
+            # --- 여기까지 ---
+            if not current_family:
+                current_family = str(self.main.font_dropdown.currentText() or '').strip()
+            if not current_family:
+                current_family = QtWidgets.QApplication.font().family()
+            self.main.set_font(current_family)
+            self.main.text_ctrl.persist_render_font_family(current_family)
         min_font_size = settings.value('min_font_size', 5)  # Default value is 5
         max_font_size = settings.value('max_font_size', 40) # Default value is 40
         self.main.settings_page.ui.min_font_spinbox.setValue(int(min_font_size))
@@ -2475,7 +2620,10 @@ class ProjectController:
         settings.endGroup()
 
     def process_group(self, group_key, group_value, settings_obj: QSettings):
-        """Helper function to process a group and its nested values."""
+        """그룹과 그 하위 값을 재귀적으로 저장한다."""
+
+        from app.ui.settings.settings_page import should_write_setting_value
+
         if is_dataclass(group_value):
             group_value = asdict(group_value)
         if isinstance(group_value, dict):
@@ -2484,6 +2632,10 @@ class ProjectController:
                 self.process_group(sub_key, sub_value, settings_obj)
             settings_obj.endGroup()
         else:
-            # Convert value to English using mappings if available
+            # 값이 있으면 영어 표기로 바꿔 저장한다.
             mapped_value = self.main.settings_page.ui.value_mappings.get(group_value, group_value)
+            if not should_write_setting_value(group_key, mapped_value):
+                # 확신 없는 값으로 저장된 선택을 덮지 않는다. `font_family` 가 빈
+                # 문자열로 지워진 사고가 정확히 이 경로였다.
+                return
             settings_obj.setValue(group_key, mapped_value)

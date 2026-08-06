@@ -4,7 +4,7 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
-현재 포크의 제품 릴리스 버전은 `1.4.0`입니다. upstream `2.7.1`은
+현재 포크의 제품 릴리스 버전은 `1.5.0`입니다. upstream `2.7.1`은
 마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
 같은 의미로 사용하지 않습니다.
 
@@ -283,9 +283,11 @@ miss 모두 정확히 한 번 적용하고, 사전 변경 시 소비 결과와 d
 
 현재 추적 중인 compose/runtime 이미지:
 
-- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
-- HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 추론: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+관리형 llama.cpp 런타임(Gemma, PaddleOCR VL, PaddleOCR VL Spotting, HunyuanOCR,
+MangaLMM, Router)은 모두 하나의 CUDA 서버 이미지를 씁니다.
+
+- 기본값: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
+- 함께 지원: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 
 ## 참고 설치 문서
 

@@ -22,6 +22,9 @@ from modules.ocr.paddleocr_vl_spotting.runtime_contract import (
 )
 
 
+_IMAGE_ID = "sha256:" + ("1" * 64)
+
+
 def _manifest_payload() -> dict:
     return {
         "schema_version": 1,
@@ -32,7 +35,7 @@ def _manifest_payload() -> dict:
         "volume_name": DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
         "ready": True,
         "source_image_ref": DEFAULT_PADDLE_SPOTTING_LLAMA_CPP_IMAGE,
-        "source_image_id": DEFAULT_PADDLE_SPOTTING_LLAMA_CPP_IMAGE.rsplit("@", 1)[-1],
+        "source_image_id": _IMAGE_ID,
         "spotting_contract": {
             "prompt": "Spotting:",
             "special_tokens": True,
@@ -74,7 +77,7 @@ class PaddleSpottingRuntimeContractTests(unittest.TestCase):
             manifest or _manifest_payload(),
             sort_keys=True,
         ).encode("utf-8")
-        image_id = DEFAULT_PADDLE_SPOTTING_LLAMA_CPP_IMAGE.rsplit("@", 1)[-1]
+        image_id = _IMAGE_ID
         return build_paddle_spotting_runtime_contract(
             manifest_bytes=manifest_bytes,
             manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),

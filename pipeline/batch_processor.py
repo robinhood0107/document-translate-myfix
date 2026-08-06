@@ -282,6 +282,32 @@ class BatchProcessor:
         minutes, secs = divmod(remainder, 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
+    def observe_progress(
+        self,
+        stage_name: str,
+        index: int,
+        total: int,
+        step: int,
+        steps: int,
+    ) -> dict[str, float | None]:
+        """진행률과 남은 시간을 하나의 출처로 계산한다.
+
+        레거시 파이프라인은 한 페이지가 모든 단계를 지나므로, 페이지 단위 외삽이
+        맞는 모델이다. stage-batched 는 전제가 달라 이 훅을 재정의한다.
+        """
+
+        total_units = max(total * steps, 1)
+        current_units = min(max(index * steps + step, 0), total_units)
+        return {
+            "progress_fraction": current_units / total_units,
+            "eta_seconds": self._estimate_eta_seconds(index, total),
+        }
+
+    def describe_progress(self, stage_name: str, index: int, total: int) -> str:
+        """진행 메시지. 파이프라인 모양에 맞는 문장을 쓴다."""
+
+        return f"{index + 1}/{total} 페이지 {stage_name} 단계 진행 중..."
+
     def _estimate_eta_seconds(self, index: int, total: int) -> float | None:
         if self._run_started_at is None:
             return None
@@ -359,6 +385,39 @@ class BatchProcessor:
             panel_message_level="success",
         )
 
+    def _report_residue_cleanup(
+        self,
+        *,
+        index: int,
+        total: int,
+        image_path: str,
+        cleanup_stats: dict,
+    ) -> None:
+        """인페인팅 잔여 텍스트 재정리 결과를 파이프라인 상태 스트림에도 알린다.
+
+        residue pass 는 인페인팅 단계 안에서 도는 후처리라서, 그 사실이 로그에
+        드러나지 않으면 별개의 알 수 없는 단계처럼 보인다. inpaint-all 과 같은
+        stage_name 을 써서 이 로그가 인페인팅에 속한다는 걸 명시한다.
+        """
+
+        if not cleanup_stats or not cleanup_stats.get("applied"):
+            return
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="running",
+            step_key="inpaint-residue-cleanup",
+            stage_name="inpaint-all",
+            message=(
+                f"[{index + 1}/{total}] 인페인팅 후처리(잔여 텍스트 재정리): "
+                f"block={cleanup_stats.get('block_count', 0)} "
+                f"component={cleanup_stats.get('component_count', 0)}"
+            ),
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+        )
+
     def _report_runtime_progress(self, **payload):
         callback = getattr(self.main_page, "report_runtime_progress", None)
         if not callable(callback):
@@ -378,27 +437,39 @@ class BatchProcessor:
         except Exception:
             logger.debug("Failed to forward automatic progress payload.", exc_info=True)
 
-    def emit_progress(self, index, total, step, steps, change_name):
-        """Wrapper around main_page.progress_update.emit that logs current batch position with ETA."""
-        stage_map = {
-            0: 'start-image',
-            1: 'text-block-detection',
-            2: 'ocr-processing',
-            3: 'pre-inpaint-setup',
-            4: 'generate-mask',
-            5: 'inpainting',
-            7: 'translation',
-            9: 'text-rendering-prepare',
-            10: 'save-and-finish',
-        }
-        stage_name = stage_map.get(step, f'stage-{step}')
+    # 레거시 페이지별 파이프라인의 단계 이름. 한 페이지가 이 단계들을 차례로 지난다.
+    STAGE_NAMES_BY_STEP = {
+        0: 'start-image',
+        1: 'text-block-detection',
+        2: 'ocr-processing',
+        3: 'pre-inpaint-setup',
+        4: 'generate-mask',
+        5: 'inpainting',
+        7: 'translation',
+        9: 'text-rendering-prepare',
+        10: 'save-and-finish',
+    }
+
+    def emit_progress(self, index, total, step, steps, change_name, stage_name=None):
+        """Wrapper around main_page.progress_update.emit that logs current batch position with ETA.
+
+        `stage_name` 을 주면 그 이름을 그대로 쓴다. 숫자 step 에서 이름을 되찾는 방식은
+        오해를 만들었다. stage-batched 의 step 3 은 마스크 생성과 LaMa 통과를 모두 하는
+        단계인데, 레거시 표에서 3 은 `pre-inpaint-setup` 이라 "인페인트 준비" 라는 이름이
+        366 줄 찍혔다. 이제 단계가 자기 이름을 직접 말한다.
+        """
+
+        stage_name = str(stage_name or "").strip() or self.STAGE_NAMES_BY_STEP.get(
+            step, f'stage-{step}'
+        )
         image_name = os.path.basename(self._progress_image_path) if self._progress_image_path else '-'
         run_elapsed = (time.monotonic() - self._run_started_at) if self._run_started_at is not None else None
         page_elapsed = (time.monotonic() - self._page_started_at) if self._page_started_at is not None else None
-        percent = 0.0
-        total_units = max(total * steps, 1)
-        current_units = min(max(index * steps + step, 0), total_units)
-        percent = (current_units / total_units) * 100.0
+        # 진행률과 남은 시간은 한 곳에서만 계산한다. 예전에는 파이프라인과 UI 트래커가
+        # 각자 추정해서 같은 순간에 2초와 23분으로 갈렸다.
+        progress = self.observe_progress(stage_name, index, total, step, steps)
+        percent = progress["progress_fraction"] * 100.0
+        eta_seconds = progress["eta_seconds"]
         logger.info(
             "Batch progress: page=%d/%d image=%s stage=%s overall=%.1f%% elapsed=%s page_elapsed=%s eta=%s",
             index + 1 if total else 0,
@@ -408,7 +479,7 @@ class BatchProcessor:
             percent,
             self._format_duration(run_elapsed),
             self._format_duration(page_elapsed),
-            self._format_duration(self._estimate_eta_seconds(index, total)),
+            self._format_duration(eta_seconds),
         )
         if step > 0:
             self._report_runtime_progress(
@@ -417,11 +488,14 @@ class BatchProcessor:
                 status="running",
                 step_key=stage_name,
                 stage_name=stage_name,
-                message=f"{index + 1}/{total} 페이지 {stage_name} 단계 진행 중...",
+                message=self.describe_progress(stage_name, index, total),
                 page_index=index,
                 page_total=total,
                 image_name=image_name,
                 source_preview_path=self._progress_image_path,
+                # 트래커는 이 값을 그대로 쓴다. 다시 추정하지 않는다.
+                eta_seconds=eta_seconds,
+                progress_fraction=progress["progress_fraction"],
             )
         self.main_page.progress_update.emit(index, total, step, steps, change_name)
 
@@ -578,7 +652,10 @@ class BatchProcessor:
             status="running",
             step_key=f"preview_{stage_key}_disabled",
             stage_name=stage_key,
-            message=f"{stage_label} 미리보기: 디버그 export의 해당 체크가 꺼져 있어 생성하지 않습니다.",
+            message=(
+                f"[{index + 1}/{total}] {stage_label} 미리보기: 디버그 export의 해당 체크가 꺼져 있어 "
+                f"이번 실행(총 {total}페이지)에서는 생성하지 않습니다."
+            ),
             detail=f"{self._preview_export_key(stage_key) or stage_key}=False",
             page_index=index,
             page_total=total,
@@ -1822,6 +1899,13 @@ class BatchProcessor:
                         inpaint_blocks,
                         self.inpainting.inpainter_cache,
                         config,
+                        page_label=f"{index + 1}/{total_images}",
+                    )
+                    self._report_residue_cleanup(
+                        index=index,
+                        total=total_images,
+                        image_path=image_path,
+                        cleanup_stats=cleanup_stats,
                     )
                     (
                         inpaint_input_img,
