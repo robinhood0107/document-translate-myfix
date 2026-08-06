@@ -27,6 +27,7 @@ from app.controllers.psd_support import ensure_photoshopapi_available
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.save_renderer import ImageSaveRenderer
+from app.ui.main_window.constants import user_font_path  # 기본 글꼴 폴백에서만 쓴다
 from app.ui.export_chapters_dialog import ExportChaptersDialog, ExportChapterRow
 from app.projects.project_state import (
     close_state_store,
@@ -2531,7 +2532,24 @@ class ProjectController:
             # 렌더는 빈 값을 받는 상태가 되고, 사용자에게는 "분명히 골랐는데
             # 적용되지 않는" 것으로 보인다. 콤보가 실제로 들고 있는 글꼴을 그대로
             # 채택하고 저장해서, 표시와 값이 처음부터 일치하게 한다.
-            current_family = str(self.main.font_dropdown.currentText() or '').strip()
+            # --- 가져온 글꼴을 기본값으로 (이 블록만 지우면 원래 동작) ---
+            # 사용자가 직접 가져온 글꼴이 있으면 그것을 기본값으로 삼는다. 만화
+            # 번역에 시스템 UI 글꼴을 쓰는 사람은 없고, 글꼴을 가져왔다는 것 자체가
+            # 그 글꼴로 렌더하겠다는 뜻이다. 여러 개면 파일 이름 순 첫 번째 —
+            # 실행마다 달라지면 안 된다. 사용자가 UI 에서 고르면 그 값이 저장되어
+            # 이 경로는 다시 타지 않는다.
+            current_family = next(
+                (
+                    self.main.get_font_family(os.path.join(user_font_path, name))
+                    for name in sorted(os.listdir(user_font_path))
+                    if os.path.splitext(name)[1].lower()
+                    in ('.ttf', '.ttc', '.otf', '.woff', '.woff2')
+                ),
+                '',
+            ) if os.path.isdir(user_font_path) else ''
+            # --- 여기까지 ---
+            if not current_family:
+                current_family = str(self.main.font_dropdown.currentText() or '').strip()
             if not current_family:
                 current_family = QtWidgets.QApplication.font().family()
             self.main.set_font(current_family)
