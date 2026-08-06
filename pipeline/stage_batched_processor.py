@@ -204,6 +204,83 @@ class StagePageContext:
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
+    # 페이지가 끝난 뒤 큰 배열을 놓아주기 전에 옮겨 담는 값들. 스윕이 끝난 다음
+    # 집계하려고 이미지 전체를 붙들고 있을 이유는 없다.
+    mask_pixel_count: int = 0
+    released_buffer_bytes: int = 0
+
+    def release_page_buffers(self) -> int:
+        """이 페이지의 전체 해상도 배열을 놓아준다. 놓아준 바이트 수를 돌려준다.
+
+        스테이지 배치 파이프라인은 실행 내내 모든 페이지의 컨텍스트를 리스트로
+        들고 있다. 페이지당 원본, 인페인팅 결과, 마스크 두 장, 패치가 전부
+        살아 있으면 4K 페이지 기준 60 MiB 를 넘고, 수백 페이지에서는 프로세스가
+        수 GB 짜리 24 MiB 할당조차 실패하는 지경이 된다. 렌더까지 끝난 페이지의
+        픽셀 데이터는 아무도 다시 보지 않으므로 그 자리에서 놓아준다.
+
+        나중에 필요한 집계값(마스크 픽셀 수)은 놓아주기 전에 옮겨 담는다.
+        """
+
+        released = 0
+        if self.mask is not None:
+            try:
+                self.mask_pixel_count = int(np.count_nonzero(self.mask))
+            except Exception:
+                self.mask_pixel_count = 0
+        for name in (
+            "image",
+            "inpaint_input_img",
+            "raw_mask",
+            "mask",
+            "project_ocr_hit",
+            "precomputed_mask_details",
+        ):
+            value = getattr(self, name, None)
+            released += _approximate_buffer_bytes(value)
+            setattr(self, name, None)
+        released += _approximate_buffer_bytes(self.patches)
+        self.patches = []
+        # `mask_details` 는 raw/final 마스크를 그대로 다시 참조한다. 비우지 않으면
+        # 위에서 놓아준 배열이 그대로 살아남는다.
+        released += _approximate_buffer_bytes(self.mask_details)
+        self.mask_details = {}
+        self.released_buffer_bytes += released
+        return released
+
+
+def _approximate_buffer_bytes(value: Any) -> int:
+    """중첩 컨테이너 안 numpy 배열이 차지하는 바이트 수의 근사치.
+
+    진단 로그용이다. 정확할 필요는 없고, 순환 참조에서 멈추기만 하면 된다.
+    """
+
+    return _approximate_buffer_bytes_inner(value, set())
+
+
+def _approximate_buffer_bytes_inner(value: Any, seen: set[int]) -> int:
+    if value is None:
+        return 0
+    marker = id(value)
+    if marker in seen:
+        return 0
+    if isinstance(value, np.ndarray):
+        return int(value.nbytes)
+    if isinstance(value, (str, bytes, int, float, bool)):
+        return 0
+    seen.add(marker)
+    if isinstance(value, dict):
+        return sum(
+            _approximate_buffer_bytes_inner(item, seen) for item in value.values()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return sum(_approximate_buffer_bytes_inner(item, seen) for item in value)
+    # 체크포인트 히트처럼 배열을 필드로 들고 있는 작은 객체.
+    slots = getattr(value, "__dict__", None)
+    if isinstance(slots, dict):
+        return sum(
+            _approximate_buffer_bytes_inner(item, seen) for item in slots.values()
+        )
+    return 0
 
 
 @dataclass
@@ -347,6 +424,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._render_executor: QtRenderPool | None = None
         self._render_cancel_event = threading.Event()
         self._pending_render_jobs: list[_PendingRenderJob] = []
+        self._released_page_buffer_bytes = 0
         self._render_context_cache: tuple[Any, str] | None = None
 
     def _stage_tr(self, text: str) -> str:
@@ -1643,6 +1721,9 @@ class StageBatchedProcessor(BatchProcessor):
             **(extra or {}),
         )
         self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
+        # 실패한 페이지는 이후 스테이지가 모두 건너뛴다. 픽셀 데이터를 계속 붙들고
+        # 있으면 한 페이지의 실패가 남은 배치 전체의 메모리를 갉아먹는다.
+        self._release_page_buffers(ctx)
 
     def _detect_all(
         self,
@@ -4360,6 +4441,21 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
         self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
+        self._release_page_buffers(ctx)
+
+    def _release_page_buffers(self, ctx: StagePageContext) -> None:
+        """끝난 페이지의 전체 해상도 배열을 놓아주고 그 사실을 기록한다."""
+
+        released = ctx.release_page_buffers()
+        if released <= 0:
+            return
+        self._released_page_buffer_bytes += released
+        logger.debug(
+            "Released %.1f MiB of page buffers for %s (run total %.1f MiB).",
+            released / (1024 * 1024),
+            ctx.image_name,
+            self._released_page_buffer_bytes / (1024 * 1024),
+        )
 
     def _resolve_render_future(self, pending: _PendingRenderJob) -> None:
         try:
@@ -4418,6 +4514,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._page_started_at = None
         self._progress_image_path = None
         self._recent_page_durations.clear()
+        self._released_page_buffer_bytes = 0
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         self._render_context_cache = None
@@ -4624,10 +4721,13 @@ class StageBatchedProcessor(BatchProcessor):
                 service="inpainter",
             ):
                 self._inpaint_all(pages)
+            # 마스크는 페이지가 끝나는 즉시 놓아준다. 집계는 놓아주기 전에 옮겨
+            # 담아둔 값을 쓰고, 아직 살아 있는 페이지만 그 자리에서 센다.
             mask_pixels = sum(
-                int(np.count_nonzero(ctx.mask))
+                int(ctx.mask_pixel_count)
+                if getattr(ctx, "mask", None) is None
+                else int(np.count_nonzero(ctx.mask))
                 for ctx in pages
-                if getattr(ctx, "mask", None) is not None
             )
             inpaint_roi_count = sum(
                 len(
