@@ -7,14 +7,13 @@ import os
 import threading
 import time
 import traceback
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import imkit as imk
 import numpy as np
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QColor
 
 from app.path_materialization import ensure_path_materialized
 from app.projects.stage_checkpoints import (
@@ -51,8 +50,6 @@ from app.projects.stage_checkpoints import (
     snapshot_project_render_blocks,
     snapshot_project_translations,
 )
-from app.ui.canvas.text.text_item_properties import TextItemProperties
-from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
@@ -64,9 +61,7 @@ from modules.ocr.persistent_cache import (
     snapshot_raw_ocr_result,
 )
 from modules.ocr.common.result_contract import (
-    PROCESSING_ACTION_TRANSLATE_INPAINT,
     canonicalize_exact_duplicate_blocks,
-    finalize_ocr_processing_contract,
     finalize_ocr_processing_contracts,
     select_translate_inpaint_blocks,
 )
@@ -75,26 +70,11 @@ from modules.ocr.selection import (
     resolve_stage_batched_ocr_policy,
 )
 from modules.rendering.render import (
-    apply_strict_render_viewer_state_guard,
-    build_duplicate_bubble_render_key,
-    build_render_rects_for_block,
-    build_text_item_layout_geometry,
-    describe_auto_render_review_status_gate,
-    describe_render_text_markup,
-    describe_render_text_sanitization,
-    describe_text_free_large_mask_gate,
-    describe_text_free_render_mask_gate,
-    describe_text_free_render_translation_gate,
-    describe_text_free_underfill_gate,
+    _register_render_fallback_system_fonts,
+    _render_font_has_real_glyph,
     get_best_render_area,
-    get_render_fit_clearance_for_block,
-    is_vertical_block,
-    pyside_word_wrap,
-    refit_detected_bubble_text_if_underfilled,
-    register_duplicate_bubble_render_key,
-    resolve_text_free_manga_layout,
-    select_blocks_for_original_restore_after_render,
-    should_skip_short_render_translation,
+    resolve_render_glyph_fallback_font_family,
+    resolve_render_symbol_fallback_font_family,
     should_use_strict_render_symbols,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
@@ -102,6 +82,16 @@ from modules.translation.processor import Translator
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
+)
+from modules.utils.automatic_output import (
+    DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+    DEFAULT_OUTPUT_IMAGE_FORMAT,
+    build_archive_page_file_name,
+    build_archive_staging_dir,
+    build_output_file_name,
+    is_single_archive_mode,
+    reserve_unique_path,
+    resolve_individual_output_format,
 )
 from modules.utils.device import resolve_device
 from modules.utils.export_paths import (
@@ -119,37 +109,29 @@ from modules.utils.gpu_handoff import (
     wait_for_global_vram_release,
 )
 from modules.utils.gpu_metrics import query_cuda_handoff_metrics
-from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
+from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
 )
 from modules.inpainting.runtime_contract import inpaint_outside_mask_message
-from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
+from modules.utils.language_utils import get_language_code, language_codes
 from modules.utils.ocr_debug import (
     all_empty_blocks_are_rejected,
     drop_embedded_ui_ocr_blocks,
     drop_rejected_empty_ocr_blocks,
-    is_block_ocr_empty,
-    is_bubble_panel_text_candidate,
-    is_embedded_ui_panel_layout_review_candidate,
     split_inpaint_protected_ocr_blocks,
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
-from modules.utils.render_style_policy import (
-    VERTICAL_ALIGNMENT_CENTER,
-    resolve_render_text_color,
-)
+from modules.utils.render_style_policy import VERTICAL_ALIGNMENT_CENTER
+from modules.utils.text_normalization import RENDER_NORMALIZABLE_GLYPHS
 from modules.utils.textblock import ensure_text_block_id, sort_blk_list
-from modules.utils.translator_utils import (
-    format_translations,
-    get_raw_text,
-    get_raw_translation,
-)
+from modules.utils.translator_utils import get_raw_text, get_raw_translation
 
 from .batch_processor import BatchProcessor
+from .render_worker import RenderJobInput, RenderJobResult, run_render_job
 from .runtime_resource_arbiter import (
     RuntimeModelState,
     RuntimeResourceArbiter,
@@ -221,6 +203,19 @@ class StagePageContext:
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
+
+
+@dataclass
+class _PendingRenderJob:
+    """전용 렌더 워커에 제출된 작업 하나를 추적한다 (파이프라인 스레드 전용 상태)."""
+
+    future: Future
+    ctx: StagePageContext
+    index: int
+    total_images: int
+    file_on_display: bool
+    output_root: str
+    started_monotonic: float
 
 
 class StageBatchedProcessor(BatchProcessor):
@@ -345,6 +340,13 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_identity: dict[str, Any] | None = None
         self._project_checkpoint_store = None
         self._project_checkpoint_page_keys: list[str] = []
+        # Phase 3a: 인페인팅 sweep 뒤에 렌더(약 300ms/page)를 숨기는 전용 단일
+        # 워커. 렌더 워커는 순수 함수이므로 별도 실행기에 둔다 — 공유
+        # QThreadPool/prewarm 실행기와 절대 섞지 않는다.
+        self._render_executor: ThreadPoolExecutor | None = None
+        self._render_cancel_event = threading.Event()
+        self._pending_render_jobs: list[_PendingRenderJob] = []
+        self._render_context_cache: tuple[Any, str] | None = None
 
     def _stage_tr(self, text: str) -> str:
         return QCoreApplication.translate("StageBatchedProcessor", text)
@@ -363,6 +365,11 @@ class StageBatchedProcessor(BatchProcessor):
         except Exception:
             cancelled = bool(self._is_cancelled())
         if cancelled:
+            # 렌더 워커(별도 스레드)가 취소를 즉시 보도록 함께 신호한다 —
+            # 그러지 않으면 teardown 때까지 진행 중인 렌더 작업이 계속 돈다.
+            render_cancel_event = getattr(self, "_render_cancel_event", None)
+            if render_cancel_event is not None:
+                render_cancel_event.set()
             raise OperationCancelledError("Automatic translation was cancelled.")
 
     def _ensure_prewarm_executor(self) -> ThreadPoolExecutor:
@@ -1390,6 +1397,92 @@ class StageBatchedProcessor(BatchProcessor):
         self._gemma_prefetch_job = None
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
+
+    def _ensure_render_executor(self) -> ThreadPoolExecutor:
+        if self._render_executor is None:
+            self._render_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="ct-render-worker",
+            )
+        return self._render_executor
+
+    def _shutdown_render_executor(self) -> None:
+        # 정리는 어떤 상황에서도 실패하면 안 된다. 생성자를 거치지 않은 객체에서도
+        # 안전하도록 속성 존재를 가정하지 않는다.
+        try:
+            cancel_event = getattr(self, "_render_cancel_event", None)
+            if cancel_event is not None:
+                cancel_event.set()
+            executor = getattr(self, "_render_executor", None)
+            self._render_executor = None
+            self._pending_render_jobs = []
+            if executor is not None:
+                executor.shutdown(wait=True, cancel_futures=True)
+        except Exception:
+            logger.warning(
+                "렌더 워커 실행기 정리 중 예외가 발생했지만 무시합니다.",
+                exc_info=True,
+            )
+
+    def _warm_render_font_caches(self, render_settings: Any) -> None:
+        """렌더 워커가 폰트 캐시(`modules/rendering/render.py`의 lru_cache 4개)를
+        처음 만지는 순간이 파이프라인 스레드와 겹치지 않도록, sweep 시작 전에
+        파이프라인 스레드에서 1회 워밍한다. 정확한 캐시 키 적중이 목적이 아니라
+        Qt 폰트 서브시스템(QFontDatabase/QRawFont)의 최초 접근 경쟁 제거가
+        목적이다."""
+        try:
+            _register_render_fallback_system_fonts()
+            resolve_render_symbol_fallback_font_family()
+            resolve_render_glyph_fallback_font_family(tuple(sorted(RENDER_NORMALIZABLE_GLYPHS)))
+            font_family = str(getattr(render_settings, "font_family", "") or "")
+            if font_family:
+                _render_font_has_real_glyph(font_family, "A")
+        except Exception:
+            logger.debug("렌더 폰트 캐시 워밍이 예외로 끝났습니다. 계속 진행합니다.", exc_info=True)
+
+    def _reserve_render_output_path(
+        self,
+        ctx: StagePageContext,
+        *,
+        export_settings: dict[str, Any],
+        page_index: int,
+        total_pages: int,
+    ) -> tuple[str, str, str]:
+        """`_write_final_render_export`의 경로 계산·예약을 파이프라인 스레드에서
+        미리 끝낸다. 개별 이미지 모드의 `reserve_unique_path` 존재 검사(TOCTOU
+        지점)가 여기서 끝나므로, 렌더 워커는 반환된 정확한 경로에 값만 쓴다."""
+        page_base_name = os.path.splitext(os.path.basename(ctx.image_path))[0]
+        series_dir = self.main_page.get_reserved_automatic_output_series_dir(
+            ctx.directory,
+            anchor_path=(
+                self.main_page.image_files[0] if self.main_page.image_files else ctx.image_path
+            ),
+        )
+        if is_single_archive_mode(export_settings):
+            staging_dir = build_archive_staging_dir(series_dir, ctx.export_token)
+            os.makedirs(staging_dir, exist_ok=True)
+            output_format = str(
+                export_settings.get(
+                    "resolved_automatic_output_archive_image_format",
+                    DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+                )
+            )
+            output_path = os.path.join(
+                staging_dir,
+                build_archive_page_file_name(page_index, total_pages, page_base_name, output_format),
+            )
+            return output_path, series_dir, output_format
+        os.makedirs(series_dir, exist_ok=True)
+        candidate = os.path.join(
+            series_dir,
+            build_output_file_name(page_base_name, "translated", ctx.image_path, export_settings),
+        )
+        output_path = reserve_unique_path(candidate)
+        requested = str(
+            export_settings.get("resolved_automatic_output_image_format", DEFAULT_OUTPUT_IMAGE_FORMAT)
+        )
+        output_format = resolve_individual_output_format(ctx.image_path, requested)
+        return output_path, series_dir, output_format
 
     def _start_gemma_prewarm(self) -> None:
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
@@ -2706,6 +2799,7 @@ class StageBatchedProcessor(BatchProcessor):
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
+            self._drain_render_futures(block=False)
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -2843,6 +2937,12 @@ class StageBatchedProcessor(BatchProcessor):
                         hd_strategy=hd_strategy,
                         export_settings=export_settings,
                     )
+                    self._submit_or_inline_render(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        export_settings=export_settings,
+                    )
                     continue
 
                 project_hit = None
@@ -2934,6 +3034,12 @@ class StageBatchedProcessor(BatchProcessor):
                         hd_strategy=hd_strategy,
                         export_settings=export_settings,
                     )
+                    self._submit_or_inline_render(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        export_settings=export_settings,
+                    )
                     continue
 
                 with self._measure_performance(
@@ -3011,6 +3117,7 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_loaded = False
         if pending:
             self._raise_if_cancelled()
+            self._drain_render_futures(block=False)
             with self._measure_performance(
                 stage="inpaint",
                 operation="model_load",
@@ -3054,6 +3161,7 @@ class StageBatchedProcessor(BatchProcessor):
                 continue
             try:
                 self._raise_if_cancelled()
+                self._drain_render_futures(block=False)
                 with self._measure_performance(
                     stage="inpaint",
                     operation="model_forward",
@@ -3200,6 +3308,12 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     runtime=runtime,
                     hd_strategy=hd_strategy,
+                    export_settings=export_settings,
+                )
+                self._submit_or_inline_render(
+                    ctx,
+                    index=index,
+                    total_images=total_images,
                     export_settings=export_settings,
                 )
             except OperationCancelledError:
@@ -3833,364 +3947,6 @@ class StageBatchedProcessor(BatchProcessor):
             )
         self._raise_if_cancelled()
 
-    def _render_page_text_items(
-        self,
-        ctx: StagePageContext,
-        *,
-        render_settings,
-        trg_lng_cd: str,
-    ) -> None:
-        font = render_settings.font_family
-        setting_font_color = QColor(render_settings.color)
-        file_on_display = None
-        if 0 <= self.main_page.curr_img_idx < len(self.main_page.image_files):
-            file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
-
-        text_items_state: list[dict[str, Any]] = []
-        alignment = self.main_page.button_to_alignment.get(
-            1,
-            self.main_page.button_to_alignment[render_settings.alignment_id],
-        )
-        vertical_alignment = self.main_page.button_to_vertical_alignment.get(
-            1,
-            VERTICAL_ALIGNMENT_CENTER,
-        )
-        strict_render_symbols = should_use_strict_render_symbols(trg_lng_cd)
-        seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]] = set()
-        for blk in ctx.blk_list:
-            if is_block_ocr_empty(blk):
-                continue
-            finalize_ocr_processing_contract(blk)
-            if (
-                getattr(blk, "processing_action", "")
-                != PROCESSING_ACTION_TRANSLATE_INPAINT
-            ):
-                blk._render_skip_reason = (
-                    "processing_action_"
-                    + str(
-                        getattr(blk, "processing_action", "")
-                        or "review"
-                    )
-                )
-                continue
-            x1, y1, block_width, block_height = blk.xywh
-            translation_raw = blk.translation
-            if should_skip_short_render_translation(blk, translation_raw):
-                continue
-            render_normalization = describe_render_text_sanitization(
-                translation_raw,
-                font,
-                block_index=getattr(blk, "_debug_block_index", None),
-                image_path=ctx.image_path,
-                strict_symbols=strict_render_symbols,
-            )
-            translation = render_normalization.text
-            blk._render_translation_raw = str(translation_raw or "")
-            blk._render_text = str(translation or "")
-            blk._render_normalization_applied = bool(
-                render_normalization.normalization_applied
-            )
-            blk._render_normalization_reasons = list(render_normalization.reasons)
-            blk._render_normalization_replacements = list(
-                render_normalization.replacements
-            )
-            if should_skip_short_render_translation(blk, translation):
-                continue
-            gate_decision = describe_text_free_render_translation_gate(
-                blk,
-                translation,
-                target_lang_code=trg_lng_cd,
-            )
-            if not gate_decision.render:
-                blk._text_fit_status = gate_decision.status
-                blk._render_skip_reason = gate_decision.status
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(gate_decision.reasons)
-                )
-                continue
-            mask_gate_decision = describe_text_free_render_mask_gate(
-                blk,
-                target_lang_code=trg_lng_cd,
-            )
-            if not mask_gate_decision.render:
-                blk._text_fit_status = mask_gate_decision.status
-                blk._render_skip_reason = mask_gate_decision.status
-                blk.mask_decision = "review"
-                blk.mask_reject_reason = mask_gate_decision.status
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(mask_gate_decision.reasons)
-                )
-                continue
-            duplicate_key = build_duplicate_bubble_render_key(blk)
-            duplicate_gate = register_duplicate_bubble_render_key(
-                blk,
-                duplicate_key,
-                seen_bubble_render_keys,
-            )
-            if not duplicate_gate.render:
-                blk._text_fit_status = duplicate_gate.status
-                blk._render_skip_reason = duplicate_gate.status
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(duplicate_gate.reasons)
-                )
-                continue
-            if duplicate_gate.reasons:
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(duplicate_gate.reasons)
-                )
-            vertical = is_vertical_block(blk, trg_lng_cd)
-            text_to_wrap = translation
-            source_rect, block_anchor = build_render_rects_for_block(blk)
-            block_width = int(source_rect[2])
-            block_height = int(source_rect[3])
-            block_alignment = alignment
-            block_vertical_alignment = vertical_alignment
-            layout_policy = resolve_text_free_manga_layout(
-                blk,
-                source_rect,
-                target_lang_code=trg_lng_cd,
-            )
-            wrap_width = block_width
-            if layout_policy.enabled:
-                block_alignment = layout_policy.alignment
-                block_vertical_alignment = layout_policy.vertical_alignment
-                wrap_width = min(block_width, int(layout_policy.wrap_width))
-            fit_clearance = get_render_fit_clearance_for_block(
-                blk,
-                render_settings.outline_width,
-                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
-            )
-            translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                text_to_wrap,
-                font,
-                wrap_width,
-                block_height,
-                float(render_settings.line_spacing),
-                float(render_settings.outline_width),
-                render_settings.bold,
-                render_settings.italic,
-                render_settings.underline,
-                block_alignment,
-                render_settings.direction,
-                render_settings.max_font_size,
-                render_settings.min_font_size,
-                vertical,
-                fit_clearance=fit_clearance,
-                return_metrics=True,
-            )
-            translation, font_size, rendered_width, rendered_height = (
-                refit_detected_bubble_text_if_underfilled(
-                    blk,
-                    text_to_wrap,
-                    font,
-                    wrap_width,
-                    block_height,
-                    float(render_settings.line_spacing),
-                    float(render_settings.outline_width),
-                    render_settings.bold,
-                    render_settings.italic,
-                    render_settings.underline,
-                    block_alignment,
-                    render_settings.direction,
-                    render_settings.max_font_size,
-                    render_settings.min_font_size,
-                    vertical,
-                    fit_clearance,
-                    translation,
-                    font_size,
-                    rendered_width,
-                    rendered_height,
-                    auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
-                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
-                )
-            )
-            blk._text_fit_status = (
-                "needs_review"
-                if rendered_width > wrap_width or rendered_height > block_height
-                else "fit"
-            )
-            if layout_policy.enabled and blk._text_fit_status != "fit":
-                blk._text_fit_status = "needs_review_text_free_layout"
-            underfill_gate = describe_text_free_underfill_gate(
-                blk,
-                source_rect=source_rect,
-                rendered_width=rendered_width,
-                rendered_height=rendered_height,
-                target_lang_code=trg_lng_cd,
-            )
-            if blk._text_fit_status == "fit" and not underfill_gate.render:
-                blk._text_fit_status = underfill_gate.status
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(underfill_gate.reasons)
-                )
-            large_mask_gate = describe_text_free_large_mask_gate(
-                blk,
-                source_rect=source_rect,
-                target_lang_code=trg_lng_cd,
-            )
-            if blk._text_fit_status == "fit" and not large_mask_gate.render:
-                blk._text_fit_status = large_mask_gate.status
-                blk.mask_decision = "review"
-                blk.mask_reject_reason = large_mask_gate.status
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(large_mask_gate.reasons)
-                )
-            if is_embedded_ui_panel_layout_review_candidate(blk) and not is_bubble_panel_text_candidate(blk):
-                blk._text_fit_status = "needs_review_embedded_ui_panel_layout"
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union({"needs_review_embedded_ui_panel_layout"})
-                )
-            review_status_gate = describe_auto_render_review_status_gate(
-                getattr(blk, "_text_fit_status", "fit")
-            )
-            if not review_status_gate.render:
-                blk._render_skip_reason = review_status_gate.status
-                blk._render_normalization_reasons = sorted(
-                    set(getattr(blk, "_render_normalization_reasons", []) or [])
-                    .union(review_status_gate.reasons)
-                )
-                continue
-            blk._text_fit_metrics = {
-                "rendered_width": float(rendered_width),
-                "rendered_height": float(rendered_height),
-                "box_width": float(wrap_width),
-                "box_height": float(block_height),
-                "item_width": float(block_width),
-                "font_size": float(font_size),
-            }
-            if is_no_space_lang(trg_lng_cd):
-                translation = translation.replace(" ", "")
-            font_color = resolve_render_text_color(
-                blk.font_color,
-                setting_font_color,
-                render_settings.force_font_color,
-                render_settings.smart_global_apply_all,
-            )
-            render_markup = describe_render_text_markup(
-                translation,
-                font_family=font,
-                font_size=font_size,
-                text_color=font_color,
-                alignment=block_alignment,
-                line_spacing=float(render_settings.line_spacing),
-                bold=render_settings.bold,
-                italic=render_settings.italic,
-                underline=render_settings.underline,
-                direction=render_settings.direction,
-                strict_symbols=strict_render_symbols,
-            )
-            blk._render_text = str(translation or "")
-            blk._render_html = str(render_markup.html_text if render_markup.html_applied else translation)
-            blk._render_html_applied = bool(render_markup.html_applied)
-            blk._render_fallback_font_family = str(render_markup.fallback_font_family or "")
-            blk._render_normalization_applied = bool(
-                render_normalization.normalization_applied or render_markup.html_applied
-            )
-            blk._render_normalization_reasons = sorted(
-                set(render_normalization.reasons)
-                .union(render_markup.reasons)
-                .union(layout_policy.reasons)
-            )
-            blk._render_normalization_replacements = list(
-                render_normalization.replacements
-            ) + list(render_markup.replacements)
-            blk._render_centered_layout = bool(layout_policy.enabled)
-            blk._render_layout_reasons = list(layout_policy.reasons)
-            position, item_width, item_height = build_text_item_layout_geometry(
-                source_rect,
-                rendered_height,
-                block_vertical_alignment,
-            )
-            outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
-            text_props = TextItemProperties(
-                text=blk._render_html,
-                font_family=font,
-                font_size=font_size,
-                text_color=font_color,
-                alignment=block_alignment,
-                line_spacing=float(render_settings.line_spacing),
-                outline_color=outline_color,
-                outline_width=float(render_settings.outline_width),
-                bold=render_settings.bold,
-                italic=render_settings.italic,
-                underline=render_settings.underline,
-                position=position,
-                rotation=blk.angle,
-                scale=1.0,
-                transform_origin=blk.tr_origin_point,
-                width=item_width,
-                height=item_height,
-                direction=render_settings.direction,
-                vertical=vertical,
-                vertical_alignment=block_vertical_alignment,
-                source_rect=source_rect,
-                block_anchor=block_anchor,
-                selection_outlines=[
-                    OutlineInfo(
-                        0,
-                        len(translation),
-                        outline_color,
-                        float(render_settings.outline_width),
-                        OutlineType.Full_Document,
-                    )
-                ] if render_settings.outline else [],
-            )
-            text_item_state = text_props.to_dict()
-            text_item_state["translation_raw"] = str(translation_raw or "")
-            text_item_state["render_text"] = str(translation or "")
-            text_item_state["render_html_applied"] = bool(render_markup.html_applied)
-            text_item_state["render_fallback_font_family"] = str(
-                render_markup.fallback_font_family or ""
-            )
-            text_item_state["render_area_source"] = str(
-                getattr(blk, "_render_area_source", "text_bbox") or "text_bbox"
-            )
-            text_item_state["render_source_xyxy"] = list(
-                getattr(blk, "_render_area_xyxy", []) or []
-            )
-            text_item_state["render_anchor_xyxy"] = list(
-                getattr(blk, "_render_original_xyxy", []) or []
-            )
-            text_item_state["render_bubble_xyxy"] = list(
-                getattr(blk, "_render_bubble_xyxy", []) or []
-            )
-            text_item_state["render_normalization_applied"] = bool(
-                blk._render_normalization_applied
-            )
-            text_item_state["render_normalization_reasons"] = list(
-                blk._render_normalization_reasons
-            )
-            text_item_state["render_centered_layout"] = bool(layout_policy.enabled)
-            text_item_state["render_layout_reasons"] = list(layout_policy.reasons)
-            text_item_state["text_fit_status"] = str(
-                getattr(blk, "_text_fit_status", "fit") or "fit"
-            )
-            text_item_state["text_fit_metrics"] = dict(
-                getattr(blk, "_text_fit_metrics", {}) or {}
-            )
-            text_items_state.append(text_item_state)
-            if ctx.image_path == file_on_display:
-                self.main_page.blk_rendered.emit(translation, font_size, blk, ctx.image_path)
-
-        page_state = self._ensure_page_state(ctx.image_path)
-        page_state.setdefault("viewer_state", {}).update({"text_items_state": text_items_state, "push_to_stack": True})
-        page_state["blk_list"] = ctx.blk_list
-        self.main_page.image_ctrl.mark_processing_stage(
-            ctx.image_path,
-            "render",
-            "completed",
-            text_item_count=len(text_items_state),
-        )
-        self.main_page.image_ctrl.mark_processing_stage(ctx.image_path, "pipeline", "completed")
-        self.main_page.render_state_ready.emit(ctx.image_path)
-
     @staticmethod
     def _render_settings_checkpoint_mapping(render_settings: Any) -> dict[str, Any]:
         values = dict(vars(render_settings))
@@ -4303,258 +4059,352 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self.main_page.render_state_ready.emit(ctx.image_path)
 
-    def _render_all(self, pages: list[StagePageContext]) -> None:
-        total_images = len(pages)
-        settings_page = self.main_page.settings_page
-        export_settings = self._effective_export_settings(settings_page)
-        target_lang_en = self.main_page.lang_mapping.get(pages[0].target_lang, pages[0].target_lang) if pages else ""
-        trg_lng_cd = get_language_code(target_lang_en)
-        render_settings = self.main_page.render_settings()
-        for index, ctx in enumerate(pages):
-            self._raise_if_cancelled()
-            if ctx.failed_stage:
-                continue
-            self._set_current_image(ctx.image_path)
-            self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
-            self._write_json_exports(
-                ctx.directory,
-                ctx.export_token,
-                ctx.archive_bname,
-                ctx.image_path,
-                ctx.image,
-                ctx.blk_list,
-                self._ensure_page_state(ctx.image_path),
-                ctx.source_lang,
-                export_settings,
-            )
-            self._emit_benchmark_event(
-                "render_start",
-                image_path=ctx.image_path,
-                image_index=index,
-                total_images=total_images,
-                block_count=len(ctx.blk_list or []),
-            )
-            try:
-                render_hit, _output_base_root = (
-                    self._prepare_render_checkpoint(
-                        ctx,
-                        render_settings=render_settings,
-                        export_settings=export_settings,
-                        target_language_code=trg_lng_cd,
-                    )
-                )
-                if render_hit is not None:
-                    try:
-                        final_output_path = (
-                            materialize_render_checkpoint_output(render_hit)
-                        )
-                    except (OSError, ValueError):
-                        logger.warning(
-                            "Render checkpoint output materialization failed "
-                            "open for %s; the page will be rendered normally.",
-                            ctx.image_name,
-                            exc_info=True,
-                        )
-                        ctx.project_render_checkpoint_status = "miss"
-                        render_hit = None
-                    if render_hit is not None:
-                        self._restore_render_project_state(ctx)
-                        final_output_root = render_hit.output_root
-                        self.main_page.image_ctrl.update_processing_summary(
-                            ctx.image_path,
-                            {
-                                "translated_image_path": final_output_path,
-                                "translated_page_image_path": (
-                                    final_output_path
-                                ),
-                                "export_root": final_output_root,
-                                "render_project_checkpoint_status": "hit",
-                                "render_output_materialized": (
-                                    not render_hit.output_exists
-                                ),
-                            },
-                        )
-                        self._emit_benchmark_event(
-                            "render_end",
-                            image_path=ctx.image_path,
-                            image_index=index,
-                            total_images=total_images,
-                            block_count=len(ctx.blk_list or []),
-                            translated_image_path=final_output_path,
-                            project_checkpoint_status="hit",
-                            render_skipped=True,
-                            output_materialized=not render_hit.output_exists,
-                        )
-                        self._emit_benchmark_event(
-                            "page_done",
-                            image_path=ctx.image_path,
-                            image_index=index,
-                            total_images=total_images,
-                            block_count=len(ctx.blk_list or []),
-                            patch_count=len(ctx.patches or []),
-                            project_checkpoint_status="hit",
-                        )
-                        self._log_page_done(
-                            index,
-                            total_images,
-                            ctx.image_path,
-                            preview_path=final_output_path,
-                        )
-                        self._raise_if_cancelled()
-                        continue
+    def _lazy_render_context(self, ctx: StagePageContext) -> tuple[Any, str]:
+        """렌더에 필요한 값들을 배치당 1회만 계산한다.
 
-                canonical_translations = [
-                    (
-                        getattr(block, "translation", ""),
-                        copy.deepcopy(getattr(block, "rich_text", "")),
+        `_inpaint_pages`가 페이지마다 즉시 렌더를 제출하므로, 이 계산은
+        `main_page.render_settings()`를 실제로 요구하는 첫 페이지에서만
+        일어난다 — 렌더까지 가지 않는 호출부(단위 테스트의 최소 더블 포함)는
+        이 표면을 갖출 필요가 없다. 폰트 캐시 워밍도 여기, 첫 렌더 제출보다
+        먼저 파이프라인 스레드에서 1회 끝낸다."""
+        cached = getattr(self, "_render_context_cache", None)
+        if cached is not None:
+            return cached
+        render_settings = self.main_page.render_settings()
+        target_lang_en = self.main_page.lang_mapping.get(ctx.target_lang, ctx.target_lang)
+        trg_lng_cd = get_language_code(target_lang_en)
+        self._warm_render_font_caches(render_settings)
+        cached = (render_settings, trg_lng_cd)
+        self._render_context_cache = cached
+        return cached
+
+    def _submit_or_inline_render(
+        self,
+        ctx: StagePageContext,
+        *,
+        index: int,
+        total_images: int,
+        export_settings: dict[str, Any],
+    ) -> None:
+        """페이지 하나의 인페인팅이 막 끝났다. 렌더 체크포인트가 있으면 그
+        자리에서(저렴하므로) 처리하고, 없으면 전용 단일 워커에 넘긴 뒤 곧바로
+        반환한다 — 파이프라인 스레드는 다음 페이지 인페인팅으로 계속 간다."""
+        if ctx.failed_stage:
+            return
+        self._raise_if_cancelled()
+        render_settings, trg_lng_cd = self._lazy_render_context(ctx)
+        self._set_current_image(ctx.image_path)
+        self._write_json_exports(
+            ctx.directory,
+            ctx.export_token,
+            ctx.archive_bname,
+            ctx.image_path,
+            ctx.image,
+            ctx.blk_list,
+            self._ensure_page_state(ctx.image_path),
+            ctx.source_lang,
+            export_settings,
+        )
+        self._emit_benchmark_event(
+            "render_start",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            block_count=len(ctx.blk_list or []),
+        )
+        try:
+            render_hit, _output_base_root = self._prepare_render_checkpoint(
+                ctx,
+                render_settings=render_settings,
+                export_settings=export_settings,
+                target_language_code=trg_lng_cd,
+            )
+            if render_hit is not None:
+                try:
+                    final_output_path = materialize_render_checkpoint_output(render_hit)
+                except (OSError, ValueError):
+                    logger.warning(
+                        "Render checkpoint output materialization failed "
+                        "open for %s; the page will be rendered normally.",
+                        ctx.image_name,
+                        exc_info=True,
                     )
-                    for block in ctx.blk_list
-                ]
-                if not ctx.no_text_detected:
-                    try:
-                        format_translations(
-                            ctx.translation_blocks,
-                            trg_lng_cd,
-                            upper_case=render_settings.upper_case,
-                        )
-                        self._raise_if_cancelled()
-                        get_best_render_area(
-                            ctx.translation_blocks,
-                            ctx.image,
-                            ctx.inpaint_input_img,
-                            auto_max_font_profile=getattr(
-                                render_settings,
-                                "auto_max_font_profile",
-                                "current",
-                            ),
-                        )
-                        self._render_page_text_items(
-                            ctx,
-                            render_settings=render_settings,
-                            trg_lng_cd=trg_lng_cd,
-                        )
-                    finally:
-                        for block, (translation, rich_text) in zip(
-                            ctx.blk_list,
-                            canonical_translations,
-                        ):
-                            block.translation = translation
-                            block.rich_text = rich_text
-                else:
-                    self._render_page_text_items(
+                    ctx.project_render_checkpoint_status = "miss"
+                    render_hit = None
+                if render_hit is not None:
+                    self._restore_render_project_state(ctx)
+                    self._finish_render_checkpoint_hit(
                         ctx,
-                        render_settings=render_settings,
-                        trg_lng_cd=trg_lng_cd,
+                        index=index,
+                        total_images=total_images,
+                        final_output_path=final_output_path,
+                        final_output_root=render_hit.output_root,
+                        output_materialized=not render_hit.output_exists,
                     )
-                restore_blocks = select_blocks_for_original_restore_after_render(ctx.blk_list)
-                if restore_blocks and ctx.inpaint_input_img is not None and ctx.mask is not None:
-                    ctx.inpaint_input_img, ctx.mask, restore_stats = restore_original_for_block_masks(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        restore_blocks,
-                    )
-                    if restore_stats.get("applied"):
-                        ctx.cleanup_stats = dict(ctx.cleanup_stats or {})
-                        ctx.cleanup_stats["render_restore"] = restore_stats
-                        ctx.patches = self.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
-                        self.main_page.patches_processed.emit(ctx.patches, ctx.image_path)
-                        self.main_page.image_ctrl.update_processing_summary(
-                            ctx.image_path,
-                            {
-                                "render_restore_block_count": int(restore_stats.get("block_count", 0) or 0),
-                                "render_restore_pixel_count": int(restore_stats.get("pixel_count", 0) or 0),
-                            },
-                        )
-                self._raise_if_cancelled()
-                page_state = self._ensure_page_state(ctx.image_path)
-                final_output_path, final_output_root = self._write_final_render_export(
-                    ctx.directory,
-                    ctx.export_token,
-                    ctx.image_path,
-                    ctx.image,
-                    ctx.patches,
-                    page_state.get("viewer_state", {}),
-                    export_settings,
-                    page_index=index,
-                    total_pages=total_images,
-                    strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
-                )
-                if ctx.project_render_identity:
-                    try:
-                        stored = record_render_checkpoint(
-                            getattr(
-                                self,
-                                "_project_checkpoint_store",
-                                None,
-                            ),
-                            page_key=ctx.project_checkpoint_page_key,
-                            fingerprint=ctx.project_render_fingerprint,
-                            identity=ctx.project_render_identity,
-                            blocks=ctx.blk_list,
-                            viewer_state=page_state.get(
-                                "viewer_state",
-                                {},
-                            ),
-                            output_path=final_output_path,
-                            output_root=final_output_root,
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Render checkpoint publication failed open for "
-                            "%s.",
-                            ctx.image_name,
-                            exc_info=True,
-                        )
-                        stored = False
-                    ctx.project_render_checkpoint_status = (
-                        "refreshed" if stored else "miss"
-                    )
-                self.main_page.image_ctrl.update_processing_summary(
-                    ctx.image_path,
-                    {
-                        "translated_image_path": final_output_path,
-                        "translated_page_image_path": final_output_path,
-                        "export_root": final_output_root,
-                        "render_project_checkpoint_status": (
-                            ctx.project_render_checkpoint_status
-                        ),
-                        **({"skip_reason": "no_text_detected"} if ctx.no_text_detected else {}),
-                    },
-                )
-                self._emit_benchmark_event(
-                    "render_end",
-                    image_path=ctx.image_path,
-                    image_index=index,
-                    total_images=total_images,
-                    block_count=len(ctx.blk_list or []),
-                    translated_image_path=final_output_path,
-                    project_checkpoint_status=(
-                        ctx.project_render_checkpoint_status
-                    ),
-                )
-                self._emit_benchmark_event(
-                    "page_done",
-                    image_path=ctx.image_path,
-                    image_index=index,
-                    total_images=total_images,
-                    block_count=len(ctx.blk_list or []),
-                    patch_count=len(ctx.patches or []),
-                    **({"skip_reason": "no_text_detected"} if ctx.no_text_detected else {}),
-                )
-                self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
-                self._raise_if_cancelled()
-            except OperationCancelledError:
-                raise
-            except Exception as exc:
-                self._mark_page_failed(
-                    ctx,
+                    return
+
+            strict_render_symbols = should_use_strict_render_symbols(trg_lng_cd)
+            output_path, output_root, output_format = self._reserve_render_output_path(
+                ctx,
+                export_settings=export_settings,
+                page_index=index,
+                total_pages=total_images,
+            )
+            page_state = self._ensure_page_state(ctx.image_path)
+            file_on_display = (
+                0 <= self.main_page.curr_img_idx < len(self.main_page.image_files)
+                and self.main_page.image_files[self.main_page.curr_img_idx] == ctx.image_path
+            )
+            alignment = self.main_page.button_to_alignment.get(
+                1,
+                self.main_page.button_to_alignment[render_settings.alignment_id],
+            )
+            vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+                1,
+                VERTICAL_ALIGNMENT_CENTER,
+            )
+            job = RenderJobInput(
+                image_path=ctx.image_path,
+                image=ctx.image,
+                inpaint_input_img=ctx.inpaint_input_img,
+                mask=ctx.mask,
+                patches=ctx.patches,
+                blk_list=ctx.blk_list,
+                translation_blocks=ctx.translation_blocks,
+                no_text_detected=ctx.no_text_detected,
+                trg_lng_cd=trg_lng_cd,
+                render_settings=render_settings,
+                strict_render_symbols=strict_render_symbols,
+                alignment=alignment,
+                vertical_alignment=vertical_alignment,
+                viewer_state=dict(page_state.get("viewer_state", {})),
+                output_path=output_path,
+                output_format=output_format,
+                is_cancelled=self._render_cancel_event.is_set,
+            )
+            self._raise_if_cancelled()
+            future = self._ensure_render_executor().submit(run_render_job, job)
+            self._pending_render_jobs.append(
+                _PendingRenderJob(
+                    future=future,
+                    ctx=ctx,
                     index=index,
                     total_images=total_images,
-                    stage="render",
-                    reason=str(exc),
-                    extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
+                    file_on_display=file_on_display,
+                    output_root=output_root,
+                    started_monotonic=time.monotonic(),
                 )
+            )
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            self._mark_page_failed(
+                ctx,
+                index=index,
+                total_images=total_images,
+                stage="render",
+                reason=str(exc),
+                extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
+            )
+
+    def _finish_render_checkpoint_hit(
+        self,
+        ctx: StagePageContext,
+        *,
+        index: int,
+        total_images: int,
+        final_output_path: str,
+        final_output_root: str,
+        output_materialized: bool,
+    ) -> None:
+        self.main_page.image_ctrl.update_processing_summary(
+            ctx.image_path,
+            {
+                "translated_image_path": final_output_path,
+                "translated_page_image_path": final_output_path,
+                "export_root": final_output_root,
+                "render_project_checkpoint_status": "hit",
+                "render_output_materialized": output_materialized,
+            },
+        )
+        self._emit_benchmark_event(
+            "render_end",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            block_count=len(ctx.blk_list or []),
+            translated_image_path=final_output_path,
+            project_checkpoint_status="hit",
+            render_skipped=True,
+            output_materialized=output_materialized,
+        )
+        self._emit_benchmark_event(
+            "page_done",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            block_count=len(ctx.blk_list or []),
+            patch_count=len(ctx.patches or []),
+            project_checkpoint_status="hit",
+        )
+        self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
+        self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
+        self._raise_if_cancelled()
+
+    def _finish_render_page_bookkeeping(
+        self,
+        pending: _PendingRenderJob,
+        *,
+        result: RenderJobResult | None,
+        exc: BaseException | None,
+    ) -> None:
+        """렌더 워커가 끝낸 작업 하나의 비순수 후처리를 파이프라인 스레드에서
+        수행한다 — 구 `_render_all`이 하던 시그널 발신·page_state 기록·체크포인트
+        기록이 전부 여기 모인다."""
+        ctx = pending.ctx
+        index = pending.index
+        total_images = pending.total_images
+        if exc is not None:
+            self._mark_page_failed(
+                ctx,
+                index=index,
+                total_images=total_images,
+                stage="render",
+                reason=str(exc),
+                extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
+            )
+            return
+
+        assert result is not None
+        page_state = self._ensure_page_state(ctx.image_path)
+        page_state.setdefault("viewer_state", {}).update(result.viewer_state)
+        page_state["blk_list"] = ctx.blk_list
+        if pending.file_on_display:
+            for translation, font_size, blk in result.blk_rendered_events:
+                self.main_page.blk_rendered.emit(translation, font_size, blk, ctx.image_path)
+        self.main_page.image_ctrl.mark_processing_stage(
+            ctx.image_path,
+            "render",
+            "completed",
+            text_item_count=len(result.viewer_state.get("text_items_state", [])),
+        )
+        self.main_page.image_ctrl.mark_processing_stage(ctx.image_path, "pipeline", "completed")
+        self.main_page.render_state_ready.emit(ctx.image_path)
+
+        ctx.inpaint_input_img = result.inpaint_input_img
+        ctx.mask = result.mask
+        ctx.patches = result.patches
+        if result.restore_applied:
+            ctx.cleanup_stats = dict(ctx.cleanup_stats or {})
+            ctx.cleanup_stats["render_restore"] = result.restore_stats
+            self.main_page.patches_processed.emit(ctx.patches, ctx.image_path)
+            self.main_page.image_ctrl.update_processing_summary(
+                ctx.image_path,
+                {
+                    "render_restore_block_count": int(result.restore_stats.get("block_count", 0) or 0),
+                    "render_restore_pixel_count": int(result.restore_stats.get("pixel_count", 0) or 0),
+                },
+            )
+
+        final_output_path = result.final_output_path
+        final_output_root = pending.output_root
+        if ctx.project_render_identity:
+            try:
+                stored = record_render_checkpoint(
+                    getattr(self, "_project_checkpoint_store", None),
+                    page_key=ctx.project_checkpoint_page_key,
+                    fingerprint=ctx.project_render_fingerprint,
+                    identity=ctx.project_render_identity,
+                    blocks=ctx.blk_list,
+                    viewer_state=page_state.get("viewer_state", {}),
+                    output_path=final_output_path,
+                    output_root=final_output_root,
+                )
+            except Exception:
+                logger.warning(
+                    "Render checkpoint publication failed open for %s.",
+                    ctx.image_name,
+                    exc_info=True,
+                )
+                stored = False
+            ctx.project_render_checkpoint_status = "refreshed" if stored else "miss"
+
+        self.main_page.image_ctrl.update_processing_summary(
+            ctx.image_path,
+            {
+                "translated_image_path": final_output_path,
+                "translated_page_image_path": final_output_path,
+                "export_root": final_output_root,
+                "render_project_checkpoint_status": ctx.project_render_checkpoint_status,
+                **({"skip_reason": "no_text_detected"} if ctx.no_text_detected else {}),
+            },
+        )
+        self._emit_benchmark_event(
+            "render_end",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            block_count=len(ctx.blk_list or []),
+            translated_image_path=final_output_path,
+            project_checkpoint_status=ctx.project_render_checkpoint_status,
+        )
+        self._emit_benchmark_event(
+            "page_done",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            block_count=len(ctx.blk_list or []),
+            patch_count=len(ctx.patches or []),
+            **({"skip_reason": "no_text_detected"} if ctx.no_text_detected else {}),
+        )
+        self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
+        self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
+
+    def _resolve_render_future(self, pending: _PendingRenderJob) -> None:
+        try:
+            result = pending.future.result()
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            self._finish_render_page_bookkeeping(pending, result=None, exc=exc)
+            return
+        self._finish_render_page_bookkeeping(pending, result=result, exc=None)
+
+    def _drain_render_futures(self, *, block: bool) -> None:
+        """제출된 렌더 작업 중 끝난 것을 후처리한다.
+
+        `block=False`는 인페인팅 루프의 기존 취소 체크 지점마다 얹혀 논블로킹
+        으로 흘려보낸다. `block=True`(`_render_all`의 최종 드레인)는
+        `modules/ocr/paddle_crop/engine.py:320-326` 관용구 그대로: 매 틱마다
+        취소를 확인하며 남은 작업이 없어질 때까지 기다린다."""
+        # `object.__new__`로 `__init__`을 거치지 않고 만들어진 인스턴스(단위
+        # 테스트의 최소 더블)에서도 안전하도록 속성 존재를 가정하지 않는다.
+        if not getattr(self, "_pending_render_jobs", None):
+            return
+        pending_by_future = {p.future: p for p in self._pending_render_jobs}
+        if not block:
+            done, _ = wait(set(pending_by_future), timeout=0)
+            for future in done:
+                pending = pending_by_future[future]
+                self._pending_render_jobs.remove(pending)
+                self._resolve_render_future(pending)
+            return
+
+        remaining = set(pending_by_future)
+        while remaining:
+            self._raise_if_cancelled()
+            done, remaining = wait(remaining, timeout=0.2, return_when=FIRST_COMPLETED)
+            for future in done:
+                pending = pending_by_future[future]
+                self._pending_render_jobs.remove(pending)
+                self._resolve_render_future(pending)
+        self._raise_if_cancelled()
+
+    def _render_all(self, pages: list[StagePageContext]) -> None:
+        # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
+        # (`_submit_or_inline_render`가 `_inpaint_pages`에서 페이지별로 제출).
+        # 여기서는 마지막 한두 페이지분만 남아 있을 뿐이다.
+        self._drain_render_futures(block=True)
 
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
@@ -4569,6 +4419,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._recent_page_durations.clear()
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
+        self._render_context_cache = None
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
         self._record_performance_workload(
             "pipeline",
@@ -4758,6 +4609,11 @@ class StageBatchedProcessor(BatchProcessor):
             # 아무 모델도 없는 컨테이너가 CUDA 컨텍스트로 약 278 MiB 를 붙들고
             # 있었다. LaMa 가 그만큼 못 쓴다.
             self._release_gemma_before_inpainter()
+            # Phase 3a: 인페인팅+렌더 융합 sweep 동안 페이지별 자동저장을
+            # 억제하고 sweep 종료 시 1회로 합친다 (finally 블록에서 해제).
+            project_ctrl = getattr(self.main_page, "project_ctrl", None)
+            if project_ctrl is not None:
+                project_ctrl.begin_batch_autosave_deferral()
             with self._measure_performance(
                 stage="inpaint",
                 operation="stage_window",
@@ -4827,6 +4683,18 @@ class StageBatchedProcessor(BatchProcessor):
         finally:
             self._persist_stage_rates()
             self._shutdown_page_cache_executor()
+            self._shutdown_render_executor()
+            try:
+                project_ctrl = getattr(self.main_page, "project_ctrl", None)
+                if project_ctrl is not None:
+                    project_ctrl.end_batch_autosave_deferral(
+                        pages[-1].image_path if pages else ""
+                    )
+            except Exception:
+                logger.warning(
+                    "Sweep 종료 자동저장 트리거 중 예외가 발생했지만 무시합니다.",
+                    exc_info=True,
+                )
             try:
                 self._shutdown_prewarm_executor()
             finally:
