@@ -98,3 +98,45 @@ class RestoreKeepsDisplayAndValueAlignedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportedFontIsTheDefaultTests(unittest.TestCase):
+    """저장된 선택이 없으면 가져온 글꼴이 기본값이어야 한다.
+
+    예전에는 이 자리에서 Qt 응용 프로그램 기본 글꼴(`맑은 고딕` 등)로 떨어졌다.
+    저장된 값이 한 번 비면 시스템 UI 글꼴이 확정됐고, 만화 번역 결과가 그 글꼴로
+    렌더됐다. 글꼴을 가져왔다는 것 자체가 그 글꼴로 렌더하겠다는 뜻이다.
+    """
+
+    def test_the_fallback_prefers_an_imported_font(self) -> None:
+        import inspect
+
+        from app.controllers import projects
+
+        source = inspect.getsource(projects.ProjectController.load_main_page_settings)
+        # 콤보/Qt 기본값보다 가져온 글꼴을 먼저 본다.
+        self.assertLess(
+            source.index("user_font_path"),
+            source.index("QtWidgets.QApplication.font().family()"),
+        )
+
+    def test_the_choice_is_deterministic(self) -> None:
+        """실행마다 다른 글꼴이 뽑히면 안 된다."""
+
+        import inspect
+
+        from app.controllers import projects
+
+        source = inspect.getsource(projects.ProjectController.load_main_page_settings)
+        self.assertIn("sorted(os.listdir(user_font_path))", source)
+
+    def test_the_block_is_marked_for_easy_removal(self) -> None:
+        """나중에 이 기본값 규칙을 걷어낼 때 어디를 지울지 분명해야 한다."""
+
+        import inspect
+
+        from app.controllers import projects
+
+        source = inspect.getsource(projects.ProjectController.load_main_page_settings)
+        self.assertIn("이 블록만 지우면 원래 동작", source)
+        self.assertIn("--- 여기까지 ---", source)
