@@ -71,7 +71,7 @@ class InpainterReleaseTests(unittest.TestCase):
             ],
             "model_ready",
         )
-        processor._release_inpainter_before_gemma([], start_gemma=False)
+        processor._release_inpainter_before_render([])
         snapshot = processor._runtime_resource_arbiter().snapshot()
         self.assertIsNone(snapshot.active_model)
         self.assertEqual(snapshot.states["inpainter"], "stopped")
@@ -100,14 +100,18 @@ class InpainterReleaseTests(unittest.TestCase):
         ):
             processor._ensure_inpainter()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "VRAM release was not confirmed",
+        # 강제가 켜져 있을 때만 실패 lease 를 남기고 중단한다.
+        with mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
         ):
-            processor._release_inpainter_before_gemma(
-                [],
-                start_gemma=False,
-            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "VRAM release was not confirmed",
+            ):
+                processor._release_inpainter_before_render(
+                    [],
+                )
 
         snapshot = processor._runtime_resource_arbiter().snapshot()
         self.assertEqual(snapshot.active_model, "inpainter")
@@ -180,7 +184,13 @@ class InpainterReleaseTests(unittest.TestCase):
             min_drop_mb=16.0,
         )
 
-    def test_stage_handoff_preserves_page_outputs_before_starting_gemma(self) -> None:
+    def test_stage_handoff_preserves_page_outputs_before_rendering(self) -> None:
+        """인페인터를 내려도 렌더가 쓸 페이지 산출물이 그대로 남아야 한다.
+
+        순서가 번역 → 인페인팅으로 바뀌면서 이 해제 다음은 번역이 아니라 렌더다.
+        예전에는 여기서 Gemma 예열을 시작했지만 그 훅은 도달할 수 없게 되어 걷어냈다.
+        """
+
         processor = object.__new__(StageBatchedProcessor)
         events: list[str] = []
         release_report = {
@@ -199,7 +209,6 @@ class InpainterReleaseTests(unittest.TestCase):
         )
         processor._emit_benchmark_event = lambda *_args, **_kwargs: events.append("telemetry")
         processor._raise_if_cancelled = lambda: events.append("cancel-check")
-        processor._start_gemma_prewarm = lambda: events.append("gemma-start")
 
         image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
         mask = np.array([[0, 255], [255, 0]], dtype=np.uint8)
@@ -236,13 +245,11 @@ class InpainterReleaseTests(unittest.TestCase):
             return renderer.render_to_image().tobytes()
 
         rendered_before = render_page()
-        processor._release_inpainter_before_gemma([page])
+        processor._release_inpainter_before_render([page])
         rendered_after = render_page()
 
-        self.assertEqual(
-            events,
-            ["release", "telemetry", "cancel-check", "gemma-start"],
-        )
+        # 해제와 그 기록만 일어난다. Gemma 기동은 이제 이 경로에 없다.
+        self.assertEqual(events, ["release", "telemetry"])
         self.assertIsNotNone(app)
         np.testing.assert_array_equal(page.inpaint_input_img, image_before)
         np.testing.assert_array_equal(page.mask, mask_before)
@@ -271,6 +278,9 @@ class InpainterReleaseTests(unittest.TestCase):
             started = True
 
         processor._start_gemma_prewarm = start_gemma
+        # 비차단 경로는 Gemma 기동까지 계속 진행하므로, 그 뒤에 필요한 최소 표면을
+        # 더블에 갖춰 둔다.
+        processor._raise_if_cancelled = lambda: None
         page = StagePageContext(
             image_path="example.png",
             image_name="example.png",
@@ -278,9 +288,20 @@ class InpainterReleaseTests(unittest.TestCase):
             target_lang="Korean",
         )
 
-        with self.assertRaisesRegex(RuntimeError, "VRAM release was not confirmed"):
-            processor._release_inpainter_before_gemma([page])
+        # 기본값은 강건성 우선이다. VRAM 확인에 실패해도 게이트에서 멈추지 않고
+        # 번역 단계로 넘어간다. (이 페이지에는 번역 블록이 없어 예열까지 가지 않는
+        # 것이 정상이며, 여기서 확인하려는 것은 게이트가 중단시키지 않는다는 점이다.)
+        processor._release_inpainter_before_render([page])
 
+        # 강제를 켜면 예전처럼 차단한다.
+        with mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "VRAM release was not confirmed"
+            ):
+                processor._release_inpainter_before_render([page])
         self.assertFalse(started)
 
     def test_aborted_inpaint_releases_resources_without_starting_gemma(self) -> None:
@@ -289,9 +310,9 @@ class InpainterReleaseTests(unittest.TestCase):
         processor._inpaint_pages = lambda _pages: (_ for _ in ()).throw(
             RuntimeError("inpaint aborted")
         )
-        processor._release_inpainter_before_gemma = (
+        processor._release_inpainter_before_render = (
             lambda _pages, **kwargs: events.append(
-                f"release:{kwargs['handoff_outcome']}:{kwargs['start_gemma']}"
+                f"release:{kwargs['handoff_outcome']}"
             )
         )
         page = StagePageContext(
@@ -304,7 +325,7 @@ class InpainterReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "inpaint aborted"):
             processor._inpaint_all([page])
 
-        self.assertEqual(events, ["release:aborted:False"])
+        self.assertEqual(events, ["release:aborted"])
 
     def test_handoff_preserves_debug_patch_mask_and_final_png_hashes(self) -> None:
         processor = object.__new__(StageBatchedProcessor)
@@ -406,7 +427,7 @@ class InpainterReleaseTests(unittest.TestCase):
                 }
 
             before_hashes = materialize("before")
-            processor._release_inpainter_before_gemma([page])
+            processor._release_inpainter_before_render([page])
             after_hashes = materialize("after")
 
         self.assertEqual(after_hashes, before_hashes)

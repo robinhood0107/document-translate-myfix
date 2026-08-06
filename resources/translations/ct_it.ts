@@ -122,6 +122,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>자동번역 진행 중</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1071,7 +1075,7 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
 <context>
     <name>MangaLMMOCRPage</name>
     <message>
-        <source>MangaLMM Settings</source>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1397,10 +1401,6 @@ Verifica la tua connessione Internet.</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1654,6 +1654,10 @@ Install it to use PSD features.</source>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
         <translation>
         Ottimale (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Comic Translate</source>
@@ -2196,6 +2200,10 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     <message>
         <source>Automatic</source>
         <translation>Automatico</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Calculating</source>
@@ -3230,6 +3238,10 @@ Riavviare ora?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3261,10 +3273,6 @@ Riavviare ora?</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>MangaLMM Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3350,6 +3358,10 @@ Riavviare ora?</translation>
     <message>
         <source>Tools</source>
         <translation>Strumenti</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Rendering</source>
@@ -3652,6 +3664,10 @@ Regola la dimensione usata dai pennelli di aggiunta, cancellazione, esclusione e
     </message>
     <message>
         <source>precision</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>개발자/성능모드</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5271,16 +5287,16 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>Ridimensiona</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>Ritaglia</translation>
+        <source>Original</source>
+        <translation type="unfinished">Originale</translation>
     </message>
 </context>
 <context>
@@ -5335,6 +5351,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>Ritaglia</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">Originale</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

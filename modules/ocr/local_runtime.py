@@ -38,10 +38,26 @@ from modules.ocr.paddle_crop.transport import (
     DEFAULT_PADDLE_DIRECT_SERVER_URL,
     direct_transport_identity,
 )
+from modules.ocr.hunyuan_llamacpp_runtime_contract import (
+    DEFAULT_HUNYUAN_OCR_LLAMA_CPP_IMAGE,
+    DEFAULT_HUNYUAN_OCR_MODEL_VOLUME,
+    DEFAULT_HUNYUAN_OCR_READY_MANIFEST,
+    DEFAULT_HUNYUAN_OCR_RUNTIME_OPTIONS,
+    HUNYUAN_OCR_MMPROJ_NAME,
+    HUNYUAN_OCR_MODEL_NAME,
+    HUNYUAN_OCR_MODEL_SPECS,
+    HUNYUAN_OCR_RUNTIME_PREPARATION_VERSION,
+    HunyuanOCRRuntimeContract,
+    HunyuanOCRRuntimeContractError,
+    build_hunyuan_ocr_runtime_contract,
+    resolve_hunyuan_ocr_runtime_options,
+    validate_hunyuan_ocr_volume_name,
+)
 from modules.ocr.mangalmm_full_page.runtime import (
     DEFAULT_MANGALMM_LLAMA_CPP_IMAGE,
     DEFAULT_MANGALMM_MODEL_VOLUME,
     DEFAULT_MANGALMM_READY_MANIFEST,
+    DEFAULT_MANGALMM_RUNTIME_OPTIONS,
     MANGALMM_MMPROJ_NAME,
     MANGALMM_MODEL_NAME,
     MANGALMM_MODEL_SPECS,
@@ -50,6 +66,7 @@ from modules.ocr.mangalmm_full_page.runtime import (
     MangaLMMRuntimeContract,
     MangaLMMRuntimeContractError,
     build_mangalmm_runtime_contract,
+    resolve_mangalmm_runtime_options,
     validate_mangalmm_volume_name,
 )
 from modules.ocr.paddle_spotting.runtime import (
@@ -73,8 +90,10 @@ from modules.utils.local_llama_router import (
     LocalLlamaRouterCoordinator,
     RouterModelMaterial,
     RouterPair,
+    RouterPairKind,
     RouterRuntimeSpec,
 )
+from modules.utils.local_llama_router.contracts import router_pair_for_engine_key
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
@@ -85,10 +104,12 @@ from modules.utils.llama_cpp_runtime import (
 logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
 PADDLEOCR_LLAMA_CPP_IMAGE_REF = DEFAULT_PADDLE_LLAMA_CPP_IMAGE
+# 캐시 식별자로 쓰는 이미지 토큰이다. digest로 고정된 참조면 digest만, 태그
+# 참조면 태그 전체가 남는다. 어느 쪽이든 이미지를 바꾸면 값이 함께 바뀌므로
+# 캐시 무효화 목적에는 그대로 성립한다.
 PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
     -1
 ]
@@ -97,6 +118,7 @@ PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
 PADDLEOCR_IMAGE_REF = PADDLEOCR_LLAMA_CPP_IMAGE_REF
 PADDLEOCR_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST
 PADDLEOCR_RUNTIME_FINGERPRINT_LABEL = PADDLE_RUNTIME_FINGERPRINT_LABEL
+HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF = DEFAULT_HUNYUAN_OCR_LLAMA_CPP_IMAGE
 MANGALMM_LLAMA_CPP_IMAGE_REF = DEFAULT_MANGALMM_LLAMA_CPP_IMAGE
 MANGALMM_LLAMA_CPP_IMAGE_DIGEST = MANGALMM_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
     -1
@@ -107,6 +129,16 @@ PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF = (
 PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST = (
     PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[-1]
 )
+# 관리형 OCR 엔진별 Arbiter lease 이름. 스테이지 스케줄러는 같은 이름을 명시적으로
+# 넘기고, 이 표는 Router의 load와 release가 함께 참조하는 기본값이다. 양쪽이 서로
+# 다른 이름을 쓰면 lease가 교착되므로 한 곳에서만 정의한다.
+_OCR_RUNTIME_SERVICE_NAMES = {
+    "PaddleOCR VL": "paddleocr_vl",
+    "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+    "HunyuanOCR": "hunyuanocr",
+    "MangaLMM": "mangalmm",
+}
+
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -184,6 +216,9 @@ class LocalOCRRuntimeManager:
         self._paddle_spotting_runtime_contract_cache: (
             PaddleSpottingRuntimeContract | None
         ) = None
+        self._hunyuan_ocr_runtime_contract_cache: (
+            HunyuanOCRRuntimeContract | None
+        ) = None
         self._mangalmm_runtime_contract_cache: MangaLMMRuntimeContract | None = None
         self._paddle_idle_released = False
         self._warned_legacy_backend_environment: tuple[str, ...] = ()
@@ -202,7 +237,7 @@ class LocalOCRRuntimeManager:
         engine_key: str,
         settings_page: Any,
     ) -> RouterPair | None:
-        """Return a Router pair only for the full default Paddle + Gemma path."""
+        """기본 OCR + Gemma 조합이 완전할 때만 Router pair를 반환한다."""
 
         coordinator = self._router_coordinator
         gemma_manager = self._router_gemma_manager
@@ -217,12 +252,39 @@ class LocalOCRRuntimeManager:
             gemma_endpoint, gemma_model = credentials(settings_page)
         except Exception:
             return None
-        return coordinator.classify_pair(
+        pair = coordinator.classify_pair(
             engine_key,
             self._resolve_server_url(engine_key, settings_page),
             gemma_endpoint,
             gemma_model,
         )
+        if pair is None or not self._router_preset_matches_runtime_options(pair):
+            return None
+        return pair
+
+    def _router_preset_matches_runtime_options(self, pair: RouterPair) -> bool:
+        """정적 preset이 사용자가 조정한 옵션을 버릴 상황이면 Router를 거부한다.
+
+        Router는 모델을 Compose 환경변수가 아니라 fingerprint된 preset 파일로
+        구성한다. 따라서 separate-server 경로가 조정 가능한 런타임 옵션을 노출하는
+        엔진은, 그 옵션이 고정된 기본값을 유지하는 동안에만 Router로 보낼 수 있다.
+        그렇지 않으면 조정값이 조용히 무시되는데, 이는 기동 비용만 달라지는 것이
+        아니라 OCR 동작 자체를 바꾸므로 separate-server 경로가 계속 담당한다.
+        """
+
+        if pair.kind is RouterPairKind.MANGALMM:
+            try:
+                resolved = resolve_mangalmm_runtime_options(os.environ)
+            except MangaLMMRuntimeContractError:
+                return False
+            return resolved == DEFAULT_MANGALMM_RUNTIME_OPTIONS
+        if pair.kind is RouterPairKind.HUNYUAN:
+            try:
+                resolved = resolve_hunyuan_ocr_runtime_options(os.environ)
+            except HunyuanOCRRuntimeContractError:
+                return False
+            return resolved == DEFAULT_HUNYUAN_OCR_RUNTIME_OPTIONS
+        return True
 
     def router_is_active(self) -> bool:
         pair = self._router_pair
@@ -259,6 +321,76 @@ class LocalOCRRuntimeManager:
                 model_alias=pair.ocr_alias,
             )
 
+    def _release_separate_server_for_router(self, engine_key: str) -> bool:
+        """Router보다 먼저 이 제품의 separate-server OCR 컨테이너를 정지한다.
+
+        두 경로는 같은 OCR 호스트 포트를 publish하므로, 이전 프로세스가 남긴
+        separate-server 컨테이너는 Router가 그 포트를 바인딩하는 것을 영구히 막는다.
+        요청된 엔진의 제품 번들 컨테이너만 정지하며, 제품 소유가 아닌 listener는
+        adapter의 ownership 오류로 남는다.
+        """
+
+        if not self._running_managed_container_names(engine_key):
+            return False
+        self._stop_engine(engine_key)
+        if self._active_engine == engine_key:
+            self._active_engine = None
+        if self._managed_start_attempted_engine == engine_key:
+            self._managed_start_attempted_engine = None
+        self._readiness_cache.clear()
+        if engine_key == "PaddleOCR VL":
+            self._paddle_idle_released = False
+        logger.info(
+            "Stopped the separate-server %s container so the Router can bind its port.",
+            engine_key,
+        )
+        return True
+
+    def _release_stale_router_ports_for_engine(
+        self,
+        engine_key: str,
+        server_url: str,
+        *,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        """separate-server 경로 이전에 남은 Router 컨테이너의 포트를 회수한다.
+
+        Router는 OCR 포트와 18080을 함께 publish하므로, 이전 프로세스가 남긴
+        컨테이너는 separate-server compose의 바인딩을 영구히 실패시킨다. 회수는
+        Router 편입 엔진의 정확한 관리형 포트로만 제한하며, custom 포트는 건드리지
+        않는다.
+        """
+
+        coordinator = self._router_coordinator
+        if coordinator is None:
+            return
+        pair = router_pair_for_engine_key(engine_key)
+        if pair is None:
+            return
+        try:
+            configured_port = urlparse(str(server_url or "").strip()).port
+        except ValueError:
+            return
+        if configured_port != pair.ocr_port:
+            return
+        try:
+            released = coordinator.release_owned_pair_ports(
+                pair,
+                cancel_checker=cancel_checker,
+            )
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(engine_key, str(exc)) from exc
+        if released:
+            logger.info(
+                "Released leftover Router container(s) %s so the separate-server "
+                "%s runtime can bind port %s.",
+                ", ".join(released),
+                engine_key,
+                pair.ocr_port,
+            )
+
     def _is_gemma_translator_selected(self, settings_page: Any) -> bool:
         getter = getattr(settings_page, "get_tool_selection", None)
         if not callable(getter):
@@ -284,6 +416,10 @@ class LocalOCRRuntimeManager:
         settings_page: Any,
         pair: RouterPair,
     ) -> RouterRuntimeSpec:
+        # 모델 alias는 반드시 pair 정의에서 가져온다. 라우터는 pair alias로
+        # 모델을 적재하고, GPU 귀속 검증은 worker의 --alias를 contract의
+        # ocr_model.alias와 대조한다. 둘이 어긋나면 컨테이너는 떠도 귀속 증거를
+        # 찾지 못해 기동이 실패한다.
         gemma_manager = self._router_gemma_manager
         material_getter = getattr(gemma_manager, "router_model_material", None)
         if not callable(material_getter):
@@ -295,7 +431,7 @@ class LocalOCRRuntimeManager:
             self._ensure_paddle_runtime_images()
             contract = self._paddle_runtime_contract(force_refresh=True)
             material = RouterModelMaterial(
-                alias=PADDLE_LLAMA_MODEL_ALIAS,
+                alias=pair.ocr_alias,
                 model_file=PADDLE_LLAMA_MODEL_NAME,
                 model_sha256=str(
                     PADDLE_LLAMA_MODEL_SPECS[PADDLE_LLAMA_MODEL_NAME]["sha256"]
@@ -314,7 +450,7 @@ class LocalOCRRuntimeManager:
             self._ensure_paddle_spotting_runtime_image()
             contract = self._paddle_spotting_runtime_contract(force_refresh=True)
             material = RouterModelMaterial(
-                alias=PADDLE_SPOTTING_MODEL_ALIAS,
+                alias=pair.ocr_alias,
                 model_file=PADDLE_SPOTTING_MODEL_NAME,
                 model_sha256=str(
                     PADDLE_SPOTTING_MODEL_SPECS[PADDLE_SPOTTING_MODEL_NAME]["sha256"]
@@ -331,10 +467,48 @@ class LocalOCRRuntimeManager:
                 runtime_options=dict(contract.runtime_options),
                 preparation_version=contract.preparation_version,
             )
+        elif engine_key == "HunyuanOCR":
+            self._ensure_hunyuan_ocr_runtime_image()
+            contract = self._hunyuan_ocr_runtime_contract(force_refresh=True)
+            material = RouterModelMaterial(
+                alias=pair.ocr_alias,
+                model_file=HUNYUAN_OCR_MODEL_NAME,
+                model_sha256=str(
+                    HUNYUAN_OCR_MODEL_SPECS[HUNYUAN_OCR_MODEL_NAME]["sha256"]
+                ),
+                mmproj_file=HUNYUAN_OCR_MMPROJ_NAME,
+                mmproj_sha256=str(
+                    HUNYUAN_OCR_MODEL_SPECS[HUNYUAN_OCR_MMPROJ_NAME]["sha256"]
+                ),
+                volume_name=contract.volume_name,
+                ready_manifest_sha256=contract.ready_manifest_sha256,
+                source_fingerprint=contract.fingerprint,
+                runtime_options=dict(contract.runtime_options),
+                preparation_version=contract.preparation_version,
+            )
+        elif engine_key == "MangaLMM":
+            self._ensure_mangalmm_runtime_image()
+            contract = self._mangalmm_runtime_contract(force_refresh=True)
+            material = RouterModelMaterial(
+                alias=pair.ocr_alias,
+                model_file=MANGALMM_MODEL_NAME,
+                model_sha256=str(
+                    MANGALMM_MODEL_SPECS[MANGALMM_MODEL_NAME]["sha256"]
+                ),
+                mmproj_file=MANGALMM_MMPROJ_NAME,
+                mmproj_sha256=str(
+                    MANGALMM_MODEL_SPECS[MANGALMM_MMPROJ_NAME]["sha256"]
+                ),
+                volume_name=contract.volume_name,
+                ready_manifest_sha256=contract.ready_manifest_sha256,
+                source_fingerprint=contract.fingerprint,
+                runtime_options=dict(contract.runtime_options),
+                preparation_version=contract.preparation_version,
+            )
         else:
             raise self._build_setup_error(
                 engine_key,
-                "Router supports only the two PaddleOCR-VL product routes.",
+                "Router는 PaddleOCR-VL 두 경로와 HunyuanOCR, MangaLMM만 지원합니다.",
             )
         gemma_material, gemma_image_ref = material_getter(settings_page)
         if str(contract.llama_image_ref) != str(gemma_image_ref):
@@ -417,11 +591,6 @@ class LocalOCRRuntimeManager:
         config = self._config_for(engine_key)
         server_url = self._resolve_server_url(engine_key, settings_page)
         return _normalize_url(server_url) == _normalize_url(config["managed_url"])
-
-    def preflight_cache_key(self, engine_key: str, settings_page: Any) -> str | None:
-        if not self.should_manage_engine(engine_key, settings_page):
-            return None
-        return f"{engine_key}|{_normalize_url(self._resolve_server_url(engine_key, settings_page))}"
 
     def get_ocr_cache_identity(
         self,
@@ -616,13 +785,21 @@ class LocalOCRRuntimeManager:
                     stop_container=True,
                     resource_arbiter=resource_arbiter,
                     runtime_service=self._router_owner_service(
-                        runtime_service or "ocr"
+                        runtime_service or self._router_owned_service_default()
                     ),
                     cancel_checker=cancel_checker,
                 )
             if not is_local_ocr_engine(engine_key) or not self.should_manage_engine(engine_key, settings_page):
                 self._deactivate_active_engine()
                 return
+
+            # 이전 프로세스의 Router 컨테이너가 이 엔진의 포트를 계속 publish
+            # 하고 있으므로, Compose가 바인딩을 시도하기 전에 회수한다.
+            self._release_stale_router_ports_for_engine(
+                engine_key,
+                self._resolve_server_url(engine_key, settings_page),
+                cancel_checker=cancel_checker,
+            )
 
             cache_key = self._readiness_cache_key(engine_key, settings_page, managed=True)
             if self._is_cancelled(cancel_checker):
@@ -672,6 +849,70 @@ class LocalOCRRuntimeManager:
                 if engine_key == "PaddleOCR VL":
                     self._paddle_idle_released = False
 
+    def prepare_engine_container(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> bool:
+        """모델은 올리지 않고 Router 컨테이너만 미리 띄운다.
+
+        Router v2 는 `--models-max 1 --no-models-autoload` 로 뜬다. 즉 컨테이너 기동
+        자체는 어떤 모델도 적재하지 않는다. 그래서 이 작업은 검출 sweep 과 겹쳐도
+        모델 적재 baseline 을 오염시키지 않는다 — PR #242 가 예열을 검출 뒤로 미룬
+        이유는 검출기의 ONNX 세션이 **모델 적재** baseline 에 섞이는 것이었고, 여기서는
+        모델을 적재하지 않는다.
+
+        컨테이너 기동은 이미지 인출·컨테이너 생성·서버 부팅을 포함해 실측 6~8초다.
+        그만큼을 검출 뒤에서 앞으로 당긴다.
+
+        준비를 실제로 수행했으면 True. Router 경로가 아니거나 실패하면 False —
+        이것은 최적화일 뿐이므로 실패가 배치를 멈춰서는 안 된다.
+        """
+
+        with self._lock:
+            coordinator = self._router_coordinator
+            if coordinator is None:
+                return False
+            try:
+                pair = self.router_pair_for_engine(engine_key, settings_page)
+            except Exception:
+                return False
+            if pair is None:
+                return False
+            if self._router_pair is not None:
+                # 이미 어떤 쌍을 소유하고 있다. 여기서 쌍 전환을 벌이면 예열이 아니라
+                # 본 작업이 된다. 준비는 건너뛰고 정식 경로에 맡긴다.
+                return False
+            try:
+                self._release_separate_server_for_router(engine_key)
+                release_gemma = getattr(
+                    self._router_gemma_manager,
+                    "release_separate_server_for_router",
+                    None,
+                )
+                if callable(release_gemma):
+                    release_gemma()
+                spec = self._router_runtime_spec(engine_key, settings_page, pair)
+                coordinator.prepare(
+                    spec,
+                    arbiter=resource_arbiter,
+                    service=runtime_service or self._router_service_name(engine_key),
+                    cancel_checker=cancel_checker,
+                )
+            except OperationCancelledError:
+                raise
+            except Exception:
+                logger.info(
+                    "Router 컨테이너 사전 기동을 건너뜁니다. 정식 경로가 처리합니다.",
+                    exc_info=True,
+                )
+                return False
+            return True
+
     def _ensure_router_engine(
         self,
         engine_key: str,
@@ -697,7 +938,7 @@ class LocalOCRRuntimeManager:
                 stop_container=True,
                 resource_arbiter=resource_arbiter,
                 runtime_service=self._router_owner_service(
-                    runtime_service or "ocr"
+                    runtime_service or self._router_owned_service_default()
                 ),
                 cancel_checker=cancel_checker,
             )
@@ -706,12 +947,30 @@ class LocalOCRRuntimeManager:
             # A foreign process at a default port remains the adapter's
             # explicit ownership error and is never guessed/stopped here.
             self._deactivate_active_engine()
-        spec = self._router_runtime_spec(engine_key, settings_page, pair)
-        service = runtime_service or (
-            "paddleocr_vl"
-            if engine_key == "PaddleOCR VL"
-            else "paddleocr_vl_spotting"
+        # separate-server 컨테이너는 Router와 같은 호스트 포트를 publish하므로,
+        # Router가 그 포트를 확보하기 전에 이 제품의 OCR·Gemma 컨테이너를 먼저
+        # 정지한다. 제품 소유가 아닌 listener는 adapter의 명시적 ownership 오류로
+        # 남는다.
+        try:
+            self._release_separate_server_for_router(engine_key)
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(engine_key, str(exc)) from exc
+        release_gemma = getattr(
+            self._router_gemma_manager,
+            "release_separate_server_for_router",
+            None,
         )
+        if callable(release_gemma):
+            try:
+                release_gemma()
+            except OperationCancelledError:
+                raise
+            except Exception as exc:
+                raise self._build_setup_error(engine_key, str(exc)) from exc
+        spec = self._router_runtime_spec(engine_key, settings_page, pair)
+        service = runtime_service or self._router_service_name(engine_key)
         try:
             coordinator.load(
                 spec,
@@ -751,7 +1010,7 @@ class LocalOCRRuntimeManager:
             return {"runtime_state": "stopped", "gpu_release_expected": False}
         evidence = coordinator.finish(
             arbiter=resource_arbiter,
-            service=runtime_service or "ocr",
+            service=runtime_service or self._router_owned_service_default(),
             stop_container=stop_container,
             cancel_checker=cancel_checker,
             allow_foreign_owner_teardown=allow_foreign_owner_teardown,
@@ -780,6 +1039,19 @@ class LocalOCRRuntimeManager:
             "router_model_generation": snapshot.model_generation,
         }
 
+    @staticmethod
+    def _router_service_name(engine_key: str, fallback: str = "ocr") -> str:
+        """Router의 load와 release가 공유해야 하는 단일 GPU lease 이름.
+
+        load가 잡은 lease 이름과 release가 요청하는 이름이 다르면 Arbiter가
+        교착되므로, 양방향이 각자 기본값을 정하지 않고 여기서 함께 해석한다.
+        """
+
+        return _OCR_RUNTIME_SERVICE_NAMES.get(
+            str(engine_key or ""),
+            str(fallback or "ocr"),
+        )
+
     def _router_owner_service(self, fallback: str) -> str:
         """Return the Arbiter service that owns the currently selected pair."""
 
@@ -792,17 +1064,19 @@ class LocalOCRRuntimeManager:
             if loaded_model == spec.gemma_model.alias:
                 return "gemma"
             if loaded_model == spec.ocr_model.alias:
-                return {
-                    "PaddleOCR VL": "paddleocr_vl",
-                    "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
-                }.get(spec.pair.ocr_engine_key, str(fallback or "ocr"))
-        return {
-            "PaddleOCR VL": "paddleocr_vl",
-            "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
-        }.get(
-            self._active_engine or "",
-            str(fallback or "ocr"),
-        )
+                return self._router_service_name(
+                    spec.pair.ocr_engine_key,
+                    fallback,
+                )
+        return self._router_service_name(self._active_engine or "", fallback)
+
+    def _router_owned_service_default(self) -> str:
+        """이 매니저가 현재 소유한 pair의 lease 이름."""
+
+        pair = self._router_pair
+        if pair is None:
+            return "ocr"
+        return self._router_service_name(pair.ocr_engine_key)
 
     def _ensure_engine_uncached(
         self,
@@ -1026,7 +1300,7 @@ class LocalOCRRuntimeManager:
                 return self._router_finish(
                     stop_container=True,
                     resource_arbiter=resource_arbiter,
-                    runtime_service=runtime_service or "ocr",
+                    runtime_service=runtime_service or self._router_owned_service_default(),
                     cancel_checker=cancel_checker,
                     allow_foreign_owner_teardown=allow_foreign_owner_teardown,
                 )
@@ -1062,7 +1336,7 @@ class LocalOCRRuntimeManager:
                 return self._router_finish(
                     stop_container=False,
                     resource_arbiter=resource_arbiter,
-                    runtime_service=runtime_service or "ocr",
+                    runtime_service=runtime_service or self._router_owned_service_default(),
                     cancel_checker=cancel_checker,
                 )
             if self._active_engine not in (None, "PaddleOCR VL"):
@@ -1253,6 +1527,7 @@ class LocalOCRRuntimeManager:
                 "PaddleOCR VL Spotting": (
                     "PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE"
                 ),
+                "HunyuanOCR": "HUNYUAN_OCR_LLAMA_CPP_IMAGE",
                 "MangaLMM": "MANGALMM_LLAMA_CPP_IMAGE",
             }.get(engine_key, "LLAMA_CPP_IMAGE")
             requested_image = env.get(image_key, "")
@@ -1290,7 +1565,9 @@ class LocalOCRRuntimeManager:
             self._warned_legacy_backend_environment = ignored_keys
         env.setdefault("LLAMA_CPP_IMAGE", DEFAULT_LLAMA_CPP_IMAGE)
         if engine_key == "HunyuanOCR":
-            env.setdefault("LLAMA_N_GPU_LAYERS", DEFAULT_HUNYUAN_N_GPU_LAYERS)
+            env.update(
+                self._hunyuan_ocr_runtime_contract().compose_environment()
+            )
         if engine_key == "PaddleOCR VL":
             env.update(self._paddle_runtime_contract().compose_environment())
         if engine_key == "PaddleOCR VL Spotting":
@@ -1357,6 +1634,7 @@ class LocalOCRRuntimeManager:
                 "PaddleOCR VL Spotting": (
                     "PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE"
                 ),
+                "HunyuanOCR": "HUNYUAN_OCR_LLAMA_CPP_IMAGE",
                 "MangaLMM": "MANGALMM_LLAMA_CPP_IMAGE",
             }.get(engine_key, "LLAMA_CPP_IMAGE")
             runtime = inspect_llama_cpp_runtime(
@@ -1672,10 +1950,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-paddleocr-vl-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-paddleocr-vl-volume-probe",
                 "--rm",
                 "--pull",
                 "never",
@@ -1806,10 +2089,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-mangalmm-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-mangalmm-volume-probe",
                 "--rm",
                 "--pull",
                 "never",
@@ -1863,6 +2151,216 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             raise self._build_setup_error(
                 "MangaLMM",
                 "Unable to parse the prepared MangaLMM volume probe output: "
+                f"{completed.stdout}",
+            ) from exc
+        return manifest_bytes, manifest_sha256, observed_file_bytes
+
+    def _hunyuan_ocr_runtime_contract(
+        self,
+        *,
+        force_refresh: bool = False,
+    ) -> HunyuanOCRRuntimeContract:
+        if (
+            self._hunyuan_ocr_runtime_contract_cache is not None
+            and not force_refresh
+        ):
+            return self._hunyuan_ocr_runtime_contract_cache
+
+        compose_file = Path(self._config_for("HunyuanOCR")["compose_file"])
+        if not compose_file.is_file():
+            raise FileNotFoundError(compose_file)
+        volume_name = validate_hunyuan_ocr_volume_name(
+            os.environ.get(
+                "HUNYUAN_OCR_MODEL_VOLUME",
+                DEFAULT_HUNYUAN_OCR_MODEL_VOLUME,
+            )
+        )
+        (
+            manifest_bytes,
+            manifest_sha256,
+            observed_file_bytes,
+        ) = self._probe_hunyuan_ocr_model_volume(
+            volume_name=volume_name,
+            image_ref=HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF,
+        )
+        llama_image_id = self._inspect_docker_image_id(
+            HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF
+        )
+        if not llama_image_id:
+            raise HunyuanOCRRuntimeContractError(
+                "고정된 HunyuanOCR llama.cpp 이미지가 설치되어 있지 않습니다."
+            )
+        contract = build_hunyuan_ocr_runtime_contract(
+            manifest_bytes=manifest_bytes,
+            manifest_sha256=manifest_sha256,
+            observed_file_bytes=observed_file_bytes,
+            volume_name=volume_name,
+            llama_image_ref=HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF,
+            llama_image_id=llama_image_id,
+            compose_file=compose_file,
+            environment=os.environ,
+        )
+        self._hunyuan_ocr_runtime_contract_cache = contract
+        return contract
+
+    def _ensure_hunyuan_ocr_runtime_image(self) -> None:
+        image_ref = HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF
+        if self._inspect_docker_image_id(image_ref):
+            return
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        try:
+            run_docker_command(
+                ["docker", "pull", image_ref],
+                cancel_checker=self._startup_cancel_checker,
+            )
+        except RuntimeError as exc:
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                f"고정된 HunyuanOCR 이미지를 불러올 수 없습니다: {image_ref}\n{exc}",
+            ) from exc
+        if not self._inspect_docker_image_id(image_ref):
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                "Docker가 고정된 HunyuanOCR 이미지의 ID를 반환하지 않았습니다: "
+                f"{image_ref}",
+            )
+
+    def _probe_hunyuan_ocr_model_volume(
+        self,
+        *,
+        volume_name: str,
+        image_ref: str,
+    ) -> tuple[bytes, str, dict[str, int]]:
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        volume_inspection = run_docker_command(
+            [
+                "docker",
+                "volume",
+                "inspect",
+                "--format",
+                "{{json .Labels}}",
+                volume_name,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if volume_inspection.returncode != 0:
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                (
+                    "준비된 HunyuanOCR 모델 volume이 없습니다: "
+                    f"{volume_name}\n"
+                    "관리형 endpoint를 시작하기 전에 "
+                    "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1을 실행하세요."
+                ),
+            )
+        try:
+            volume_labels = json.loads(
+                (volume_inspection.stdout or "").strip() or "{}"
+            )
+        except json.JSONDecodeError as exc:
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                f"HunyuanOCR volume의 Docker label을 파싱할 수 없습니다: {volume_name}",
+            ) from exc
+        expected_labels = {
+            "comic-translate.runtime": "HunyuanOCR-llama.cpp",
+            "comic-translate.preparation-version": str(
+                HUNYUAN_OCR_RUNTIME_PREPARATION_VERSION
+            ),
+        }
+        if not isinstance(volume_labels, dict) or any(
+            str(volume_labels.get(key, "")) != expected
+            for key, expected in expected_labels.items()
+        ):
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                (
+                    "HunyuanOCR volume label이 준비 계약과 다릅니다: "
+                    f"{volume_name}\n"
+                    f"기대한 label: {expected_labels}\n"
+                    f"실제 label: {volume_labels}"
+                ),
+            )
+
+        shell_script = r'''
+set -eu
+manifest_path="/models/$READY_MANIFEST"
+model_path="/models/$MODEL_FILE"
+mmproj_path="/models/$MMPROJ_FILE"
+test -f "$manifest_path"
+test -f "$model_path"
+test -f "$mmproj_path"
+printf 'manifest_sha256=%s\n' "$(sha256sum "$manifest_path" | cut -d ' ' -f 1)"
+printf 'manifest_base64='
+base64 -w 0 "$manifest_path"
+printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
+printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
+'''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-hunyuanocr-volume-probe")
+        completed = run_docker_command(
+            [
+                "docker",
+                "run",
+                "--name",
+                "comic-translate-hunyuanocr-volume-probe",
+                "--rm",
+                "--pull",
+                "never",
+                "-e",
+                f"READY_MANIFEST={DEFAULT_HUNYUAN_OCR_READY_MANIFEST}",
+                "-e",
+                f"MODEL_FILE={HUNYUAN_OCR_MODEL_NAME}",
+                "-e",
+                f"MMPROJ_FILE={HUNYUAN_OCR_MMPROJ_NAME}",
+                "--mount",
+                f"type=volume,source={volume_name},target=/models,readonly",
+                "--entrypoint",
+                "/bin/sh",
+                image_ref,
+                "-ec",
+                shell_script,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if completed.returncode != 0:
+            detail = (
+                (completed.stderr or "") + "\n" + (completed.stdout or "")
+            ).strip()
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                (
+                    "준비된 HunyuanOCR 모델 volume이 불완전합니다: "
+                    f"{volume_name}\n{detail}\n"
+                    "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1을 Prepare "
+                    "또는 Verify 모드로 실행하세요."
+                ),
+            )
+
+        values: dict[str, str] = {}
+        for line in (completed.stdout or "").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key.strip()] = value.strip()
+        try:
+            manifest_bytes = base64.b64decode(
+                values["manifest_base64"],
+                validate=True,
+            )
+            manifest_sha256 = values["manifest_sha256"].lower()
+            observed_file_bytes = {
+                HUNYUAN_OCR_MODEL_NAME: int(values["model_bytes"]),
+                HUNYUAN_OCR_MMPROJ_NAME: int(values["mmproj_bytes"]),
+            }
+        except (KeyError, ValueError, binascii.Error) as exc:
+            raise self._build_setup_error(
+                "HunyuanOCR",
+                "준비된 HunyuanOCR volume 프로브 출력을 파싱할 수 없습니다: "
                 f"{completed.stdout}",
             ) from exc
         return manifest_bytes, manifest_sha256, observed_file_bytes
@@ -1946,10 +2444,15 @@ base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-paddleocr-vl-spotting-volume-probe")
         completed = run_docker_command(
             [
                 "docker",
                 "run",
+                "--name",
+                "comic-translate-paddleocr-vl-spotting-volume-probe",
                 "--rm",
                 "--pull",
                 "never",

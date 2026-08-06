@@ -268,7 +268,7 @@ class ToolStateMixin:
             loaded = self._load_custom_font_file(requested)
             return loaded or requested
 
-        for family in QFontDatabase().families():
+        for family in QFontDatabase.families():
             if family.casefold() == lower:
                 self._custom_font_family_cache[lower] = family
                 return family
