@@ -85,6 +85,9 @@ class ProjectController:
         self._autosave_save_pending = False
         self._autosave_retrigger_requested = False
         self._active_save_workers: list = []  # keeps Python refs alive until workers finish
+        # Phase 3a: 인페인팅+렌더 융합 sweep 동안은 페이지별 자동저장을 억제하고
+        # sweep 종료 시 1회로 합친다 (공유 QThreadPool 잠식 방지).
+        self._batch_autosave_deferred = False
         # 본문 서식 설정을 변경 즉시 저장하기 위한 디바운스 타이머. 예전에는
         # `save_main_page_settings` 가 정상 종료에서만 불렸고, 크래시나 강제 종료면
         # 정렬·색·외곽선·굵기 같은 12개 키가 통째로 유실됐다.
@@ -399,6 +402,10 @@ class ProjectController:
         """
         if self._current_project_kind() == PROJECT_KIND_SERIES:
             return
+        if self._batch_autosave_deferred:
+            # 인페인팅+렌더 융합 sweep 이 진행 중이다 — sweep 종료 시
+            # `end_batch_autosave_deferral`이 1회 저장을 트리거할 것이다.
+            return
         autosave_enabled = bool(
             self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
         )
@@ -450,6 +457,21 @@ class ProjectController:
             lambda: QtCore.QTimer.singleShot(0, self.main, on_finished)
         )
         self.main.threadpool.start(worker)
+
+    def begin_batch_autosave_deferral(self) -> None:
+        """인페인팅+렌더 융합 sweep 시작 — 그동안 `_on_batch_page_done`이
+        `render_state_ready`마다 공유 QThreadPool에 저장 워커를 던져 풀을
+        잠식하지 않도록 억제한다. sweep 종료 후 `end_batch_autosave_deferral`이
+        1회만 저장한다. (대가: 중간 크래시 시 자동저장이 더 오래됨 — 승인됨.)
+        """
+        self._batch_autosave_deferred = True
+
+    def end_batch_autosave_deferral(self, image_path: str) -> None:
+        """sweep 종료 — 억제를 풀고 지금까지 쌓인 변경을 1회 저장한다."""
+        if not self._batch_autosave_deferred:
+            return
+        self._batch_autosave_deferred = False
+        self._on_batch_page_done(image_path)
 
     def notify_project_dirty_revision_changed(self):
         autosave_enabled = bool(
