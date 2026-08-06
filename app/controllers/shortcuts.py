@@ -55,10 +55,20 @@ class ShortcutController:
             "save_project": self._save_project,
             "delete_selected_box": self._delete_selected_box,
             "restore_text_blocks": self._restore_text_blocks,
+            "series_back": self._series_back,
         }
         handler = handlers.get(shortcut_id)
         if handler is not None:
             handler()
+
+    def _series_back(self) -> None:
+        """시리즈 자식 편집 화면에서만 보드로 돌아간다."""
+        if not self._workspace_is_active() or self._is_text_input_focused():
+            return
+        series_ctrl = getattr(self.main, "series_ctrl", None)
+        if series_ctrl is None or not series_ctrl.is_child_project_active():
+            return
+        series_ctrl.show_board_during_queue()
 
     def _workspace_is_active(self) -> bool:
         try:
