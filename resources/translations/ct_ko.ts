@@ -5119,6 +5119,14 @@ It may have been moved, renamed, or deleted.
         <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.</translation>
     </message>
     <message>
+        <source>Could not write this chapter&apos;s changes back to the series project.</source>
+        <translation>이 세부 프로젝트의 변경을 시리즈 프로젝트에 반영하지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>The working copy was kept so nothing is lost: {path}</source>
+        <translation>변경이 사라지지 않도록 작업본을 남겨 두었습니다: {path}</translation>
+    </message>
+    <message>
         <source>The selected series project file could not be found.
 It may have been moved, renamed, or deleted.
 
