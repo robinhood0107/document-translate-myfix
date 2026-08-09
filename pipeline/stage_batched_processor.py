@@ -4624,13 +4624,29 @@ class StageBatchedProcessor(BatchProcessor):
             translated_image_path=output_path,
         )
         logger.warning(
-            "Exported %s from its %s image because the %s stage failed: %s",
+            "Exported %s from its %s image: %s",
             ctx.image_name,
             kind,
-            ctx.failed_stage or "unknown",
-            ctx.failed_reason or "(no reason recorded)",
+            self._fallback_cause(ctx),
         )
         return True
+
+    @staticmethod
+    def _fallback_cause(ctx: StagePageContext) -> str:
+        """폴백을 하게 된 이유를 사실대로 적는다.
+
+        스테이지 실패가 기록돼 있으면 그것이 이유다. 그렇지 않은데도 출력이 없다면
+        원인은 다른 곳이다 — 실측으로 366장 중 15장이 인페인팅까지 끝나고도 렌더
+        결과가 기록되지 않은 채 조용히 빠졌고, 실패로 표시되지도 않았다. 그때
+        "unknown stage failed" 라고 적으면 없는 실패를 지어내는 셈이 된다.
+        """
+
+        if ctx.failed_stage:
+            return (
+                f"the {ctx.failed_stage} stage failed: "
+                f"{ctx.failed_reason or '(no reason recorded)'}"
+            )
+        return "no rendered output was recorded for it"
 
     def _reconcile_page_outputs(
         self,
@@ -4648,8 +4664,18 @@ class StageBatchedProcessor(BatchProcessor):
         fallbacks: list[dict[str, str]] = []
         unrecoverable: list[str] = []
         for index, ctx in enumerate(pages):
-            if ctx.output_path:
+            # 내부 기록만 믿지 않고 파일이 실제로 있는지 본다. 어느 한 경로가
+            # 출력 기록을 빠뜨려도(실측으로 그런 페이지가 15장 있었다) 여기서
+            # 잡힌다. 디스크에 있는 파일이 유일한 진실이다.
+            if ctx.output_path and os.path.exists(ctx.output_path):
                 continue
+            if ctx.output_path:
+                logger.warning(
+                    "%s recorded an output that is not on disk: %s",
+                    ctx.image_name,
+                    ctx.output_path,
+                )
+                ctx.output_path = ""
             if self._write_fallback_export(
                 ctx,
                 index=index,
@@ -4662,6 +4688,7 @@ class StageBatchedProcessor(BatchProcessor):
                         "kind": ctx.output_fallback_kind,
                         "failed_stage": ctx.failed_stage,
                         "reason": ctx.failed_reason,
+                        "cause": self._fallback_cause(ctx),
                     }
                 )
             else:
