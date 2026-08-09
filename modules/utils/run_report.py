@@ -80,28 +80,43 @@ def _stage_rows(telemetry: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _stage_work_rows(telemetry: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """단계별 **작업량** 합계. 겹쳐 도는 작업이 얼마나 되는지 보여준다.
+    """단계별 **작업량** 합계. 그 단계의 세부 연산을 더한 값이다.
 
     벽시계 구간과 나란히 놓으면 동시성이 얼마나 먹히는지 드러난다. 작업 합계가
     벽시계 구간보다 크면 그만큼 겹쳐서 숨겼다는 뜻이다.
+
+    ``telemetry["stages"]`` 를 쓰지 않는 이유는 그 값이 여러 출처를 한 통에
+    담기 때문이다. 실측으로 42분 실행에서 ``inpaint`` 가 4030분으로 찍혔는데,
+    그 단계의 세부 연산을 다 더해도 21분이다. 여기서는 세부 연산만 더하므로
+    합계가 항상 설명 가능하다.
     """
 
-    stages = telemetry.get("stages")
+    details = telemetry.get("stage_details")
     rows: list[dict[str, Any]] = []
-    if isinstance(stages, Mapping):
-        for name, values in stages.items():
-            if not isinstance(values, Mapping):
+    if isinstance(details, Mapping):
+        for name, operations in details.items():
+            if not isinstance(operations, Mapping):
                 continue
-            wall_ms = float(values.get("wall_ms", 0.0) or 0.0)
-            count = int(values.get("count", 0) or 0)
+            seconds = 0.0
+            count = 0
+            for operation, metrics in operations.items():
+                if operation == STAGE_WINDOW_OPERATION or not isinstance(
+                    metrics, Mapping
+                ):
+                    continue
+                seconds += float(metrics.get("wall_ms", 0.0) or 0.0) / 1000.0
+                count = max(count, int(metrics.get("count", 0) or 0))
+            if seconds <= 0.0:
+                continue
             rows.append(
                 {
                     "stage": str(name),
                     "label": STAGE_LABELS.get(str(name), str(name)),
-                    "work_seconds": round(wall_ms / 1000.0, 3),
+                    "work_seconds": round(seconds, 3),
+                    # 연산마다 호출 횟수가 다르므로 최대값을 페이지 수 대용으로 쓴다.
                     "count": count,
                     "seconds_per_measurement": (
-                        round(wall_ms / 1000.0 / count, 4) if count else None
+                        round(seconds / count, 4) if count else None
                     ),
                 }
             )
