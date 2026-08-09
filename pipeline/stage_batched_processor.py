@@ -9,6 +9,7 @@ import time
 import traceback
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 import imkit as imk
@@ -126,6 +127,7 @@ from modules.utils.ocr_debug import (
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import VERTICAL_ALIGNMENT_CENTER
+from modules.utils.run_report import build_run_report, write_run_report
 from modules.utils.text_normalization import RENDER_NORMALIZABLE_GLYPHS
 from modules.utils.textblock import ensure_text_block_id, sort_blk_list
 from modules.utils.translator_utils import get_raw_text, get_raw_translation
@@ -4695,6 +4697,82 @@ class StageBatchedProcessor(BatchProcessor):
             )
         return summary
 
+    def _run_started_wall_text(self) -> str:
+        """이번 실행이 시작된 벽시계 시각. 사용자가 버튼을 누른 시점이다."""
+
+        tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
+        started = getattr(tracker, "run_started_wall", None)
+        if isinstance(started, str) and started:
+            return started
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _click_to_now_seconds(self) -> float:
+        """사용자가 '모두 번역'을 누른 순간부터 지금까지의 실측 경과 시간.
+
+        파이프라인 자체 시작 시각이 아니라 클릭 시점을 기준으로 한다. 런타임
+        준비(컨테이너 기동, 모델 적재)도 사용자가 기다린 시간이기 때문이다.
+        """
+
+        tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
+        started = getattr(tracker, "run_started_at", None)
+        if isinstance(started, (int, float)):
+            return max(time.monotonic() - float(started), 0.0)
+        run_started = getattr(self, "_run_started_at", None)
+        if isinstance(run_started, (int, float)):
+            return max(time.monotonic() - float(run_started), 0.0)
+        return 0.0
+
+    def _page_outcomes(self, pages: list[StagePageContext]) -> list[dict[str, Any]]:
+        return [
+            {
+                "image_name": ctx.image_name,
+                "output_path": ctx.output_path,
+                "fallback_kind": ctx.output_fallback_kind,
+                "failed_stage": ctx.failed_stage,
+                "failed_reason": ctx.failed_reason,
+                "no_text_detected": bool(ctx.no_text_detected),
+                "block_count": len(ctx.blk_list or []),
+            }
+            for ctx in pages
+        ]
+
+    def _write_run_report(
+        self,
+        pages: list[StagePageContext],
+        *,
+        output_summary: dict[str, Any],
+    ) -> str:
+        """이번 실행의 실측 소요시간과 페이지별 결과를 파일로 남긴다."""
+
+        try:
+            telemetry = self._performance_telemetry().snapshot()
+        except Exception:
+            logger.debug("Could not snapshot the run telemetry.", exc_info=True)
+            telemetry = {}
+        report = build_run_report(
+            telemetry=telemetry,
+            total_wall_sec=self._click_to_now_seconds(),
+            page_outcomes=self._page_outcomes(pages),
+            output_summary=output_summary,
+            started_at_local=self._run_started_wall_text(),
+        )
+        try:
+            from modules.utils.paths import get_user_data_dir
+
+            log_dir = os.path.join(get_user_data_dir(), "logs", "runs")
+        except Exception:
+            logger.debug("Could not resolve the run report directory.", exc_info=True)
+            return ""
+        path = write_run_report(report, log_dir=log_dir)
+        if path:
+            logger.info(
+                "Run finished in %s for %d page(s); report at %s",
+                report.get("total_wall_text", "?"),
+                int(report.get("page_count", 0) or 0),
+                path,
+            )
+        return path
+
     def _render_all(self, pages: list[StagePageContext]) -> None:
         # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
         # (`_submit_or_inline_render`가 `_inpaint_pages`에서 페이지별로 제출).
@@ -4981,6 +5059,7 @@ class StageBatchedProcessor(BatchProcessor):
                 output_count=int(output_summary.get("output_count", 0)),
                 fallback_count=int(output_summary.get("fallback_count", 0)),
             )
+            self._write_run_report(pages, output_summary=output_summary)
             batch_completed = True
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
