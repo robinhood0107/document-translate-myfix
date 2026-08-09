@@ -5056,6 +5056,14 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Could not write this chapter&apos;s changes back to the series project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The working copy was kept so nothing is lost: {path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>The selected series project file could not be found.
 It may have been moved, renamed, or deleted.
 
