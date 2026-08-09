@@ -420,6 +420,12 @@ class StageBatchedProcessor(BatchProcessor):
         return {
             "progress_fraction": estimator.progress_fraction(),
             "eta_seconds": estimator.remaining_seconds(),
+            # 파이프라인 전 단계의 남은 시간과 상태. UI 가 마우스를 올렸을 때
+            # 보여준다.
+            "eta_by_stage": [
+                {**row, "label": self.STAGE_LABELS.get(row["stage"], row["stage"])}
+                for row in estimator.remaining_by_stage()
+            ],
         }
 
     def describe_progress(self, stage_name: str, index: int, total: int) -> str:

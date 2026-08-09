@@ -42,6 +42,30 @@
         <source>Live Stable</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>완료</source>
+        <translation>Completato</translation>
+    </message>
+    <message>
+        <source>진행 중</source>
+        <translation>In corso</translation>
+    </message>
+    <message>
+        <source>대기</source>
+        <translation>In attesa</translation>
+    </message>
+    <message>
+        <source>인페인팅에 포함</source>
+        <translation>Incluso nell&apos;inpainting</translation>
+    </message>
+    <message>
+        <source>추정 불가</source>
+        <translation>Non stimabile</translation>
+    </message>
+    <message>
+        <source>단계별 남은 시간</source>
+        <translation>Tempo rimanente per fase</translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgressDialog</name>
@@ -59,7 +83,7 @@
     </message>
     <message>
         <source>경과 시간</source>
-        <translation type="unfinished"></translation>
+        <translation>Tempo trascorso</translation>
     </message>
     <message>
         <source>남은 시간</source>
@@ -67,7 +91,7 @@
     </message>
     <message>
         <source>예상 완료 시각</source>
-        <translation type="unfinished"></translation>
+        <translation>Fine stimata</translation>
     </message>
     <message>
         <source>ETA 신뢰도</source>
@@ -2078,10 +2102,6 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
         <translation>File</translation>
     </message>
     <message>
-        <source>ETA</source>
-        <translation>ETA</translation>
-    </message>
-    <message>
         <source>Message</source>
         <translation>Messaggio</translation>
     </message>
@@ -2144,6 +2164,22 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     <message>
         <source>Embed</source>
         <translation>Integra</translation>
+    </message>
+    <message>
+        <source>예상 남은 시간</source>
+        <translation>Tempo rimanente stimato</translation>
+    </message>
+    <message>
+        <source>전체 예상 시간</source>
+        <translation>Tempo totale stimato</translation>
+    </message>
+    <message>
+        <source>경과 시간</source>
+        <translation>Tempo trascorso</translation>
+    </message>
+    <message>
+        <source>예상 완료 시각</source>
+        <translation>Fine stimata</translation>
     </message>
     <message>
         <source>Opening series board...</source>
