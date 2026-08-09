@@ -152,6 +152,5 @@ launcher와 공개 import 사용 여부를 별도 릴리스에서 먼저 감사�
 ## 현재 품질·성능 판정
 
 현재 제품 기본 OCR, full-page Experimental 경로, 번역·캐시·인페인트의 최종
-판정은 [Optimal++ v1.3.0 진실명세](../performance-and-bugfix-audits/optimal-plus-v1.3.0/00-truth-specification-ko.md)를
-기준으로 한다. 이 구조 문서는 코드 책임을 설명하며, benchmark 원문·이미지·수동
-검수표는 포함하지 않는다.
+판정 기록은 `benchmarking/lab`의 감사 문서 세트를 기준으로 한다. 이 구조 문서는
+코드 책임을 설명하며, benchmark 원문·이미지·수동 검수표는 포함하지 않는다.
