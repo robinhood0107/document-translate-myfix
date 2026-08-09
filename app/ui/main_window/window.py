@@ -237,6 +237,19 @@ class ComicTranslateUI(
             if hasattr(self.title_bar, "webtoon_toggle"):
                 self.title_bar.webtoon_toggle.setVisible(visible)
 
+    def refresh_series_breadcrumb(self) -> None:
+        """자식 프로젝트가 활성일 때만 시리즈 컨텍스트 표시줄을 노출한다."""
+        breadcrumb = getattr(self, "series_breadcrumb", None)
+        if breadcrumb is None:
+            return
+        series_ctrl = getattr(self, "series_ctrl", None)
+        state = series_ctrl.breadcrumb_state() if series_ctrl is not None else None
+        if not state:
+            breadcrumb.setVisible(False)
+            return
+        breadcrumb.set_context(**state)
+        breadcrumb.setVisible(True)
+
     def _set_series_tools_visible(self, visible: bool) -> None:
         if hasattr(self, "insert_button"):
             self.insert_button.setVisible(False)
@@ -292,6 +305,7 @@ class ComicTranslateUI(
             self._workspace_initialized = True
             self._set_series_tools_visible(False)
             self._set_document_tools_visible(True)
+            self.refresh_series_breadcrumb()
             self._center_stack.setCurrentWidget(self.main_content_widget)
             self._set_nav_checked_state("main")
             if getattr(self, "_batch_active", False):

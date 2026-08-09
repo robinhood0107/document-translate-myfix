@@ -206,9 +206,9 @@ class MemLogger:
             os.makedirs(self._bench_output_dir, exist_ok=True)
             return os.path.join(self._bench_output_dir, "metrics.jsonl")
         try:
-            from modules.utils.paths import get_user_data_dir
+            from modules.utils.paths import get_log_dir
 
-            base = os.path.join(get_user_data_dir(), "logs")
+            base = get_log_dir()
         except Exception:
             base = os.path.join(getattr(self.main, "temp_dir", ""), "logs") or os.getcwd()
         os.makedirs(base, exist_ok=True)
