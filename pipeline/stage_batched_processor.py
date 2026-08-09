@@ -127,6 +127,10 @@ from modules.utils.ocr_debug import (
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import VERTICAL_ALIGNMENT_CENTER
+from pipeline.inpaint_cleanup_job import (
+    InpaintCleanupInput,
+    run_inpaint_cleanup,
+)
 from modules.utils.run_report import build_run_report, write_run_report
 from modules.utils.text_normalization import RENDER_NORMALIZABLE_GLYPHS
 from modules.utils.textblock import ensure_text_block_id, sort_blk_list
@@ -416,6 +420,12 @@ class StageBatchedProcessor(BatchProcessor):
         return {
             "progress_fraction": estimator.progress_fraction(),
             "eta_seconds": estimator.remaining_seconds(),
+            # 파이프라인 전 단계의 남은 시간과 상태. UI 가 마우스를 올렸을 때
+            # 보여준다.
+            "eta_by_stage": [
+                {**row, "label": self.STAGE_LABELS.get(row["stage"], row["stage"])}
+                for row in estimator.remaining_by_stage()
+            ],
         }
 
     def describe_progress(self, stage_name: str, index: int, total: int) -> str:
@@ -1503,12 +1513,43 @@ class StageBatchedProcessor(BatchProcessor):
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
+    @staticmethod
+    def _render_worker_count() -> int:
+        """렌더 워커 수. 기본 1이며 ``CT_RENDER_WORKERS`` 로만 바꾼다.
+
+        렌더를 융합한 근거는 "렌더 약 300ms 가 인페인팅 1.28s 뒤에 숨는다" 였다.
+        실측 366장 실행에서 렌더는 페이지당 **2.31초**였고, 워커가 하나뿐이라
+        14.1분의 직렬 작업이 됐다. 즉 그 전제는 더 이상 성립하지 않는다.
+
+        그렇다고 기본값을 올리지는 않는다. 렌더가 Qt 스레드를 벗어나면
+        `scene.render()` 가 **예외도 경고도 없이** 빈 이미지를 만든다
+        (`pipeline/render_pool.py` 참고). 워커를 늘렸을 때 같은 종류의 조용한
+        실패가 없다는 것은 렌더 결과 픽셀로 확인해야 하며, 그 확인 전에는
+        기본값을 바꾸지 않는다. 이 환경변수는 그 A/B 를 할 수 있게 열어둔 것이다.
+        """
+
+        raw = str(os.environ.get("CT_RENDER_WORKERS", "") or "").strip()
+        if not raw:
+            return 1
+        try:
+            value = int(raw)
+        except ValueError:
+            logger.warning("Ignoring a non-numeric CT_RENDER_WORKERS: %r", raw)
+            return 1
+        if value < 1 or value > 8:
+            logger.warning("Ignoring an out-of-range CT_RENDER_WORKERS: %d", value)
+            return 1
+        return value
+
     def _ensure_render_executor(self) -> QtRenderPool:
         if self._render_executor is None:
             # plain Python 스레드가 아니라 Qt 스레드여야 한다. 이유는
             # `pipeline/render_pool.py` 의 모듈 주석 참고 — 디스패처 없는
             # 스레드에서는 `scene.render()` 가 조용히 빈 이미지를 만든다.
-            self._render_executor = QtRenderPool(max_workers=1)
+            workers = self._render_worker_count()
+            if workers > 1:
+                logger.info("Running the render sweep with %d workers.", workers)
+            self._render_executor = QtRenderPool(max_workers=workers)
         return self._render_executor
 
     def _shutdown_render_executor(self) -> None:
@@ -2958,6 +2999,18 @@ class StageBatchedProcessor(BatchProcessor):
                     skip_reason="no_text_detected",
                     project_checkpoint_status="skipped",
                 )
+                # 인페인팅은 건너뛰어도 **출력은 반드시 나가야 한다.** 이 분기가
+                # 렌더 제출 없이 넘어가는 바람에, 텍스트가 없다고 판정된 페이지는
+                # 정상 경로로 파일을 남기지 못했다. 실측 366장에서 15장이 여기로
+                # 빠져 배치 끝 폴백이 대신 저장했고, 실패가 아닌데도 실패 경로로
+                # 처리됐다. 글자가 없으면 렌더할 텍스트가 없을 뿐, 페이지 자체는
+                # 그대로 내보내면 된다.
+                self._submit_or_inline_render(
+                    ctx,
+                    index=index,
+                    total_images=total_images,
+                    export_settings=export_settings,
+                )
                 continue
             self._emit_benchmark_event(
                 "inpaint_start",
@@ -3306,62 +3359,34 @@ class StageBatchedProcessor(BatchProcessor):
                         "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
                     },
                 ):
-                    ctx.inpaint_input_img = imk.convert_scale_abs(
-                        ctx.inpaint_input_img
+                    cleanup = run_inpaint_cleanup(
+                        InpaintCleanupInput(
+                            image=ctx.image,
+                            inpaint_input_img=ctx.inpaint_input_img,
+                            mask=ctx.mask,
+                            mask_details=ctx.mask_details,
+                            inpaint_blocks=inpaint_blocks,
+                            config=config,
+                            page_label=f"{index + 1}/{total_images}",
+                            inpaint_edit_mask=getattr(
+                                self.inpainting,
+                                "last_inpaint_edit_mask",
+                                None,
+                            ),
+                        )
                     )
-                    inpaint_edit_mask = getattr(
-                        self.inpainting,
-                        "last_inpaint_edit_mask",
-                        None,
-                    )
-                    if inpaint_edit_mask is not None:
-                        ctx.mask = np.where(
-                            (ctx.mask > 0) | (inpaint_edit_mask > 0),
-                            255,
-                            0,
-                        ).astype(np.uint8)
-                    (
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.cleanup_stats,
-                    ) = refine_bubble_residue_inpaint(
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        inpaint_blocks,
-                        self.inpainting.inpainter_cache,
-                        config,
-                        page_label=f"{index + 1}/{total_images}",
-                    )
+                    ctx.inpaint_input_img = cleanup.inpaint_input_img
+                    ctx.mask = cleanup.mask
+                    ctx.cleanup_stats = cleanup.cleanup_stats
+                    outside_before_restore = cleanup.outside_before_restore
+                    outside_after_restore = cleanup.outside_after_restore
+                    # 진행 보고는 파이프라인 스레드에 남긴다. 계산과 달리 이건
+                    # 시그널을 건드린다.
                     self._report_residue_cleanup(
                         index=index,
                         total=total_images,
                         image_path=ctx.image_path,
                         cleanup_stats=ctx.cleanup_stats,
-                    )
-                    (
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.cleanup_stats,
-                    ) = apply_duplicate_bubble_inner_fill(
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.mask_details,
-                        ctx.cleanup_stats,
-                    )
-                    outside_before_restore = count_changed_outside_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                    )
-                    ctx.inpaint_input_img = composite_with_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                    )
-                    outside_after_restore = count_changed_outside_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
                     )
                 ctx.inpaint_diagnostics[
                     "outside_mask_changed_before_restore"
@@ -4289,6 +4314,7 @@ class StageBatchedProcessor(BatchProcessor):
                 output_path=output_path,
                 output_format=output_format,
                 is_cancelled=self._render_cancel_event.is_set,
+                submitted_monotonic=time.monotonic(),
             )
             self._raise_if_cancelled()
             future = self._ensure_render_executor().submit(run_render_job, job)
@@ -4415,6 +4441,20 @@ class StageBatchedProcessor(BatchProcessor):
                 },
             )
 
+        # 렌더는 전용 워커에서 돈다. 파이프라인 스레드는 제출만 하고 떠나므로,
+        # 워커가 돌려준 실측값을 여기서 텔레메트리에 넣지 않으면 렌더 비용이
+        # 어디에도 남지 않는다. 실제로 그래서 렌더가 페이지당 2.31초를 쓰는데도
+        # 리포트에서는 보이지 않았다.
+        self._record_performance_detail(
+            stage="render",
+            operation="worker",
+            elapsed_ms=float(result.worker_seconds) * 1000.0,
+        )
+        self._record_performance_detail(
+            stage="render",
+            operation="queue_wait",
+            elapsed_ms=float(result.queue_wait_seconds) * 1000.0,
+        )
         final_output_path = result.final_output_path
         final_output_root = pending.output_root
         ctx.output_path = final_output_path
@@ -4624,13 +4664,29 @@ class StageBatchedProcessor(BatchProcessor):
             translated_image_path=output_path,
         )
         logger.warning(
-            "Exported %s from its %s image because the %s stage failed: %s",
+            "Exported %s from its %s image: %s",
             ctx.image_name,
             kind,
-            ctx.failed_stage or "unknown",
-            ctx.failed_reason or "(no reason recorded)",
+            self._fallback_cause(ctx),
         )
         return True
+
+    @staticmethod
+    def _fallback_cause(ctx: StagePageContext) -> str:
+        """폴백을 하게 된 이유를 사실대로 적는다.
+
+        스테이지 실패가 기록돼 있으면 그것이 이유다. 그렇지 않은데도 출력이 없다면
+        원인은 다른 곳이다 — 실측으로 366장 중 15장이 인페인팅까지 끝나고도 렌더
+        결과가 기록되지 않은 채 조용히 빠졌고, 실패로 표시되지도 않았다. 그때
+        "unknown stage failed" 라고 적으면 없는 실패를 지어내는 셈이 된다.
+        """
+
+        if ctx.failed_stage:
+            return (
+                f"the {ctx.failed_stage} stage failed: "
+                f"{ctx.failed_reason or '(no reason recorded)'}"
+            )
+        return "no rendered output was recorded for it"
 
     def _reconcile_page_outputs(
         self,
@@ -4648,8 +4704,18 @@ class StageBatchedProcessor(BatchProcessor):
         fallbacks: list[dict[str, str]] = []
         unrecoverable: list[str] = []
         for index, ctx in enumerate(pages):
-            if ctx.output_path:
+            # 내부 기록만 믿지 않고 파일이 실제로 있는지 본다. 어느 한 경로가
+            # 출력 기록을 빠뜨려도(실측으로 그런 페이지가 15장 있었다) 여기서
+            # 잡힌다. 디스크에 있는 파일이 유일한 진실이다.
+            if ctx.output_path and os.path.exists(ctx.output_path):
                 continue
+            if ctx.output_path:
+                logger.warning(
+                    "%s recorded an output that is not on disk: %s",
+                    ctx.image_name,
+                    ctx.output_path,
+                )
+                ctx.output_path = ""
             if self._write_fallback_export(
                 ctx,
                 index=index,
@@ -4662,6 +4728,7 @@ class StageBatchedProcessor(BatchProcessor):
                         "kind": ctx.output_fallback_kind,
                         "failed_stage": ctx.failed_stage,
                         "reason": ctx.failed_reason,
+                        "cause": self._fallback_cause(ctx),
                     }
                 )
             else:
@@ -4777,9 +4844,9 @@ class StageBatchedProcessor(BatchProcessor):
             started_at_local=self._run_started_wall_text(),
         )
         try:
-            from modules.utils.paths import get_user_data_dir
+            from modules.utils.paths import get_log_dir
 
-            log_dir = os.path.join(get_user_data_dir(), "logs", "runs")
+            log_dir = get_log_dir("runs")
         except Exception:
             logger.debug("Could not resolve the run report directory.", exc_info=True)
             return ""
@@ -4796,8 +4863,28 @@ class StageBatchedProcessor(BatchProcessor):
     def _render_all(self, pages: list[StagePageContext]) -> None:
         # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
         # (`_submit_or_inline_render`가 `_inpaint_pages`에서 페이지별로 제출).
-        # 여기서는 마지막 한두 페이지분만 남아 있을 뿐이다.
-        self._drain_render_futures(block=True)
+        # 여기 남는 시간이 곧 **융합이 숨기지 못한 렌더 잔량**이다. 이상적으로는
+        # 마지막 한두 페이지분이지만, 렌더가 인페인팅보다 느려지면 큐가 쌓여
+        # 이 값이 커진다. 그때는 인페인팅을 더 줄여도 전체 시간이 줄지 않는다.
+        pending = len(getattr(self, "_pending_render_jobs", []) or [])
+        started_at = time.monotonic()
+        try:
+            self._drain_render_futures(block=True)
+        finally:
+            elapsed = max(0.0, time.monotonic() - started_at)
+            self._record_performance_detail(
+                stage="render",
+                operation="tail_drain",
+                elapsed_ms=elapsed * 1000.0,
+                workload={"pending_at_drain": pending},
+            )
+            if elapsed > 1.0:
+                logger.info(
+                    "Render tail drain took %.1fs with %d job(s) still queued; "
+                    "that is render time the inpaint sweep could not hide.",
+                    elapsed,
+                    pending,
+                )
 
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
