@@ -399,6 +399,51 @@ class AutomaticProgressTracker:
         return round((current_units / units) * 100.0, 1) if units else 0.0
 
     STAGE_RATE_GROUP = "automatic_progress/stage_rates"
+    STAGE_STARTUP_GROUP = "automatic_progress/stage_startup"
+
+    def read_stage_startups(self) -> dict[str, float]:
+        """지난 실행들에서 측정한 단계별 고정 시작 비용의 중앙값(초).
+
+        컨테이너 기동과 모델 적재처럼 페이지 수와 무관한 비용이다. 이 값이 없으면
+        아직 시작하지 않은 단계의 시작 비용이 남은 시간에서 통째로 빠진다.
+        """
+
+        return self._read_median_group(self.STAGE_STARTUP_GROUP)
+
+    def record_stage_startups(self, startup_by_stage: dict[str, float]) -> None:
+        """이번 실행의 단계별 시작 비용을 이력에 더한다."""
+
+        self._append_positive_numbers(self.STAGE_STARTUP_GROUP, startup_by_stage)
+
+    def _read_median_group(self, group: str) -> dict[str, float]:
+        self.settings.beginGroup(group)
+        keys = list(self.settings.childKeys())
+        medians: dict[str, float] = {}
+        for key in keys:
+            samples = self.settings.value(key, [], type=list) or []
+            values = []
+            for sample in samples:
+                try:
+                    parsed = float(sample)
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0.0:
+                    values.append(parsed)
+            if values:
+                values.sort()
+                medians[str(key)] = values[len(values) // 2]
+        self.settings.endGroup()
+        return medians
+
+    def _append_positive_numbers(self, group: str, values: dict[str, float]) -> None:
+        for name, raw in (values or {}).items():
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value <= 0.0:
+                continue
+            self._append_history(group, str(name), value)
 
     def read_stage_rates(self) -> dict[str, float]:
         """지난 실행들에서 측정한 단계별 페이지당 속도의 중앙값.
