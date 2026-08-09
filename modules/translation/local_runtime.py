@@ -54,6 +54,13 @@ from modules.utils.llama_cpp_runtime import (
     resolve_docker_compose_command,
     run_docker_command,
 )
+from modules.utils.managed_runtime_repair import (
+    ManagedRuntimeRepairError,
+    ManagedRuntimeRepairPlan,
+    describe_image_identity_drift,
+    is_image_identity_only_drift,
+    run_managed_runtime_preparation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +76,14 @@ LATE_START_STOP_POLL_SEC = 0.25
 GEMMA_PAGE_CACHE_PREFETCH_CONTAINER = "comic-translate-gemma-cache-warm"
 # 크기를 알아내는 컨테이너. 프리페치와 이름을 나눠 서로 정리를 방해하지 않게 한다.
 GEMMA_MODEL_SIZE_PROBE_CONTAINER = "comic-translate-gemma-cache-warm-size"
+
+class _GemmaVolumeNotProvisioned(RuntimeError):
+    """준비 볼륨이 아예 없거나 계약된 파일이 빠져 있다.
+
+    준비 스크립트를 돌리면 해결되는 상태다. 볼륨 라벨 불일치처럼 사람의 판단을
+    요구하는 상태와 구별하려고 따로 둔다.
+    """
+
 
 _RUNTIME_CONFIG = {
     "compose_file": ROOT_DIR / "docker-compose.yaml",
@@ -208,6 +223,9 @@ class LocalGemmaRuntimeManager:
         self._active_contract: GemmaRuntimeContract | None = None
         self._readiness_cache: set[tuple[str, str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
+        # 자가복구는 계약을 읽는 깊은 곳에서 일어난다. 진행 콜백을 그 경로 전체로
+        # 인자로 흘리는 대신 현재 기동의 콜백을 여기에 둔다.
+        self._startup_progress_callback: Callable[[dict[str, Any]], None] | None = None
         self._router_coordinator = router_coordinator
         self._router_spec: RouterRuntimeSpec | None = None
         self._router_pair: RouterPair | None = None
@@ -576,6 +594,7 @@ class LocalGemmaRuntimeManager:
     ) -> None:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
+            self._startup_progress_callback = progress_callback
             router_pair = self._router_pair_for_server(settings_page)
             if router_pair is not None:
                 coordinator = self._router_coordinator
@@ -975,7 +994,12 @@ class LocalGemmaRuntimeManager:
             extra = f"{extra}\nRequested image: {requested_image}"
         raise self._build_setup_error(extra)
 
-    def _load_runtime_contract(self, model_name: str) -> GemmaRuntimeContract:
+    def _load_runtime_contract(
+        self,
+        model_name: str,
+        *,
+        allow_repair: bool = True,
+    ) -> GemmaRuntimeContract:
         image_ref = DEFAULT_GEMMA_LLAMA_CPP_IMAGE
         volume_name = str(
             os.environ.get("GEMMA_MODEL_VOLUME", DEFAULT_GEMMA_MODEL_VOLUME)
@@ -989,31 +1013,134 @@ class LocalGemmaRuntimeManager:
         except GemmaRuntimeContractError as exc:
             raise self._build_setup_error(str(exc)) from exc
         image_id = self._ensure_runtime_image_id(image_ref)
-        manifest_bytes, manifest_sha256, observed_model_bytes = self._probe_model_volume(
-            volume_name=volume_name,
-            model_name=model_file,
-            image_ref=image_ref,
-        )
         try:
+            (
+                manifest_bytes,
+                manifest_sha256,
+                observed_model_bytes,
+            ) = self._probe_model_volume(
+                volume_name=volume_name,
+                model_name=model_file,
+                image_ref=image_ref,
+            )
+        except _GemmaVolumeNotProvisioned as exc:
+            if not allow_repair:
+                raise self._build_setup_error(str(exc)) from exc
+            # 볼륨 자체가 없거나 비었다. 준비 스크립트가 원본을 찾아 채운다.
+            self._repair_runtime_volume(
+                volume_name=volume_name,
+                detail=str(exc),
+                message="Gemma 런타임 볼륨을 준비하는 중... 모델을 내려받아야 하면 오래 걸립니다.",
+            )
+            return self._load_runtime_contract(model_name, allow_repair=False)
+
+        def build(contract_image_ref: str, contract_image_id: str) -> GemmaRuntimeContract:
             return build_gemma_runtime_contract(
                 manifest_bytes=manifest_bytes,
                 manifest_sha256=manifest_sha256,
                 observed_model_bytes=observed_model_bytes,
                 volume_name=volume_name,
                 model_name=model_file,
-                image_ref=image_ref,
-                image_id=image_id,
+                image_ref=contract_image_ref,
+                image_id=contract_image_id,
                 compose_file=_RUNTIME_CONFIG["compose_file"],
                 environment=os.environ,
             )
+
+        try:
+            return build(image_ref, image_id)
         except (GemmaRuntimeContractError, OSError) as exc:
+            if allow_repair and is_image_identity_only_drift(
+                manifest_bytes,
+                current_image_id=image_id,
+                revalidate=build,
+            ):
+                # 봉인된 image identity 하나만 어긋났다. 모델 자체는 계약 그대로다.
+                # 원본 파일을 다시 구하지 않고 현재 image 로 다시 봉인한다.
+                self._repair_runtime_volume(
+                    volume_name=volume_name,
+                    detail=describe_image_identity_drift(
+                        manifest_bytes,
+                        current_image_id=image_id,
+                        runtime_label="Gemma",
+                    ),
+                )
+                return self._load_runtime_contract(model_name, allow_repair=False)
             raise self._build_setup_error(
                 (
                     f"Prepared Gemma runtime validation failed: {exc}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 in Prepare mode, "
-                    "or use Verify mode to recompute the model hashes."
+                    "Run scripts/prepare_gemma_runtime.ps1 in Auto mode to provision "
+                    "or reseal the volume, or use Verify mode to recompute the model hashes."
                 )
             ) from exc
+
+    def _gemma_repair_plan(self, volume_name: str) -> ManagedRuntimeRepairPlan:
+        return ManagedRuntimeRepairPlan(
+            runtime_label="Gemma",
+            prepare_script=ROOT_DIR / "scripts" / "prepare_gemma_runtime.ps1",
+            volume_name=volume_name,
+        )
+
+    def _repair_runtime_volume(
+        self,
+        *,
+        volume_name: str,
+        detail: str,
+        message: str = (
+            "Gemma 런타임 볼륨을 현재 llama.cpp 이미지에 맞춰 다시 봉인하는 중..."
+        ),
+    ) -> None:
+        """준비 스크립트를 ``Auto`` 로 돌려 볼륨을 계약에 맞춘다.
+
+        볼륨이 이미 계약된 모델을 담고 있으면 manifest 만 다시 봉인하고, 비어
+        있으면 원본을 찾아 채운다. 컨테이너가 실행 중이면 준비 스크립트가
+        거부한다. 이 시점의 컨테이너는 이미 계약을 만족하지 못하는 것이므로 먼저
+        정지한다.
+        """
+
+        logger.info("%s Running the preparation script.", detail)
+        self._emit_progress(
+            self._startup_progress_callback,
+            status="running",
+            step_key="runtime_repair",
+            message=message,
+            detail=detail,
+        )
+        if self._inspect_managed_container_running():
+            self._stop_managed_container()
+            self._managed_active = False
+            self._managed_start_attempted = False
+        self._readiness_cache.clear()
+        try:
+            run_managed_runtime_preparation(
+                self._gemma_repair_plan(volume_name),
+                mode="Auto",
+                allow_download=True,
+                cancel_checker=self._startup_cancel_checker,
+                progress=lambda text: self._emit_progress(
+                    self._startup_progress_callback,
+                    status="running",
+                    step_key="runtime_repair",
+                    message=text,
+                    detail=detail,
+                ),
+            )
+        except OperationCancelledError:
+            raise
+        except ManagedRuntimeRepairError as exc:
+            raise self._build_setup_error(
+                (
+                    f"{detail}\nAutomatic repair failed: {exc}\n"
+                    "Run scripts/prepare_gemma_runtime.ps1 -Mode Auto by hand."
+                )
+            ) from exc
+        self._emit_progress(
+            self._startup_progress_callback,
+            status="completed",
+            step_key="runtime_repair",
+            message="Gemma 런타임 볼륨 준비를 마쳤습니다.",
+            detail=detail,
+        )
 
     def _ensure_runtime_image_id(self, image_ref: str) -> str:
         inspect_command = [
@@ -1073,12 +1200,8 @@ class LocalGemmaRuntimeManager:
             cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
-            raise self._build_setup_error(
-                (
-                    f"Prepared Gemma model volume does not exist: {volume_name}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 before starting "
-                    "the managed endpoint."
-                )
+            raise _GemmaVolumeNotProvisioned(
+                f"Prepared Gemma model volume does not exist: {volume_name}"
             )
         try:
             volume_labels = json.loads(
@@ -1148,12 +1271,9 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
         )
         if completed.returncode != 0:
             detail = ((completed.stderr or "") + "\n" + (completed.stdout or "")).strip()
-            raise self._build_setup_error(
-                (
-                    f"Prepared Gemma model volume is unavailable or incomplete: {volume_name}\n"
-                    f"Configured model: {model_name}\n{detail}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 before starting the managed endpoint."
-                )
+            raise _GemmaVolumeNotProvisioned(
+                f"Prepared Gemma model volume is unavailable or incomplete: {volume_name}\n"
+                f"Configured model: {model_name}\n{detail}"
             )
 
         values: dict[str, str] = {}
