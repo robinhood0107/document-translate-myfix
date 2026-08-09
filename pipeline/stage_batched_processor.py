@@ -9,6 +9,7 @@ import time
 import traceback
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 import imkit as imk
@@ -126,6 +127,11 @@ from modules.utils.ocr_debug import (
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import VERTICAL_ALIGNMENT_CENTER
+from pipeline.inpaint_cleanup_job import (
+    InpaintCleanupInput,
+    run_inpaint_cleanup,
+)
+from modules.utils.run_report import build_run_report, write_run_report
 from modules.utils.text_normalization import RENDER_NORMALIZABLE_GLYPHS
 from modules.utils.textblock import ensure_text_block_id, sort_blk_list
 from modules.utils.translator_utils import get_raw_text, get_raw_translation
@@ -204,6 +210,87 @@ class StagePageContext:
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
+    # 이 페이지가 실제로 남긴 파일. 배치 끝의 정합성 검사가 이 값을 본다.
+    output_path: str = ""
+    # 폴백으로 저장했다면 무엇으로 저장했는지. 빈 문자열이면 정상 렌더다.
+    output_fallback_kind: str = ""
+    # 페이지가 끝난 뒤 큰 배열을 놓아주기 전에 옮겨 담는 값들. 스윕이 끝난 다음
+    # 집계하려고 이미지 전체를 붙들고 있을 이유는 없다.
+    mask_pixel_count: int = 0
+    released_buffer_bytes: int = 0
+
+    def release_page_buffers(self) -> int:
+        """이 페이지의 전체 해상도 배열을 놓아준다. 놓아준 바이트 수를 돌려준다.
+
+        스테이지 배치 파이프라인은 실행 내내 모든 페이지의 컨텍스트를 리스트로
+        들고 있다. 페이지당 원본, 인페인팅 결과, 마스크 두 장, 패치가 전부
+        살아 있으면 4K 페이지 기준 60 MiB 를 넘고, 수백 페이지에서는 프로세스가
+        수 GB 짜리 24 MiB 할당조차 실패하는 지경이 된다. 렌더까지 끝난 페이지의
+        픽셀 데이터는 아무도 다시 보지 않으므로 그 자리에서 놓아준다.
+
+        나중에 필요한 집계값(마스크 픽셀 수)은 놓아주기 전에 옮겨 담는다.
+        """
+
+        released = 0
+        if self.mask is not None:
+            try:
+                self.mask_pixel_count = int(np.count_nonzero(self.mask))
+            except Exception:
+                self.mask_pixel_count = 0
+        for name in (
+            "image",
+            "inpaint_input_img",
+            "raw_mask",
+            "mask",
+            "project_ocr_hit",
+            "precomputed_mask_details",
+        ):
+            value = getattr(self, name, None)
+            released += _approximate_buffer_bytes(value)
+            setattr(self, name, None)
+        released += _approximate_buffer_bytes(self.patches)
+        self.patches = []
+        # `mask_details` 는 raw/final 마스크를 그대로 다시 참조한다. 비우지 않으면
+        # 위에서 놓아준 배열이 그대로 살아남는다.
+        released += _approximate_buffer_bytes(self.mask_details)
+        self.mask_details = {}
+        self.released_buffer_bytes += released
+        return released
+
+
+def _approximate_buffer_bytes(value: Any) -> int:
+    """중첩 컨테이너 안 numpy 배열이 차지하는 바이트 수의 근사치.
+
+    진단 로그용이다. 정확할 필요는 없고, 순환 참조에서 멈추기만 하면 된다.
+    """
+
+    return _approximate_buffer_bytes_inner(value, set())
+
+
+def _approximate_buffer_bytes_inner(value: Any, seen: set[int]) -> int:
+    if value is None:
+        return 0
+    marker = id(value)
+    if marker in seen:
+        return 0
+    if isinstance(value, np.ndarray):
+        return int(value.nbytes)
+    if isinstance(value, (str, bytes, int, float, bool)):
+        return 0
+    seen.add(marker)
+    if isinstance(value, dict):
+        return sum(
+            _approximate_buffer_bytes_inner(item, seen) for item in value.values()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return sum(_approximate_buffer_bytes_inner(item, seen) for item in value)
+    # 체크포인트 히트처럼 배열을 필드로 들고 있는 작은 객체.
+    slots = getattr(value, "__dict__", None)
+    if isinstance(slots, dict):
+        return sum(
+            _approximate_buffer_bytes_inner(item, seen) for item in slots.values()
+        )
+    return 0
 
 
 @dataclass
@@ -275,6 +362,18 @@ class StageBatchedProcessor(BatchProcessor):
                     estimator.seed_from_history(reader())
                 except Exception:
                     logger.debug("Could not seed the stage ETA model.", exc_info=True)
+            # 컨테이너 기동·모델 적재처럼 페이지 수와 무관한 고정 비용도 이력에서
+            # 채운다. 이게 없으면 아직 시작하지 않은 단계의 시작 비용만큼 남은
+            # 시간을 계속 과소평가하고, 그 단계로 넘어가는 순간 위로 튄다.
+            startup_reader = getattr(tracker, "read_stage_startups", None)
+            if callable(startup_reader):
+                try:
+                    estimator.seed_startup_from_history(startup_reader())
+                except Exception:
+                    logger.debug(
+                        "Could not seed the stage startup costs.",
+                        exc_info=True,
+                    )
             self._stage_eta = estimator
         return estimator
 
@@ -286,12 +385,20 @@ class StageBatchedProcessor(BatchProcessor):
             return
         tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
         writer = getattr(tracker, "record_stage_rates", None)
-        if not callable(writer):
-            return
-        try:
-            writer(estimator.measured_per_page_by_stage())
-        except Exception:
-            logger.debug("Could not persist the stage ETA model.", exc_info=True)
+        if callable(writer):
+            try:
+                writer(estimator.measured_per_page_by_stage())
+            except Exception:
+                logger.debug("Could not persist the stage ETA model.", exc_info=True)
+        startup_writer = getattr(tracker, "record_stage_startups", None)
+        if callable(startup_writer):
+            try:
+                startup_writer(estimator.measured_startup_by_stage())
+            except Exception:
+                logger.debug(
+                    "Could not persist the stage startup costs.",
+                    exc_info=True,
+                )
 
     def observe_progress(
         self,
@@ -313,6 +420,12 @@ class StageBatchedProcessor(BatchProcessor):
         return {
             "progress_fraction": estimator.progress_fraction(),
             "eta_seconds": estimator.remaining_seconds(),
+            # 파이프라인 전 단계의 남은 시간과 상태. UI 가 마우스를 올렸을 때
+            # 보여준다.
+            "eta_by_stage": [
+                {**row, "label": self.STAGE_LABELS.get(row["stage"], row["stage"])}
+                for row in estimator.remaining_by_stage()
+            ],
         }
 
     def describe_progress(self, stage_name: str, index: int, total: int) -> str:
@@ -347,6 +460,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._render_executor: QtRenderPool | None = None
         self._render_cancel_event = threading.Event()
         self._pending_render_jobs: list[_PendingRenderJob] = []
+        self._released_page_buffer_bytes = 0
         self._render_context_cache: tuple[Any, str] | None = None
 
     def _stage_tr(self, text: str) -> str:
@@ -1399,12 +1513,43 @@ class StageBatchedProcessor(BatchProcessor):
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
+    @staticmethod
+    def _render_worker_count() -> int:
+        """렌더 워커 수. 기본 1이며 ``CT_RENDER_WORKERS`` 로만 바꾼다.
+
+        렌더를 융합한 근거는 "렌더 약 300ms 가 인페인팅 1.28s 뒤에 숨는다" 였다.
+        실측 366장 실행에서 렌더는 페이지당 **2.31초**였고, 워커가 하나뿐이라
+        14.1분의 직렬 작업이 됐다. 즉 그 전제는 더 이상 성립하지 않는다.
+
+        그렇다고 기본값을 올리지는 않는다. 렌더가 Qt 스레드를 벗어나면
+        `scene.render()` 가 **예외도 경고도 없이** 빈 이미지를 만든다
+        (`pipeline/render_pool.py` 참고). 워커를 늘렸을 때 같은 종류의 조용한
+        실패가 없다는 것은 렌더 결과 픽셀로 확인해야 하며, 그 확인 전에는
+        기본값을 바꾸지 않는다. 이 환경변수는 그 A/B 를 할 수 있게 열어둔 것이다.
+        """
+
+        raw = str(os.environ.get("CT_RENDER_WORKERS", "") or "").strip()
+        if not raw:
+            return 1
+        try:
+            value = int(raw)
+        except ValueError:
+            logger.warning("Ignoring a non-numeric CT_RENDER_WORKERS: %r", raw)
+            return 1
+        if value < 1 or value > 8:
+            logger.warning("Ignoring an out-of-range CT_RENDER_WORKERS: %d", value)
+            return 1
+        return value
+
     def _ensure_render_executor(self) -> QtRenderPool:
         if self._render_executor is None:
             # plain Python 스레드가 아니라 Qt 스레드여야 한다. 이유는
             # `pipeline/render_pool.py` 의 모듈 주석 참고 — 디스패처 없는
             # 스레드에서는 `scene.render()` 가 조용히 빈 이미지를 만든다.
-            self._render_executor = QtRenderPool(max_workers=1)
+            workers = self._render_worker_count()
+            if workers > 1:
+                logger.info("Running the render sweep with %d workers.", workers)
+            self._render_executor = QtRenderPool(max_workers=workers)
         return self._render_executor
 
     def _shutdown_render_executor(self) -> None:
@@ -1643,6 +1788,9 @@ class StageBatchedProcessor(BatchProcessor):
             **(extra or {}),
         )
         self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
+        # 실패한 페이지는 이후 스테이지가 모두 건너뛴다. 픽셀 데이터를 계속 붙들고
+        # 있으면 한 페이지의 실패가 남은 배치 전체의 메모리를 갉아먹는다.
+        self._release_page_buffers(ctx)
 
     def _detect_all(
         self,
@@ -2851,6 +2999,18 @@ class StageBatchedProcessor(BatchProcessor):
                     skip_reason="no_text_detected",
                     project_checkpoint_status="skipped",
                 )
+                # 인페인팅은 건너뛰어도 **출력은 반드시 나가야 한다.** 이 분기가
+                # 렌더 제출 없이 넘어가는 바람에, 텍스트가 없다고 판정된 페이지는
+                # 정상 경로로 파일을 남기지 못했다. 실측 366장에서 15장이 여기로
+                # 빠져 배치 끝 폴백이 대신 저장했고, 실패가 아닌데도 실패 경로로
+                # 처리됐다. 글자가 없으면 렌더할 텍스트가 없을 뿐, 페이지 자체는
+                # 그대로 내보내면 된다.
+                self._submit_or_inline_render(
+                    ctx,
+                    index=index,
+                    total_images=total_images,
+                    export_settings=export_settings,
+                )
                 continue
             self._emit_benchmark_event(
                 "inpaint_start",
@@ -3199,62 +3359,34 @@ class StageBatchedProcessor(BatchProcessor):
                         "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
                     },
                 ):
-                    ctx.inpaint_input_img = imk.convert_scale_abs(
-                        ctx.inpaint_input_img
+                    cleanup = run_inpaint_cleanup(
+                        InpaintCleanupInput(
+                            image=ctx.image,
+                            inpaint_input_img=ctx.inpaint_input_img,
+                            mask=ctx.mask,
+                            mask_details=ctx.mask_details,
+                            inpaint_blocks=inpaint_blocks,
+                            config=config,
+                            page_label=f"{index + 1}/{total_images}",
+                            inpaint_edit_mask=getattr(
+                                self.inpainting,
+                                "last_inpaint_edit_mask",
+                                None,
+                            ),
+                        )
                     )
-                    inpaint_edit_mask = getattr(
-                        self.inpainting,
-                        "last_inpaint_edit_mask",
-                        None,
-                    )
-                    if inpaint_edit_mask is not None:
-                        ctx.mask = np.where(
-                            (ctx.mask > 0) | (inpaint_edit_mask > 0),
-                            255,
-                            0,
-                        ).astype(np.uint8)
-                    (
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.cleanup_stats,
-                    ) = refine_bubble_residue_inpaint(
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        inpaint_blocks,
-                        self.inpainting.inpainter_cache,
-                        config,
-                        page_label=f"{index + 1}/{total_images}",
-                    )
+                    ctx.inpaint_input_img = cleanup.inpaint_input_img
+                    ctx.mask = cleanup.mask
+                    ctx.cleanup_stats = cleanup.cleanup_stats
+                    outside_before_restore = cleanup.outside_before_restore
+                    outside_after_restore = cleanup.outside_after_restore
+                    # 진행 보고는 파이프라인 스레드에 남긴다. 계산과 달리 이건
+                    # 시그널을 건드린다.
                     self._report_residue_cleanup(
                         index=index,
                         total=total_images,
                         image_path=ctx.image_path,
                         cleanup_stats=ctx.cleanup_stats,
-                    )
-                    (
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.cleanup_stats,
-                    ) = apply_duplicate_bubble_inner_fill(
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.mask_details,
-                        ctx.cleanup_stats,
-                    )
-                    outside_before_restore = count_changed_outside_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                    )
-                    ctx.inpaint_input_img = composite_with_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                    )
-                    outside_after_restore = count_changed_outside_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
                     )
                 ctx.inpaint_diagnostics[
                     "outside_mask_changed_before_restore"
@@ -4182,6 +4314,7 @@ class StageBatchedProcessor(BatchProcessor):
                 output_path=output_path,
                 output_format=output_format,
                 is_cancelled=self._render_cancel_event.is_set,
+                submitted_monotonic=time.monotonic(),
             )
             self._raise_if_cancelled()
             future = self._ensure_render_executor().submit(run_render_job, job)
@@ -4218,6 +4351,7 @@ class StageBatchedProcessor(BatchProcessor):
         final_output_root: str,
         output_materialized: bool,
     ) -> None:
+        ctx.output_path = final_output_path
         self.main_page.image_ctrl.update_processing_summary(
             ctx.image_path,
             {
@@ -4307,8 +4441,23 @@ class StageBatchedProcessor(BatchProcessor):
                 },
             )
 
+        # 렌더는 전용 워커에서 돈다. 파이프라인 스레드는 제출만 하고 떠나므로,
+        # 워커가 돌려준 실측값을 여기서 텔레메트리에 넣지 않으면 렌더 비용이
+        # 어디에도 남지 않는다. 실제로 그래서 렌더가 페이지당 2.31초를 쓰는데도
+        # 리포트에서는 보이지 않았다.
+        self._record_performance_detail(
+            stage="render",
+            operation="worker",
+            elapsed_ms=float(result.worker_seconds) * 1000.0,
+        )
+        self._record_performance_detail(
+            stage="render",
+            operation="queue_wait",
+            elapsed_ms=float(result.queue_wait_seconds) * 1000.0,
+        )
         final_output_path = result.final_output_path
         final_output_root = pending.output_root
+        ctx.output_path = final_output_path
         if ctx.project_render_identity:
             try:
                 stored = record_render_checkpoint(
@@ -4360,6 +4509,21 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
         self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
+        self._release_page_buffers(ctx)
+
+    def _release_page_buffers(self, ctx: StagePageContext) -> None:
+        """끝난 페이지의 전체 해상도 배열을 놓아주고 그 사실을 기록한다."""
+
+        released = ctx.release_page_buffers()
+        if released <= 0:
+            return
+        self._released_page_buffer_bytes += released
+        logger.debug(
+            "Released %.1f MiB of page buffers for %s (run total %.1f MiB).",
+            released / (1024 * 1024),
+            ctx.image_name,
+            self._released_page_buffer_bytes / (1024 * 1024),
+        )
 
     def _resolve_render_future(self, pending: _PendingRenderJob) -> None:
         try:
@@ -4401,11 +4565,326 @@ class StageBatchedProcessor(BatchProcessor):
                 self._resolve_render_future(pending)
         self._raise_if_cancelled()
 
+    def _fallback_page_image(self, ctx: StagePageContext):
+        """폴백 저장에 쓸 최선의 이미지. 없으면 ``None``.
+
+        인페인팅까지 갔다면 글자가 지워진 결과가 원본보다 낫다. 그마저 없으면
+        원본이다. 버퍼는 이미 놓아준 뒤일 수 있으므로 그때는 디스크에서 다시
+        읽는다. 폴백 대상은 소수라 다시 읽는 비용이 메모리를 붙들고 있는 것보다
+        훨씬 싸다.
+        """
+
+        for candidate, kind in (
+            (ctx.inpaint_input_img, "inpainted"),
+            (ctx.image, "source"),
+        ):
+            if candidate is not None:
+                return candidate, kind
+        try:
+            reloaded = self.main_page.image_ctrl.load_image(ctx.image_path)
+            if reloaded is None:
+                reloaded = imk.read_image(ctx.image_path)
+        except Exception:
+            logger.warning(
+                "Could not reload %s for the fallback export.",
+                ctx.image_name,
+                exc_info=True,
+            )
+            return None, ""
+        if reloaded is None:
+            return None, ""
+        return reloaded, "source-reloaded"
+
+    def _write_fallback_export(
+        self,
+        ctx: StagePageContext,
+        *,
+        index: int,
+        total_images: int,
+        export_settings: dict[str, Any],
+    ) -> bool:
+        """렌더까지 가지 못한 페이지도 파일 하나를 반드시 남긴다.
+
+        한 스테이지의 실패로 페이지가 출력에서 통째로 사라지던 동작을 막는다.
+        실측으로 366장 입력에서 347장만 나온 적이 있고, 사라진 19장에는 아무런
+        흔적도 남지 않았다. 품질이 떨어지는 것과 결과가 없는 것은 전혀 다르다.
+
+        정상 렌더와 똑같은 내보내기 경로를 쓴다. 아카이브 모드에서 페이지 순서와
+        파일명 규칙이 어긋나면 안 되기 때문이다.
+        """
+
+        image, kind = self._fallback_page_image(ctx)
+        if image is None:
+            logger.error(
+                "No image available for the fallback export of %s.",
+                ctx.image_name,
+            )
+            return False
+        try:
+            output_path, output_root = self._write_final_render_export(
+                ctx.directory,
+                ctx.export_token,
+                ctx.image_path,
+                image,
+                # 폴백은 번역 텍스트를 얹지 않는다. 얹을 만한 상태였다면 정상
+                # 렌더가 이미 성공했을 것이다.
+                [],
+                {},
+                export_settings,
+                page_index=index,
+                total_pages=total_images,
+            )
+        except Exception:
+            logger.error(
+                "Fallback export failed for %s.",
+                ctx.image_name,
+                exc_info=True,
+            )
+            return False
+        ctx.output_path = output_path
+        ctx.output_fallback_kind = kind
+        self.main_page.image_ctrl.update_processing_summary(
+            ctx.image_path,
+            {
+                "translated_image_path": output_path,
+                "translated_page_image_path": output_path,
+                "export_root": output_root,
+                "output_fallback_kind": kind,
+                "output_fallback_reason": ctx.failed_reason or ctx.failed_stage,
+            },
+        )
+        self._emit_benchmark_event(
+            "page_output_fallback",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            fallback_kind=kind,
+            failed_stage=ctx.failed_stage,
+            reason=ctx.failed_reason,
+            translated_image_path=output_path,
+        )
+        logger.warning(
+            "Exported %s from its %s image: %s",
+            ctx.image_name,
+            kind,
+            self._fallback_cause(ctx),
+        )
+        return True
+
+    @staticmethod
+    def _fallback_cause(ctx: StagePageContext) -> str:
+        """폴백을 하게 된 이유를 사실대로 적는다.
+
+        스테이지 실패가 기록돼 있으면 그것이 이유다. 그렇지 않은데도 출력이 없다면
+        원인은 다른 곳이다 — 실측으로 366장 중 15장이 인페인팅까지 끝나고도 렌더
+        결과가 기록되지 않은 채 조용히 빠졌고, 실패로 표시되지도 않았다. 그때
+        "unknown stage failed" 라고 적으면 없는 실패를 지어내는 셈이 된다.
+        """
+
+        if ctx.failed_stage:
+            return (
+                f"the {ctx.failed_stage} stage failed: "
+                f"{ctx.failed_reason or '(no reason recorded)'}"
+            )
+        return "no rendered output was recorded for it"
+
+    def _reconcile_page_outputs(
+        self,
+        pages: list[StagePageContext],
+        *,
+        export_settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        """모든 페이지가 파일을 남겼는지 확인하고, 없으면 폴백으로 채운다.
+
+        배치가 끝나는 시점에 입력 수와 출력 수가 같아야 한다. 어긋나면 조용히
+        넘어가지 않고 배치 리포트에 올린다.
+        """
+
+        total_images = len(pages)
+        fallbacks: list[dict[str, str]] = []
+        unrecoverable: list[str] = []
+        for index, ctx in enumerate(pages):
+            # 내부 기록만 믿지 않고 파일이 실제로 있는지 본다. 어느 한 경로가
+            # 출력 기록을 빠뜨려도(실측으로 그런 페이지가 15장 있었다) 여기서
+            # 잡힌다. 디스크에 있는 파일이 유일한 진실이다.
+            if ctx.output_path and os.path.exists(ctx.output_path):
+                continue
+            if ctx.output_path:
+                logger.warning(
+                    "%s recorded an output that is not on disk: %s",
+                    ctx.image_name,
+                    ctx.output_path,
+                )
+                ctx.output_path = ""
+            if self._write_fallback_export(
+                ctx,
+                index=index,
+                total_images=total_images,
+                export_settings=export_settings,
+            ):
+                fallbacks.append(
+                    {
+                        "image_name": ctx.image_name,
+                        "kind": ctx.output_fallback_kind,
+                        "failed_stage": ctx.failed_stage,
+                        "reason": ctx.failed_reason,
+                        "cause": self._fallback_cause(ctx),
+                    }
+                )
+            else:
+                unrecoverable.append(ctx.image_name)
+            self._release_page_buffers(ctx)
+
+        produced = sum(1 for ctx in pages if ctx.output_path)
+        summary = {
+            "input_count": total_images,
+            "output_count": produced,
+            "fallback_count": len(fallbacks),
+            "fallbacks": fallbacks,
+            "missing": unrecoverable,
+        }
+        self._emit_benchmark_event(
+            "batch_output_reconciled",
+            total_images=total_images,
+            output_count=produced,
+            fallback_count=len(fallbacks),
+            missing_count=len(unrecoverable),
+        )
+        if unrecoverable:
+            logger.error(
+                "Batch produced %d outputs for %d input pages. Missing: %s",
+                produced,
+                total_images,
+                ", ".join(unrecoverable),
+            )
+            report = getattr(self.main_page, "batch_report_ctrl", None)
+            register = getattr(report, "register_preflight_error", None)
+            if callable(register):
+                try:
+                    register(
+                        self._stage_tr("출력 페이지 수가 입력과 다릅니다."),
+                        self._stage_tr(
+                            "입력 {input}장 중 {output}장만 저장되었습니다. "
+                            "누락: {missing}"
+                        )
+                        .replace("{input}", str(total_images))
+                        .replace("{output}", str(produced))
+                        .replace("{missing}", ", ".join(unrecoverable)),
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not register the output reconciliation error.",
+                        exc_info=True,
+                    )
+        elif fallbacks:
+            logger.warning(
+                "Batch produced all %d outputs, but %d came from a fallback image.",
+                total_images,
+                len(fallbacks),
+            )
+        return summary
+
+    def _run_started_wall_text(self) -> str:
+        """이번 실행이 시작된 벽시계 시각. 사용자가 버튼을 누른 시점이다."""
+
+        tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
+        started = getattr(tracker, "run_started_wall", None)
+        if isinstance(started, str) and started:
+            return started
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _click_to_now_seconds(self) -> float:
+        """사용자가 '모두 번역'을 누른 순간부터 지금까지의 실측 경과 시간.
+
+        파이프라인 자체 시작 시각이 아니라 클릭 시점을 기준으로 한다. 런타임
+        준비(컨테이너 기동, 모델 적재)도 사용자가 기다린 시간이기 때문이다.
+        """
+
+        tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
+        started = getattr(tracker, "run_started_at", None)
+        if isinstance(started, (int, float)):
+            return max(time.monotonic() - float(started), 0.0)
+        run_started = getattr(self, "_run_started_at", None)
+        if isinstance(run_started, (int, float)):
+            return max(time.monotonic() - float(run_started), 0.0)
+        return 0.0
+
+    def _page_outcomes(self, pages: list[StagePageContext]) -> list[dict[str, Any]]:
+        return [
+            {
+                "image_name": ctx.image_name,
+                "output_path": ctx.output_path,
+                "fallback_kind": ctx.output_fallback_kind,
+                "failed_stage": ctx.failed_stage,
+                "failed_reason": ctx.failed_reason,
+                "no_text_detected": bool(ctx.no_text_detected),
+                "block_count": len(ctx.blk_list or []),
+            }
+            for ctx in pages
+        ]
+
+    def _write_run_report(
+        self,
+        pages: list[StagePageContext],
+        *,
+        output_summary: dict[str, Any],
+    ) -> str:
+        """이번 실행의 실측 소요시간과 페이지별 결과를 파일로 남긴다."""
+
+        try:
+            telemetry = self._performance_telemetry().snapshot()
+        except Exception:
+            logger.debug("Could not snapshot the run telemetry.", exc_info=True)
+            telemetry = {}
+        report = build_run_report(
+            telemetry=telemetry,
+            total_wall_sec=self._click_to_now_seconds(),
+            page_outcomes=self._page_outcomes(pages),
+            output_summary=output_summary,
+            started_at_local=self._run_started_wall_text(),
+        )
+        try:
+            from modules.utils.paths import get_log_dir
+
+            log_dir = get_log_dir("runs")
+        except Exception:
+            logger.debug("Could not resolve the run report directory.", exc_info=True)
+            return ""
+        path = write_run_report(report, log_dir=log_dir)
+        if path:
+            logger.info(
+                "Run finished in %s for %d page(s); report at %s",
+                report.get("total_wall_text", "?"),
+                int(report.get("page_count", 0) or 0),
+                path,
+            )
+        return path
+
     def _render_all(self, pages: list[StagePageContext]) -> None:
         # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
         # (`_submit_or_inline_render`가 `_inpaint_pages`에서 페이지별로 제출).
-        # 여기서는 마지막 한두 페이지분만 남아 있을 뿐이다.
-        self._drain_render_futures(block=True)
+        # 여기 남는 시간이 곧 **융합이 숨기지 못한 렌더 잔량**이다. 이상적으로는
+        # 마지막 한두 페이지분이지만, 렌더가 인페인팅보다 느려지면 큐가 쌓여
+        # 이 값이 커진다. 그때는 인페인팅을 더 줄여도 전체 시간이 줄지 않는다.
+        pending = len(getattr(self, "_pending_render_jobs", []) or [])
+        started_at = time.monotonic()
+        try:
+            self._drain_render_futures(block=True)
+        finally:
+            elapsed = max(0.0, time.monotonic() - started_at)
+            self._record_performance_detail(
+                stage="render",
+                operation="tail_drain",
+                elapsed_ms=elapsed * 1000.0,
+                workload={"pending_at_drain": pending},
+            )
+            if elapsed > 1.0:
+                logger.info(
+                    "Render tail drain took %.1fs with %d job(s) still queued; "
+                    "that is render time the inpaint sweep could not hide.",
+                    elapsed,
+                    pending,
+                )
 
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
@@ -4418,6 +4897,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._page_started_at = None
         self._progress_image_path = None
         self._recent_page_durations.clear()
+        self._released_page_buffer_bytes = 0
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         self._render_context_cache = None
@@ -4624,10 +5104,13 @@ class StageBatchedProcessor(BatchProcessor):
                 service="inpainter",
             ):
                 self._inpaint_all(pages)
+            # 마스크는 페이지가 끝나는 즉시 놓아준다. 집계는 놓아주기 전에 옮겨
+            # 담아둔 값을 쓰고, 아직 살아 있는 페이지만 그 자리에서 센다.
             mask_pixels = sum(
-                int(np.count_nonzero(ctx.mask))
+                int(ctx.mask_pixel_count)
+                if getattr(ctx, "mask", None) is None
+                else int(np.count_nonzero(ctx.mask))
                 for ctx in pages
-                if getattr(ctx, "mask", None) is not None
             )
             inpaint_roi_count = sum(
                 len(
@@ -4669,7 +5152,21 @@ class StageBatchedProcessor(BatchProcessor):
                 source_megapixels=source_pixels / 1_000_000.0,
             )
             self._sample_performance_resources("render_stage_end")
-            self._emit_benchmark_event("batch_run_done", total_images=total_images)
+            # 한 스테이지의 실패로 페이지가 출력에서 사라지지 않게, 아직 파일을
+            # 남기지 못한 페이지를 여기서 마지막으로 채운다.
+            output_summary = self._reconcile_page_outputs(
+                pages,
+                export_settings=self._effective_export_settings(
+                    self.main_page.settings_page
+                ),
+            )
+            self._emit_benchmark_event(
+                "batch_run_done",
+                total_images=total_images,
+                output_count=int(output_summary.get("output_count", 0)),
+                fallback_count=int(output_summary.get("fallback_count", 0)),
+            )
+            self._write_run_report(pages, output_summary=output_summary)
             batch_completed = True
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)

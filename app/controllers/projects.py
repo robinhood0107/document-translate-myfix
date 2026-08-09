@@ -105,6 +105,21 @@ class ProjectController:
     def _current_project_kind(self) -> str:
         return str(getattr(self.main, "project_kind", PROJECT_KIND_SINGLE) or PROJECT_KIND_SINGLE)
 
+    def _series_child_is_active(self) -> bool:
+        """시리즈의 한 화를 실제로 편집 중인지.
+
+        `project_kind` 는 자식을 열어도 `PROJECT_KIND_SERIES` 로 고정된다.
+        "시리즈 프로젝트인가"와 "지금 자식을 편집 중인가"는 다른 질문이고,
+        저장 분기가 필요로 하는 것은 후자다.
+        """
+        series_ctrl = getattr(self.main, "series_ctrl", None)
+        if series_ctrl is None:
+            return False
+        try:
+            return bool(series_ctrl.is_child_project_active())
+        except Exception:
+            return False
+
     def _project_extension(self, kind: str | None = None) -> str:
         return project_extension_for_kind(kind or self._current_project_kind())
 
@@ -400,7 +415,14 @@ class ProjectController:
         (which the batch processor uses for cancel detection). A GenericWorker
         is started directly on the shared threadpool instead.
         """
+        if self._series_child_is_active():
+            # 시리즈 자식을 편집하는 중이다. 페이지마다 저장하면 시리즈 파일
+            # 전체를 매번 다시 쓰게 된다. 챕터가 끝나면
+            # `SeriesController.on_batch_process_finished` 가
+            # `sync_active_child_to_series` 로 한 번에 반영한다.
+            return
         if self._current_project_kind() == PROJECT_KIND_SERIES:
+            # 시리즈 보드 화면 — 저장할 페이지 상태 자체가 없다.
             return
         if self._batch_autosave_deferred:
             # 인페인팅+렌더 융합 sweep 이 진행 중이다 — sweep 종료 시
@@ -568,20 +590,34 @@ class ProjectController:
             return
 
         autosave_start_revision = self.main._dirty_revision
-        self._autosave_save_pending = True
+        series_ctrl = self.main.series_ctrl
+        series_file = str(series_ctrl.series_file or "")
+        # 원본 시리즈 파일에 직접 쓰는 것은 자동저장이 실제로 켜져 있을 때뿐이다.
+        # 예전에는 자동저장이 꺼져 있어도 동기 sync 가 원본을 갱신해서,
+        # "저장하지 않음"을 기대한 흐름과 어긋났다.
+        writes_original = bool(use_project_file and target_file == series_file)
+
+        # 1단계만 메인 스레드에서 한다. 예전에는 자식 프로젝트 직렬화와 시리즈
+        # 임베드까지 전부 GUI 스레드에서 돌아, 페이지가 많은 화에서는 자동저장
+        # 주기마다 UI 가 멈췄다.
         try:
-            self.main.series_ctrl.sync_active_child_to_series()
+            sync_payload = series_ctrl.prepare_active_child_sync()
         except Exception:
             self._autosave_save_pending = False
             logger.warning("Series autosave sync failed.", exc_info=True)
             return
 
         def worker() -> str:
-            current_series = str(self.main.series_ctrl.series_file or "")
-            if not current_series:
+            if not series_file:
                 raise FileNotFoundError("Series project file is not available for autosave.")
-            if target_file != current_series:
-                shutil.copyfile(current_series, target_file)
+            if writes_original:
+                if sync_payload is not None:
+                    series_ctrl.write_active_child_sync(sync_payload)
+                return target_file
+            # 복구 스냅샷 경로: 원본을 뜬 다음 사본에만 자식 변경을 반영한다.
+            shutil.copyfile(series_file, target_file)
+            if sync_payload is not None:
+                series_ctrl.write_active_child_sync(sync_payload, series_target_file=target_file)
             return target_file
 
         def on_error(error_tuple):
@@ -594,14 +630,22 @@ class ProjectController:
 
         def on_finished():
             self._autosave_save_pending = False
-            if use_project_file and self.main._dirty_revision == autosave_start_revision:
-                self.main.set_project_clean()
-                self.add_recent_project(target_file)
-                self._refresh_home_screen()
+            if writes_original:
+                # 원본이 실제로 바뀐 경우에만 메모리 매니페스트를 맞춘다.
+                # 복구 스냅샷만 쓴 경우 자식은 여전히 미반영 상태다.
+                try:
+                    series_ctrl.finalize_active_child_sync()
+                except Exception:
+                    logger.warning("Series autosave finalize failed.", exc_info=True)
+                if self.main._dirty_revision == autosave_start_revision:
+                    self.main.set_project_clean()
+                    self.add_recent_project(target_file)
+                    self._refresh_home_screen()
             if self._autosave_retrigger_requested:
                 self._autosave_retrigger_requested = False
                 self._realtime_autosave_timer.start()
 
+        self._autosave_save_pending = True
         self.main.run_threaded(worker, None, on_error, on_finished)
 
     def prompt_restore_recovery_if_available(self) -> bool:

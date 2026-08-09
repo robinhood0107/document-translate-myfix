@@ -155,6 +155,20 @@ The tool reuses a file already present in the volume when its SHA-256 matches
 instead of copying it again. It then runs a CUDA model-load smoke test and
 records the result in the ready manifest. Use `-Mode Verify` to re-check only.
 
+### When a prepared volume is suddenly rejected
+
+Every preparation script accepts `-Mode Auto`: it prepares an empty volume and
+reseals one that already holds the contracted files. When upstream refreshes the
+llama.cpp tag the image digest moves, so the models stay correct while the ready
+manifest no longer matches; `Auto` (internally `Reseal`) recovers that without
+the original source files. The app detects the same state and repairs it once on
+its own. `Reseal` leaves the volume contents alone, re-verifies the model
+SHA-256s, re-runs the GPU smoke against the current image, and rewrites only the
+manifest.
+
+Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and
+its immediate subdirectories first.
+
 HunyuanOCR previously bind-mounted the `testmodel` folder and read generic
 environment names such as `LLAMA_CTX_SIZE`, which it shared with Gemma. It now
 uses the prepared volume and dedicated `HUNYUAN_OCR_LLAMA_*` names, so tuning
