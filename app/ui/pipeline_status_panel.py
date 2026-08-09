@@ -238,8 +238,16 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.service_value = self._add_summary_row(summary_grid, 0, self.tr("Service"))
         self.progress_value = self._add_summary_row(summary_grid, 1, self.tr("Progress"))
         self.file_value = self._add_summary_row(summary_grid, 2, self.tr("File"), wrap=True)
-        self.eta_value = self._add_summary_row(summary_grid, 3, self.tr("ETA"))
-        self.message_value = self._add_summary_row(summary_grid, 4, self.tr("Message"), wrap=True)
+        self.eta_value = self._add_summary_row(summary_grid, 3, self.tr("예상 남은 시간"))
+        # 남은 시간만으로는 이 실행이 통째로 얼마짜리인지, 언제 끝나는지 알 수 없다.
+        self.total_estimate_value = self._add_summary_row(
+            summary_grid, 4, self.tr("전체 예상 시간")
+        )
+        self.elapsed_value = self._add_summary_row(summary_grid, 5, self.tr("경과 시간"))
+        self.finish_value = self._add_summary_row(
+            summary_grid, 6, self.tr("예상 완료 시각")
+        )
+        self.message_value = self._add_summary_row(summary_grid, 7, self.tr("Message"), wrap=True)
 
         self.details_view = QtWidgets.QPlainTextEdit(self)
         self.details_view.setReadOnly(True)
@@ -975,6 +983,25 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             self.progress_value.setText("-")
         self.file_value.setText(str(event.get("image_name") or "-"))
         self.eta_value.setText(str(event.get("eta_text") or self.tr("Calculating")))
+        self.total_estimate_value.setText(
+            str(event.get("total_estimate_text") or self.tr("Calculating"))
+        )
+        self.elapsed_value.setText(
+            str(event.get("elapsed_text") or self.tr("Calculating"))
+        )
+        self.finish_value.setText(
+            str(event.get("eta_finish_at_local") or self.tr("Calculating"))
+        )
+        # 단계별 내역은 마우스를 올렸을 때만 보여준다. 항상 펼쳐 두면 이 좁은
+        # 패널이 숫자로 뒤덮이고, 정작 봐야 하는 남은 시간이 묻힌다.
+        breakdown = str(event.get("eta_breakdown_text") or "")
+        for label in (
+            self.eta_value,
+            self.total_estimate_value,
+            self.elapsed_value,
+            self.finish_value,
+        ):
+            label.setToolTip(breakdown)
         self.message_value.setText(str(event.get("message") or "-"))
         if "preview_path" in event:
             preview_path = str(event.get("preview_path") or "").strip()
@@ -1047,6 +1074,16 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.progress_value.setText("-")
         self.file_value.setText("-")
         self.eta_value.setText("-")
+        self.total_estimate_value.setText("-")
+        self.elapsed_value.setText("-")
+        self.finish_value.setText("-")
+        for label in (
+            self.eta_value,
+            self.total_estimate_value,
+            self.elapsed_value,
+            self.finish_value,
+        ):
+            label.setToolTip("")
         self._append_log(text)
         self.close_button.setVisible(bool(closable))
         if not self._pipeline_active and duration:
