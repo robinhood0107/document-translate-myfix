@@ -109,6 +109,40 @@ def _stage_work_rows(telemetry: Mapping[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _operation_rows(telemetry: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """단계 안의 세부 연산별 합계. 어디에 시간이 가는지 여기서 갈린다.
+
+    ``stage_window`` 는 단계 전체 구간이라 여기서는 뺀다. 남는 것이 실제 작업이다.
+    렌더의 ``worker``/``queue_wait``/``tail_drain``, 번역의
+    ``inference_and_cache``/``dictionary_and_sanitizer`` 가 이 표에 나온다.
+    """
+
+    details = telemetry.get("stage_details")
+    rows: list[dict[str, Any]] = []
+    if isinstance(details, Mapping):
+        for stage, operations in details.items():
+            if not isinstance(operations, Mapping):
+                continue
+            for operation, metrics in operations.items():
+                if operation == STAGE_WINDOW_OPERATION or not isinstance(
+                    metrics, Mapping
+                ):
+                    continue
+                seconds = float(metrics.get("wall_ms", 0.0) or 0.0) / 1000.0
+                count = int(metrics.get("count", 0) or 0)
+                rows.append(
+                    {
+                        "stage": str(stage),
+                        "operation": str(operation),
+                        "seconds": round(seconds, 3),
+                        "count": count,
+                        "seconds_each": round(seconds / count, 4) if count else None,
+                    }
+                )
+    rows.sort(key=lambda row: row["seconds"], reverse=True)
+    return rows
+
+
 def build_run_report(
     *,
     telemetry: Mapping[str, Any],
@@ -133,6 +167,7 @@ def build_run_report(
         ),
         "stages": stage_rows,
         "stage_work": _stage_work_rows(telemetry),
+        "operations": _operation_rows(telemetry),
         "output": dict(output_summary),
         "pages": [dict(item) for item in page_outcomes],
     }
@@ -228,6 +263,22 @@ def render_run_report_text(report: Mapping[str, Any]) -> str:
                 f" x{int(row.get('count', 0) or 0):<5}"
                 f" {f'{float(per):.2f}s/회' if isinstance(per, (int, float)) else '':>10}"
                 f"{hidden}"
+            )
+    operations = report.get("operations") or []
+    if operations:
+        lines.append("")
+        lines.append("세부 연산 (긴 순서, 상위 10개)")
+        lines.append("-" * 60)
+        for row in operations[:10]:
+            if not isinstance(row, Mapping):
+                continue
+            each = row.get("seconds_each")
+            lines.append(
+                f"  {str(row.get('stage', '?')):<10}"
+                f" {str(row.get('operation', '?')):<22}"
+                f" {format_minutes(float(row.get('seconds', 0.0) or 0.0)):>9}"
+                f" x{int(row.get('count', 0) or 0):<5}"
+                f" {f'{float(each):.3f}s/회' if isinstance(each, (int, float)) else ''}"
             )
     lines.append("=" * 60)
     return "\n".join(lines) + "\n"

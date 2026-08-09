@@ -1503,12 +1503,43 @@ class StageBatchedProcessor(BatchProcessor):
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
+    @staticmethod
+    def _render_worker_count() -> int:
+        """렌더 워커 수. 기본 1이며 ``CT_RENDER_WORKERS`` 로만 바꾼다.
+
+        렌더를 융합한 근거는 "렌더 약 300ms 가 인페인팅 1.28s 뒤에 숨는다" 였다.
+        실측 366장 실행에서 렌더는 페이지당 **2.31초**였고, 워커가 하나뿐이라
+        14.1분의 직렬 작업이 됐다. 즉 그 전제는 더 이상 성립하지 않는다.
+
+        그렇다고 기본값을 올리지는 않는다. 렌더가 Qt 스레드를 벗어나면
+        `scene.render()` 가 **예외도 경고도 없이** 빈 이미지를 만든다
+        (`pipeline/render_pool.py` 참고). 워커를 늘렸을 때 같은 종류의 조용한
+        실패가 없다는 것은 렌더 결과 픽셀로 확인해야 하며, 그 확인 전에는
+        기본값을 바꾸지 않는다. 이 환경변수는 그 A/B 를 할 수 있게 열어둔 것이다.
+        """
+
+        raw = str(os.environ.get("CT_RENDER_WORKERS", "") or "").strip()
+        if not raw:
+            return 1
+        try:
+            value = int(raw)
+        except ValueError:
+            logger.warning("Ignoring a non-numeric CT_RENDER_WORKERS: %r", raw)
+            return 1
+        if value < 1 or value > 8:
+            logger.warning("Ignoring an out-of-range CT_RENDER_WORKERS: %d", value)
+            return 1
+        return value
+
     def _ensure_render_executor(self) -> QtRenderPool:
         if self._render_executor is None:
             # plain Python 스레드가 아니라 Qt 스레드여야 한다. 이유는
             # `pipeline/render_pool.py` 의 모듈 주석 참고 — 디스패처 없는
             # 스레드에서는 `scene.render()` 가 조용히 빈 이미지를 만든다.
-            self._render_executor = QtRenderPool(max_workers=1)
+            workers = self._render_worker_count()
+            if workers > 1:
+                logger.info("Running the render sweep with %d workers.", workers)
+            self._render_executor = QtRenderPool(max_workers=workers)
         return self._render_executor
 
     def _shutdown_render_executor(self) -> None:
@@ -4289,6 +4320,7 @@ class StageBatchedProcessor(BatchProcessor):
                 output_path=output_path,
                 output_format=output_format,
                 is_cancelled=self._render_cancel_event.is_set,
+                submitted_monotonic=time.monotonic(),
             )
             self._raise_if_cancelled()
             future = self._ensure_render_executor().submit(run_render_job, job)
@@ -4415,6 +4447,20 @@ class StageBatchedProcessor(BatchProcessor):
                 },
             )
 
+        # 렌더는 전용 워커에서 돈다. 파이프라인 스레드는 제출만 하고 떠나므로,
+        # 워커가 돌려준 실측값을 여기서 텔레메트리에 넣지 않으면 렌더 비용이
+        # 어디에도 남지 않는다. 실제로 그래서 렌더가 페이지당 2.31초를 쓰는데도
+        # 리포트에서는 보이지 않았다.
+        self._record_performance_detail(
+            stage="render",
+            operation="worker",
+            elapsed_ms=float(result.worker_seconds) * 1000.0,
+        )
+        self._record_performance_detail(
+            stage="render",
+            operation="queue_wait",
+            elapsed_ms=float(result.queue_wait_seconds) * 1000.0,
+        )
         final_output_path = result.final_output_path
         final_output_root = pending.output_root
         ctx.output_path = final_output_path
@@ -4823,8 +4869,28 @@ class StageBatchedProcessor(BatchProcessor):
     def _render_all(self, pages: list[StagePageContext]) -> None:
         # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
         # (`_submit_or_inline_render`가 `_inpaint_pages`에서 페이지별로 제출).
-        # 여기서는 마지막 한두 페이지분만 남아 있을 뿐이다.
-        self._drain_render_futures(block=True)
+        # 여기 남는 시간이 곧 **융합이 숨기지 못한 렌더 잔량**이다. 이상적으로는
+        # 마지막 한두 페이지분이지만, 렌더가 인페인팅보다 느려지면 큐가 쌓여
+        # 이 값이 커진다. 그때는 인페인팅을 더 줄여도 전체 시간이 줄지 않는다.
+        pending = len(getattr(self, "_pending_render_jobs", []) or [])
+        started_at = time.monotonic()
+        try:
+            self._drain_render_futures(block=True)
+        finally:
+            elapsed = max(0.0, time.monotonic() - started_at)
+            self._record_performance_detail(
+                stage="render",
+                operation="tail_drain",
+                elapsed_ms=elapsed * 1000.0,
+                workload={"pending_at_drain": pending},
+            )
+            if elapsed > 1.0:
+                logger.info(
+                    "Render tail drain took %.1fs with %d job(s) still queued; "
+                    "that is render time the inpaint sweep could not hide.",
+                    elapsed,
+                    pending,
+                )
 
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
