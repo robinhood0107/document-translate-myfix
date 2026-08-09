@@ -61,6 +61,7 @@ from .response_parser import (
 from .transport import (
     DEFAULT_PADDLE_DIRECT_SERVER_URL,
     PADDLE_DIRECT_PARSER_SCHEMA_VERSION,
+    PaddleDirectOcrTruncatedError,
     build_direct_ocr_payload,
     direct_transport_identity,
     encoded_product_jpeg_to_png,
@@ -110,6 +111,12 @@ class PaddleOCRVLEngine(OCREngine):
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_TIMEOUT_SECONDS = 60
     REQUEST_RETRY_TOTAL_ATTEMPTS = 3
+    # 응답이 잘렸을 때 한 번만 올려서 다시 물어볼 토큰 한도 배수와 그 상한.
+    # 상한을 두는 이유는 한 말풍선이 컨텍스트를 통째로 먹는 것을 막기 위해서다.
+    TRUNCATION_RETRY_MULTIPLIER = 3
+    TRUNCATION_RETRY_MAX_TOKENS = 4096
+    # 재시도까지 잘린 블록에 남기는 사유. 페이지는 계속 진행한다.
+    TRUNCATED_OCR_REASON = "ocr_response_truncated"
     REQUEST_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
     TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
     TEXT_EXPANSION_RATIO = 0.03
@@ -832,6 +839,19 @@ class PaddleOCRVLEngine(OCREngine):
             self._request_telemetry_context.record = record
             try:
                 raw_text = self._request_ocr_text(crop)
+            except PaddleDirectOcrTruncatedError:
+                # 한도를 올린 재시도까지 잘렸다. 이 말풍선만 비우고 페이지는
+                # 계속 간다. 예전에는 이 예외가 위로 올라가 페이지 전체가
+                # 실패로 표시되고 출력에서 사라졌다.
+                self._mark_empty(blk, self.TRUNCATED_OCR_REASON)
+                blk.ocr_reject_reason = self.TRUNCATED_OCR_REASON
+                record["status"] = "truncated_after_retry"
+                logger.warning(
+                    "Leaving one block empty because its OCR response stayed "
+                    "truncated: bbox=%s",
+                    bbox,
+                )
+                return
             finally:
                 self._request_telemetry_context.record = None
             self._raise_if_cancelled()
@@ -1209,35 +1229,68 @@ class PaddleOCRVLEngine(OCREngine):
 
         encode_started_at = time.perf_counter()
         image_png = encoded_product_jpeg_to_png(image_bytes)
-        payload, base64_chars = build_direct_ocr_payload(
-            image_png,
-            max_tokens=self.max_new_tokens,
-        )
         encode_elapsed_ms = (
             time.perf_counter() - encode_started_at
         ) * 1000.0
         self._add_request_metric(record, "base64_ms", encode_elapsed_ms)
-        self._add_request_metric(record, "base64_chars", base64_chars)
 
-        payload_started_at = time.perf_counter()
-        # Building is deterministic and already complete above.  Keep the
-        # existing telemetry field populated so relay/direct profiles share
-        # one stable schema.
-        self._add_request_metric(
-            record,
-            "payload_build_ms",
-            (time.perf_counter() - payload_started_at) * 1000.0,
+        budgets = [int(self.max_new_tokens)]
+        # 잘림은 토큰 한도라는 원인이 분명하므로, 한도를 올려 한 번만 다시
+        # 물어본다. 글자가 유난히 많은 말풍선 하나 때문에 페이지 전체를 버릴
+        # 이유는 없다.
+        retry_budget = min(
+            int(self.max_new_tokens * self.TRUNCATION_RETRY_MULTIPLIER),
+            self.TRUNCATION_RETRY_MAX_TOKENS,
         )
+        if retry_budget > budgets[0]:
+            budgets.append(retry_budget)
 
-        data = self._send_request(payload, telemetry_record=record)
-        parse_started_at = time.perf_counter()
-        text = extract_direct_ocr_text(data)
-        self._add_request_metric(
-            record,
-            "parse_sanitize_ms",
-            (time.perf_counter() - parse_started_at) * 1000.0,
-        )
-        return text
+        last_error: PaddleDirectOcrTruncatedError | None = None
+        for attempt, max_tokens in enumerate(budgets):
+            payload, base64_chars = build_direct_ocr_payload(
+                image_png,
+                max_tokens=max_tokens,
+            )
+            if attempt == 0:
+                self._add_request_metric(record, "base64_chars", base64_chars)
+                payload_started_at = time.perf_counter()
+                # Building is deterministic and already complete above.  Keep
+                # the existing telemetry field populated so relay/direct
+                # profiles share one stable schema.
+                self._add_request_metric(
+                    record,
+                    "payload_build_ms",
+                    (time.perf_counter() - payload_started_at) * 1000.0,
+                )
+            else:
+                self._add_request_metric(record, "truncation_retry_count", 1)
+                record["truncation_retry_max_tokens"] = int(max_tokens)
+
+            data = self._send_request(payload, telemetry_record=record)
+            parse_started_at = time.perf_counter()
+            try:
+                text = extract_direct_ocr_text(data)
+            except PaddleDirectOcrTruncatedError as exc:
+                last_error = exc
+                self._add_request_metric(
+                    record,
+                    "parse_sanitize_ms",
+                    (time.perf_counter() - parse_started_at) * 1000.0,
+                )
+                logger.warning(
+                    "Direct Paddle OCR response was truncated at max_tokens=%d.",
+                    max_tokens,
+                )
+                continue
+            self._add_request_metric(
+                record,
+                "parse_sanitize_ms",
+                (time.perf_counter() - parse_started_at) * 1000.0,
+            )
+            return text
+
+        assert last_error is not None
+        raise last_error
 
     def _send_request(
         self,
