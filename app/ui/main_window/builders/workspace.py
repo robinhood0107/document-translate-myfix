@@ -19,6 +19,7 @@ from app.ui.dayu_widgets.spin_box import MSpinBox
 from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
+from app.ui.series_breadcrumb import SeriesBreadcrumbBar
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
 from app.projects.project_types import PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT
 from modules.utils.automatic_output import (
@@ -72,6 +73,11 @@ class WorkspaceMixin:
         content_widget = QtWidgets.QWidget()
 
         header_layout = QtWidgets.QHBoxLayout()
+
+        # 시리즈 자식 프로젝트를 편집하는 동안에만 뜨는 컨텍스트 표시줄. 보드
+        # 복귀 진입점이자, 단일 프로젝트와 시리즈 자식을 구분하는 신호다.
+        self.series_breadcrumb = SeriesBreadcrumbBar()
+        self.series_breadcrumb.setVisible(False)
 
         self.undo_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Horizontal, exclusive=True)
         undo_tools = [
@@ -179,6 +185,7 @@ class WorkspaceMixin:
             self.tr("Automatically process only the current page with the current automatic settings.")
         )
 
+        header_layout.addWidget(self.series_breadcrumb)
         header_layout.addWidget(self.hbutton_group)
         header_layout.addWidget(render_save_widget)
         header_layout.addWidget(self.loading)

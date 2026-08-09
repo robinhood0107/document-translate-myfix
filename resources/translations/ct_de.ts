@@ -2478,6 +2478,25 @@ This folder is separate from Auto-Recover snapshots.</source>
     </message>
 </context>
 <context>
+    <name>SeriesBreadcrumbBar</name>
+    <message>
+        <source>Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This chapter has changes that are not written back to the series project yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back to the series board</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SeriesImportDialog</name>
     <message>
         <source>Create Series Project</source>
@@ -3404,6 +3423,14 @@ Jetzt neu starten?</translation>
     </message>
     <message>
         <source>Delete the currently selected text or block box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back to Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave the current series chapter and go back to the series board.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5097,6 +5124,11 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Series Project</source>
         <translation>Serienprojekt</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Add Files To Series</source>
