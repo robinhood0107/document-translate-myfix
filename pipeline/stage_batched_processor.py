@@ -204,6 +204,10 @@ class StagePageContext:
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
+    # 이 페이지가 실제로 남긴 파일. 배치 끝의 정합성 검사가 이 값을 본다.
+    output_path: str = ""
+    # 폴백으로 저장했다면 무엇으로 저장했는지. 빈 문자열이면 정상 렌더다.
+    output_fallback_kind: str = ""
     # 페이지가 끝난 뒤 큰 배열을 놓아주기 전에 옮겨 담는 값들. 스윕이 끝난 다음
     # 집계하려고 이미지 전체를 붙들고 있을 이유는 없다.
     mask_pixel_count: int = 0
@@ -4299,6 +4303,7 @@ class StageBatchedProcessor(BatchProcessor):
         final_output_root: str,
         output_materialized: bool,
     ) -> None:
+        ctx.output_path = final_output_path
         self.main_page.image_ctrl.update_processing_summary(
             ctx.image_path,
             {
@@ -4390,6 +4395,7 @@ class StageBatchedProcessor(BatchProcessor):
 
         final_output_path = result.final_output_path
         final_output_root = pending.output_root
+        ctx.output_path = final_output_path
         if ctx.project_render_identity:
             try:
                 stored = record_render_checkpoint(
@@ -4496,6 +4502,198 @@ class StageBatchedProcessor(BatchProcessor):
                 self._pending_render_jobs.remove(pending)
                 self._resolve_render_future(pending)
         self._raise_if_cancelled()
+
+    def _fallback_page_image(self, ctx: StagePageContext):
+        """폴백 저장에 쓸 최선의 이미지. 없으면 ``None``.
+
+        인페인팅까지 갔다면 글자가 지워진 결과가 원본보다 낫다. 그마저 없으면
+        원본이다. 버퍼는 이미 놓아준 뒤일 수 있으므로 그때는 디스크에서 다시
+        읽는다. 폴백 대상은 소수라 다시 읽는 비용이 메모리를 붙들고 있는 것보다
+        훨씬 싸다.
+        """
+
+        for candidate, kind in (
+            (ctx.inpaint_input_img, "inpainted"),
+            (ctx.image, "source"),
+        ):
+            if candidate is not None:
+                return candidate, kind
+        try:
+            reloaded = self.main_page.image_ctrl.load_image(ctx.image_path)
+            if reloaded is None:
+                reloaded = imk.read_image(ctx.image_path)
+        except Exception:
+            logger.warning(
+                "Could not reload %s for the fallback export.",
+                ctx.image_name,
+                exc_info=True,
+            )
+            return None, ""
+        if reloaded is None:
+            return None, ""
+        return reloaded, "source-reloaded"
+
+    def _write_fallback_export(
+        self,
+        ctx: StagePageContext,
+        *,
+        index: int,
+        total_images: int,
+        export_settings: dict[str, Any],
+    ) -> bool:
+        """렌더까지 가지 못한 페이지도 파일 하나를 반드시 남긴다.
+
+        한 스테이지의 실패로 페이지가 출력에서 통째로 사라지던 동작을 막는다.
+        실측으로 366장 입력에서 347장만 나온 적이 있고, 사라진 19장에는 아무런
+        흔적도 남지 않았다. 품질이 떨어지는 것과 결과가 없는 것은 전혀 다르다.
+
+        정상 렌더와 똑같은 내보내기 경로를 쓴다. 아카이브 모드에서 페이지 순서와
+        파일명 규칙이 어긋나면 안 되기 때문이다.
+        """
+
+        image, kind = self._fallback_page_image(ctx)
+        if image is None:
+            logger.error(
+                "No image available for the fallback export of %s.",
+                ctx.image_name,
+            )
+            return False
+        try:
+            output_path, output_root = self._write_final_render_export(
+                ctx.directory,
+                ctx.export_token,
+                ctx.image_path,
+                image,
+                # 폴백은 번역 텍스트를 얹지 않는다. 얹을 만한 상태였다면 정상
+                # 렌더가 이미 성공했을 것이다.
+                [],
+                {},
+                export_settings,
+                page_index=index,
+                total_pages=total_images,
+            )
+        except Exception:
+            logger.error(
+                "Fallback export failed for %s.",
+                ctx.image_name,
+                exc_info=True,
+            )
+            return False
+        ctx.output_path = output_path
+        ctx.output_fallback_kind = kind
+        self.main_page.image_ctrl.update_processing_summary(
+            ctx.image_path,
+            {
+                "translated_image_path": output_path,
+                "translated_page_image_path": output_path,
+                "export_root": output_root,
+                "output_fallback_kind": kind,
+                "output_fallback_reason": ctx.failed_reason or ctx.failed_stage,
+            },
+        )
+        self._emit_benchmark_event(
+            "page_output_fallback",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            fallback_kind=kind,
+            failed_stage=ctx.failed_stage,
+            reason=ctx.failed_reason,
+            translated_image_path=output_path,
+        )
+        logger.warning(
+            "Exported %s from its %s image because the %s stage failed: %s",
+            ctx.image_name,
+            kind,
+            ctx.failed_stage or "unknown",
+            ctx.failed_reason or "(no reason recorded)",
+        )
+        return True
+
+    def _reconcile_page_outputs(
+        self,
+        pages: list[StagePageContext],
+        *,
+        export_settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        """모든 페이지가 파일을 남겼는지 확인하고, 없으면 폴백으로 채운다.
+
+        배치가 끝나는 시점에 입력 수와 출력 수가 같아야 한다. 어긋나면 조용히
+        넘어가지 않고 배치 리포트에 올린다.
+        """
+
+        total_images = len(pages)
+        fallbacks: list[dict[str, str]] = []
+        unrecoverable: list[str] = []
+        for index, ctx in enumerate(pages):
+            if ctx.output_path:
+                continue
+            if self._write_fallback_export(
+                ctx,
+                index=index,
+                total_images=total_images,
+                export_settings=export_settings,
+            ):
+                fallbacks.append(
+                    {
+                        "image_name": ctx.image_name,
+                        "kind": ctx.output_fallback_kind,
+                        "failed_stage": ctx.failed_stage,
+                        "reason": ctx.failed_reason,
+                    }
+                )
+            else:
+                unrecoverable.append(ctx.image_name)
+            self._release_page_buffers(ctx)
+
+        produced = sum(1 for ctx in pages if ctx.output_path)
+        summary = {
+            "input_count": total_images,
+            "output_count": produced,
+            "fallback_count": len(fallbacks),
+            "fallbacks": fallbacks,
+            "missing": unrecoverable,
+        }
+        self._emit_benchmark_event(
+            "batch_output_reconciled",
+            total_images=total_images,
+            output_count=produced,
+            fallback_count=len(fallbacks),
+            missing_count=len(unrecoverable),
+        )
+        if unrecoverable:
+            logger.error(
+                "Batch produced %d outputs for %d input pages. Missing: %s",
+                produced,
+                total_images,
+                ", ".join(unrecoverable),
+            )
+            report = getattr(self.main_page, "batch_report_ctrl", None)
+            register = getattr(report, "register_preflight_error", None)
+            if callable(register):
+                try:
+                    register(
+                        self._stage_tr("출력 페이지 수가 입력과 다릅니다."),
+                        self._stage_tr(
+                            "입력 {input}장 중 {output}장만 저장되었습니다. "
+                            "누락: {missing}"
+                        )
+                        .replace("{input}", str(total_images))
+                        .replace("{output}", str(produced))
+                        .replace("{missing}", ", ".join(unrecoverable)),
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not register the output reconciliation error.",
+                        exc_info=True,
+                    )
+        elif fallbacks:
+            logger.warning(
+                "Batch produced all %d outputs, but %d came from a fallback image.",
+                total_images,
+                len(fallbacks),
+            )
+        return summary
 
     def _render_all(self, pages: list[StagePageContext]) -> None:
         # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
@@ -4769,7 +4967,20 @@ class StageBatchedProcessor(BatchProcessor):
                 source_megapixels=source_pixels / 1_000_000.0,
             )
             self._sample_performance_resources("render_stage_end")
-            self._emit_benchmark_event("batch_run_done", total_images=total_images)
+            # 한 스테이지의 실패로 페이지가 출력에서 사라지지 않게, 아직 파일을
+            # 남기지 못한 페이지를 여기서 마지막으로 채운다.
+            output_summary = self._reconcile_page_outputs(
+                pages,
+                export_settings=self._effective_export_settings(
+                    self.main_page.settings_page
+                ),
+            )
+            self._emit_benchmark_event(
+                "batch_run_done",
+                total_images=total_images,
+                output_count=int(output_summary.get("output_count", 0)),
+                fallback_count=int(output_summary.get("fallback_count", 0)),
+            )
             batch_completed = True
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
