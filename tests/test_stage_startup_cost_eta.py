@@ -50,11 +50,13 @@ class StageStartupCaptureTests(unittest.TestCase):
 
         self.assertEqual(estimator.stage_startup_estimate("ocr-all"), 0.0)
 
-    def test_the_first_stage_has_no_preceding_gap(self) -> None:
+    def test_the_first_stage_counts_the_gap_from_the_run_start(self) -> None:
+        # 실행이 시작되고 첫 단계가 첫 페이지를 보고하기까지의 공백도 모델 적재
+        # 시간이다. 첫 단계라고 빼놓을 이유가 없다.
         estimator = _estimator()
         estimator.observe("detect-all", 0, 5.0)
 
-        self.assertEqual(estimator.stage_startup_estimate("detect-all"), 0.0)
+        self.assertAlmostEqual(estimator.stage_startup_estimate("detect-all"), 5.0)
 
 
 class RemainingSecondsIncludesStartupTests(unittest.TestCase):
@@ -127,13 +129,16 @@ class StartupPersistenceTests(unittest.TestCase):
         self.assertEqual(estimator.stage_startup_estimate("ocr-all"), 0.0)
         self.assertEqual(estimator.stage_startup_estimate("inpaint-all"), 0.0)
 
-    def test_an_out_of_band_runtime_swap_lands_on_the_current_stage(self) -> None:
+    def test_an_out_of_band_runtime_swap_adds_to_the_current_stage(self) -> None:
         estimator = _estimator()
         estimator.observe("detect-all", 0, 1.0)
+        before = estimator.stage_startup_estimate("detect-all")
 
         estimator.observe_runtime_swap(9.0)
 
-        self.assertAlmostEqual(estimator.stage_startup_estimate("detect-all"), 9.0)
+        self.assertAlmostEqual(
+            estimator.stage_startup_estimate("detect-all"), before + 9.0
+        )
 
 
 if __name__ == "__main__":

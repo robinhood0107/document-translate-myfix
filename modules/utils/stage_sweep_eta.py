@@ -18,6 +18,7 @@ stage-batched 는 반대로 **하나의 단계가 전체 페이지를 훑고, �
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 # 각 단계가 페이지당 대략 얼마나 무거운지에 대한 사전 비중. 상대값만 의미가 있다.
@@ -43,6 +44,18 @@ DEFAULT_STAGE_WEIGHTS: dict[str, float] = {
     "render-all": 1.5,
     "save-and-finish": 0.2,
 }
+
+# 다른 단계 **안에서** 도는 단계. 렌더는 인페인팅 sweep 도중 페이지마다 회수되므로
+# 별도의 sweep 시간을 갖지 않는다. 실측으로 렌더 창은 0.0분, 최종 drain 은 0.015초다.
+#
+# 이걸 별도 단계로 세면 두 가지가 동시에 틀어진다. 렌더는 인페인팅에 맞춰 진행하므로
+# 페이지당 속도가 인페인팅과 같게 측정되고(실측 1.68초/page, 실제 작업은 0.38초),
+# 그 값을 인페인팅과 **합산**하면 남은 시간이 두 배가 된다. 실측으로 90/100 지점에서
+# 36초가 남았는데 72초로 나왔다.
+#
+# 융합된 단계의 비용은 이미 감싸는 단계의 페이지당 시간 안에 들어 있다. 그래서 남은
+# 시간에는 더하지 않는다. 진행률과 학습은 그대로 한다.
+FUSED_STAGES: frozenset[str] = frozenset({"render-all"})
 
 # 단계가 실제로 도는 순서.
 DEFAULT_STAGE_ORDER: tuple[str, ...] = (
@@ -74,6 +87,9 @@ class _StageState:
     finished_at: float | None = None
     # 페이지 수와 무관한 고정 시작 비용. 컨테이너 기동과 모델 적재가 여기 들어간다.
     startup_sec: float | None = None
+    # 이 단계 자신의 직전 보고 시각. 융합 파이프라인에서는 여러 단계가 교대로
+    # 보고하므로, 전역 시계로 속도를 재면 남의 간격을 자기 것으로 학습한다.
+    last_report_at: float | None = None
 
     def observe_page(self, duration_sec: float) -> None:
         if duration_sec <= 0.0:
@@ -96,10 +112,13 @@ class StageSweepEtaEstimator:
     stage_weights: dict[str, float] = field(
         default_factory=lambda: dict(DEFAULT_STAGE_WEIGHTS)
     )
+    # 다른 단계 안에서 도는 단계. 남은 시간에 따로 더하지 않는다.
+    fused_stages: frozenset[str] = FUSED_STAGES
     run_started_at: float | None = None
     _stages: dict[str, _StageState] = field(default_factory=dict, init=False)
     _current_stage: str = field(default="", init=False)
-    _last_page_at: float | None = field(default=None, init=False)
+    # 마지막 보고 시각(단계 무관). 단계의 첫 진입 공백을 재는 데만 쓴다.
+    _last_report_at: float | None = field(default=None, init=False)
     _runtime_swap_sec: float = field(default=DEFAULT_RUNTIME_SWAP_SEC, init=False)
     _seeded_startup: dict[str, float] = field(default_factory=dict, init=False)
     _last_eta: float | None = field(default=None, init=False)
@@ -146,7 +165,7 @@ class StageSweepEtaEstimator:
 
     def start_run(self, now: float) -> None:
         self.run_started_at = now
-        self._last_page_at = now
+        self._last_report_at = now
 
     def observe(self, stage_name: str, page_index: int, now: float) -> None:
         """단계 ``stage_name`` 의 ``page_index`` 번째 페이지 진행을 기록한다.
@@ -172,32 +191,31 @@ class StageSweepEtaEstimator:
         if self.run_started_at is None:
             self.start_run(now)
 
-        if stage_name != self._current_stage:
-            if self._current_stage:
-                previous = self._stages.get(self._current_stage)
-                if previous is not None and previous.finished_at is None:
-                    previous.finished_at = now
-                    # 이전 단계는 전체 페이지를 마친 것으로 본다.
-                    previous.pages_done = max(previous.pages_done, self.page_total)
-                # 이전 단계의 마지막 페이지와 이 단계의 첫 보고 사이의 공백은
-                # 컨테이너 기동과 모델 적재 시간이다. 페이지와 무관한 고정 비용인데
-                # 예전에는 그냥 버려서 남은 시간에서 통째로 빠졌다. 그래서 무거운
-                # 단계로 넘어가는 순간 남은 시간이 위로 튀었다.
-                if self._last_page_at is not None:
-                    self.observe_stage_startup(stage_name, now - self._last_page_at)
-            self._current_stage = stage_name
+        if stage.started_at is None:
+            # 이 단계의 **첫** 보고다. 직전 보고와의 공백은 컨테이너 기동과 모델
+            # 적재처럼 페이지와 무관한 고정 비용이다. 재진입할 때마다 다시 재면
+            # 융합 파이프라인에서 그 값이 끝없이 부풀어 오른다.
             stage.started_at = now
-            self._last_page_at = now
+            if self._last_report_at is not None:
+                self.observe_stage_startup(stage_name, now - self._last_report_at)
+        self._current_stage = stage_name
 
         done = min(max(int(page_index) + 1, 0), self.page_total or (page_index + 1))
         if done > stage.pages_done:
-            if self._last_page_at is not None:
-                spent = now - self._last_page_at
+            # 페이지 속도는 **그 단계 자신의** 직전 보고를 기준으로 잰다. 전역
+            # 시계를 쓰면 교대로 들어오는 다른 단계의 간격이 섞여, 인페인팅 뒤에
+            # 숨어 도는 렌더가 인페인팅의 속도를 자기 것으로 학습한다. 실측으로
+            # 렌더가 1.68초/page 로 학습됐는데 실제 sweep 은 0.015초다.
+            if stage.last_report_at is not None:
+                spent = now - stage.last_report_at
                 pages = done - stage.pages_done
                 if pages > 0:
                     stage.observe_page(spent / pages)
             stage.pages_done = done
-            self._last_page_at = now
+            if stage.pages_done >= self.page_total and stage.finished_at is None:
+                stage.finished_at = now
+        stage.last_report_at = now
+        self._last_report_at = now
 
     def observe_stage_startup(self, stage_name: str, elapsed_sec: float) -> None:
         """단계 하나의 고정 시작 비용(컨테이너 기동·모델 적재)을 기록한다."""
@@ -287,33 +305,82 @@ class StageSweepEtaEstimator:
         if self._reference_per_page() is None:
             return None
 
+        # 단계가 순서대로만 돈다고 가정하지 않는다. 렌더는 인페인팅 sweep 안에서
+        # 페이지마다 회수되므로 두 단계의 보고가 교대로 들어온다. 순서를 가정하면
+        # 아직 시작 안 한 단계를 매번 **전체 페이지**로 세게 되고, 그 값이 줄지
+        # 않아 남은 시간이 한 자리에 못 박힌다. 실측으로 인페인팅 47장부터
+        # 327장까지 280장이 처리되는 동안 ETA 가 11~12분에 고정돼 있었다.
+        #
+        # 각 단계의 남은 페이지만 세면 순서와 무관하게 맞고, 겹쳐 도는 단계는
+        # 자기 진행만큼 알아서 줄어든다.
         remaining = 0.0
-        seen_current = False
         for name in self.stage_order:
+            if name in self.fused_stages:
+                # 감싸는 단계의 페이지당 시간에 이미 포함돼 있다. 더하면 두 번 센다.
+                continue
             stage = self._stages[name]
             per_page = self.stage_per_page_estimate(name)
             if per_page is None:
                 continue
-            if name == self._current_stage:
-                seen_current = True
-                remaining += per_page * max(self.page_total - stage.pages_done, 0)
+            pages_left = max(self.page_total - stage.pages_done, 0)
+            if pages_left <= 0:
                 continue
-            if not seen_current and stage.finished_at is not None:
-                continue
-            if not seen_current and stage.pages_done >= self.page_total:
-                continue
-            if seen_current:
-                # 아직 시작하지 않은 단계는 페이지 비용에 더해 고정 시작 비용도
-                # 남아 있다. 이걸 빼놓으면 컨테이너 기동과 모델 적재에 드는
-                # 시간만큼 남은 시간을 계속 과소평가한다.
+            remaining += per_page * pages_left
+            if stage.started_at is None:
+                # 아직 한 번도 돌지 않은 단계는 고정 시작 비용도 남아 있다.
                 remaining += self.stage_startup_estimate(name)
-                remaining += per_page * self.page_total
-            else:
-                # 현재 단계보다 앞인데 끝나지 않은 단계. 남은 페이지만 센다.
-                remaining += per_page * max(self.page_total - stage.pages_done, 0)
 
         self._last_eta = max(remaining, 0.0)
         return self._last_eta
+
+    def remaining_by_stage(self) -> list[dict[str, Any]]:
+        """파이프라인 **전 단계**의 남은 시간과 상태. 실행 순서대로 돌려준다.
+
+        사용자가 남은 시간 위에 마우스를 올렸을 때 파이프라인 전체가 한눈에 보여야
+        한다. 남은 단계만 보여주면 이미 끝난 단계가 목록에서 사라져, 지금 어디쯤
+        와 있는지가 오히려 흐려진다.
+
+        ``counted`` 가 참인 행만 ``remaining_seconds`` 에 더해진다. 융합된 단계는
+        감싸는 단계 안에 이미 포함돼 있어 거짓이며, 그 사실을 ``state`` 로 밝힌다.
+        """
+
+        rows: list[dict[str, Any]] = []
+        if self.page_total <= 0:
+            return rows
+        for name in self.stage_order:
+            stage = self._stages.get(name)
+            if stage is None:
+                continue
+            pages_left = max(self.page_total - stage.pages_done, 0)
+            fused = name in self.fused_stages
+            per_page = self.stage_per_page_estimate(name)
+
+            if pages_left <= 0:
+                state = "done"
+                seconds = 0.0
+            elif fused:
+                state = "fused"
+                seconds = 0.0
+            elif per_page is None:
+                state = "unknown"
+                seconds = 0.0
+            else:
+                state = "running" if stage.started_at is not None else "pending"
+                seconds = per_page * pages_left
+                if stage.started_at is None:
+                    seconds += self.stage_startup_estimate(name)
+
+            rows.append(
+                {
+                    "stage": name,
+                    "seconds": seconds,
+                    "state": state,
+                    "counted": state in {"running", "pending"},
+                    "pages_done": int(min(stage.pages_done, self.page_total)),
+                    "page_total": int(self.page_total),
+                }
+            )
+        return rows
 
     def completed_units(self) -> float:
         units = 0.0

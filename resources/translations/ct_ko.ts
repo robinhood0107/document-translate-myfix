@@ -42,6 +42,30 @@
         <source>Live Stable</source>
         <translation>실시간 안정판</translation>
     </message>
+    <message>
+        <source>완료</source>
+        <translation>완료</translation>
+    </message>
+    <message>
+        <source>진행 중</source>
+        <translation>진행 중</translation>
+    </message>
+    <message>
+        <source>대기</source>
+        <translation>대기</translation>
+    </message>
+    <message>
+        <source>인페인팅에 포함</source>
+        <translation>인페인팅에 포함</translation>
+    </message>
+    <message>
+        <source>추정 불가</source>
+        <translation>추정 불가</translation>
+    </message>
+    <message>
+        <source>단계별 남은 시간</source>
+        <translation>단계별 남은 시간</translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgressDialog</name>
@@ -2119,10 +2143,6 @@ detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 na
         <translation>파일</translation>
     </message>
     <message>
-        <source>ETA</source>
-        <translation>예상 남은 시간</translation>
-    </message>
-    <message>
         <source>Message</source>
         <translation>메시지</translation>
     </message>
@@ -2185,6 +2205,22 @@ detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 na
     <message>
         <source>Embed</source>
         <translation>내부</translation>
+    </message>
+    <message>
+        <source>예상 남은 시간</source>
+        <translation>예상 남은 시간</translation>
+    </message>
+    <message>
+        <source>전체 예상 시간</source>
+        <translation>전체 예상 시간</translation>
+    </message>
+    <message>
+        <source>경과 시간</source>
+        <translation type="unfinished">경과 시간</translation>
+    </message>
+    <message>
+        <source>예상 완료 시각</source>
+        <translation type="unfinished">예상 완료 시각</translation>
     </message>
     <message>
         <source>Opening series board...</source>

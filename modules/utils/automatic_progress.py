@@ -170,6 +170,68 @@ def format_finish_time(eta_sec: float | None) -> str:
     return finish.strftime("%H:%M")
 
 
+STAGE_STATE_LABELS = {
+    "done": QCoreApplication.translate("AutomaticProgress", "완료"),
+    "running": QCoreApplication.translate("AutomaticProgress", "진행 중"),
+    "pending": QCoreApplication.translate("AutomaticProgress", "대기"),
+    "fused": QCoreApplication.translate("AutomaticProgress", "인페인팅에 포함"),
+    "unknown": QCoreApplication.translate("AutomaticProgress", "추정 불가"),
+}
+
+
+def format_stage_breakdown(rows: Any) -> str:
+    """파이프라인 전 단계를 실행 순서대로 적는다. 마우스를 올렸을 때만 보인다.
+
+    남은 시간이 한 숫자로만 보이면 그게 번역에서 오는지 인페인팅에서 오는지 알 수
+    없다. 끝난 단계까지 함께 적는 이유는, 남은 단계만 보이면 지금 파이프라인의
+    어디쯤 와 있는지가 오히려 흐려지기 때문이다.
+
+    분해가 없으면 빈 문자열이고, 그러면 UI 는 툴팁을 붙이지 않는다.
+    """
+
+    if not isinstance(rows, list) or not rows:
+        return ""
+    entries: list[tuple[str, str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or row.get("stage") or "").strip()
+        if not label:
+            continue
+        state = str(row.get("state") or "")
+        seconds = _coerce_finite_float(row.get("seconds")) or 0.0
+        progress = ""
+        total = _coerce_finite_float(row.get("page_total"))
+        done = _coerce_finite_float(row.get("pages_done"))
+        if total and total > 0 and done is not None:
+            progress = f"{int(done)}/{int(total)}"
+        if state == "done":
+            value = STAGE_STATE_LABELS["done"]
+        elif state in {"fused", "unknown"}:
+            value = STAGE_STATE_LABELS[state]
+        else:
+            value = format_duration(seconds)
+        entries.append((label, value, progress))
+    if not entries:
+        return ""
+
+    label_width = max(len(label) for label, _v, _p in entries)
+    value_width = max(len(value) for _l, value, _p in entries)
+    lines = [QCoreApplication.translate("AutomaticProgress", "단계별 남은 시간")]
+    for label, value, progress in entries:
+        line = f"  {label.ljust(label_width)}  {value.rjust(value_width)}"
+        if progress:
+            line = f"{line}  {progress}"
+        lines.append(line)
+    # 한글과 숫자가 섞이면 비례 글꼴에서 열이 어긋난다. 툴팁은 리치 텍스트를
+    # 받으므로 등폭으로 감싸 정렬이 유지되게 한다.
+    body = "\n".join(lines)
+    escaped = (
+        body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    return f"<pre style='margin:0'>{escaped}</pre>"
+
+
 class AutomaticProgressTracker:
     STARTUP_HISTORY_GROUP = "automatic_progress/startup_history"
     BATCH_HISTORY_GROUP = "automatic_progress/batch_history"
@@ -250,6 +312,12 @@ class AutomaticProgressTracker:
         event["eta_finish_at_local"] = format_finish_time(eta_sec)
         event["elapsed_text"] = format_duration(elapsed_sec)
         event["eta_text"] = format_duration(eta_sec)
+        # 전체 예상 시간 = 이미 쓴 시간 + 남은 시간. 남은 시간만으로는 이 실행이
+        # 통째로 얼마짜리인지 알 수 없고, 지난 실행과 비교할 수도 없다.
+        total_sec = None if eta_sec is None else max(elapsed_sec, 0.0) + max(eta_sec, 0.0)
+        event["total_estimate_sec"] = total_sec
+        event["total_estimate_text"] = format_duration(total_sec)
+        event["eta_breakdown_text"] = format_stage_breakdown(event.get("eta_by_stage"))
         event["overall_progress_percent"] = self._estimate_progress(event)
         event["page_total"] = page_total
         event["image_name"] = image_name
@@ -398,8 +466,12 @@ class AutomaticProgressTracker:
         current_units = min(max(page_index * 8 + stage_order.get(stage_name, 0), 0), units)
         return round((current_units / units) * 100.0, 1) if units else 0.0
 
-    STAGE_RATE_GROUP = "automatic_progress/stage_rates"
-    STAGE_STARTUP_GROUP = "automatic_progress/stage_startup"
+    # v2: 융합 파이프라인에서 단계 보고가 교대로 들어오는데 추정기가 순차라고
+    # 가정하는 바람에, 렌더가 인페인팅의 속도를 자기 것으로 학습했다(1.68초/page,
+    # 실제 sweep 은 0.015초). 그 값으로 시드하면 남은 시간이 계속 부풀므로
+    # 그룹 이름을 올려 오염된 이력을 버린다.
+    STAGE_RATE_GROUP = "automatic_progress/stage_rates_v2"
+    STAGE_STARTUP_GROUP = "automatic_progress/stage_startup_v2"
 
     def read_stage_startups(self) -> dict[str, float]:
         """지난 실행들에서 측정한 단계별 고정 시작 비용의 중앙값(초).
