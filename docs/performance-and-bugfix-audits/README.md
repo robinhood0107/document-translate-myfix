@@ -23,6 +23,9 @@
 - [Optimal++ v1.3.0 최종 감사](optimal-plus-v1.3.0/README-ko.md)
   - 관리형 llama.cpp 전용 전환, 세 OCR 전략, Gemma 최종값, 캐시·인페인트
     품질 게이트, CUDA 검증과 릴리스 종료 상태를 정리한다.
+- [v1.5.0 이후 안정화 감사](post-v1.5.0-hardening/README-ko.md)
+  - 관리형 볼륨 다이제스트 드리프트 복구, 배치 메모리·페이지 손실 차단, 계측
+    정정, 예상 시간 모델 교정을 PR·커밋 단위로 기록한다.
 - [극한 파이프라인 성능 최종화](extreme-pipeline-performance-finalization/README-ko.md)
   - 새 폴더·시리즈 full-auto critical path, runtime scheduler와 calibrated ETA
     후속 작업을 추적한다.

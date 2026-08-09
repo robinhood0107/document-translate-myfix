@@ -128,17 +128,25 @@ class TruncationRetryTests(unittest.TestCase):
 
 
 class BlockScopeTests(unittest.TestCase):
-    def test_a_truncated_block_is_emptied_instead_of_failing_the_page(self) -> None:
-        # 말풍선 하나의 잘림이 페이지 전체를 출력에서 지우던 동작을 막는다.
+    def test_both_job_paths_contain_a_truncated_block(self) -> None:
+        # 작업 처리기가 둘이다. 일반 sweep 은 `_process_job`, 영구 캐시 미스는
+        # `_process_prepared_job` 을 쓴다. 한쪽만 막으면 다른 쪽으로 새어나가
+        # 페이지 전체가 실패한다. 실측: 366장 배치에서 캐시 경로로만 4장이
+        # 원본 그대로 나갔다.
         import inspect
 
-        source = inspect.getsource(PaddleOCRVLEngine._process_job)
-        self.assertIn("except PaddleDirectOcrTruncatedError:", source)
-        handler = source.index("except PaddleDirectOcrTruncatedError:")
-        marked = source.index("TRUNCATED_OCR_REASON", handler)
-        returned = source.index("return", marked)
-        self.assertLess(handler, marked)
-        self.assertLess(marked, returned)
+        for method in (
+            PaddleOCRVLEngine._process_job,
+            PaddleOCRVLEngine._process_prepared_job,
+        ):
+            with self.subTest(method=method.__name__):
+                source = inspect.getsource(method)
+                self.assertIn("except PaddleDirectOcrTruncatedError:", source)
+                handler = source.index("except PaddleDirectOcrTruncatedError:")
+                marked = source.index("TRUNCATED_OCR_REASON", handler)
+                returned = source.index("return", marked)
+                self.assertLess(handler, marked)
+                self.assertLess(marked, returned)
 
 
 if __name__ == "__main__":
