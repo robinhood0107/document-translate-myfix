@@ -72,6 +72,8 @@ class _StageState:
     per_page_sec: float | None = None
     started_at: float | None = None
     finished_at: float | None = None
+    # 페이지 수와 무관한 고정 시작 비용. 컨테이너 기동과 모델 적재가 여기 들어간다.
+    startup_sec: float | None = None
 
     def observe_page(self, duration_sec: float) -> None:
         if duration_sec <= 0.0:
@@ -99,6 +101,7 @@ class StageSweepEtaEstimator:
     _current_stage: str = field(default="", init=False)
     _last_page_at: float | None = field(default=None, init=False)
     _runtime_swap_sec: float = field(default=DEFAULT_RUNTIME_SWAP_SEC, init=False)
+    _seeded_startup: dict[str, float] = field(default_factory=dict, init=False)
     _last_eta: float | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
@@ -176,6 +179,12 @@ class StageSweepEtaEstimator:
                     previous.finished_at = now
                     # 이전 단계는 전체 페이지를 마친 것으로 본다.
                     previous.pages_done = max(previous.pages_done, self.page_total)
+                # 이전 단계의 마지막 페이지와 이 단계의 첫 보고 사이의 공백은
+                # 컨테이너 기동과 모델 적재 시간이다. 페이지와 무관한 고정 비용인데
+                # 예전에는 그냥 버려서 남은 시간에서 통째로 빠졌다. 그래서 무거운
+                # 단계로 넘어가는 순간 남은 시간이 위로 튀었다.
+                if self._last_page_at is not None:
+                    self.observe_stage_startup(stage_name, now - self._last_page_at)
             self._current_stage = stage_name
             stage.started_at = now
             self._last_page_at = now
@@ -190,11 +199,60 @@ class StageSweepEtaEstimator:
             stage.pages_done = done
             self._last_page_at = now
 
-    def observe_runtime_swap(self, elapsed_sec: float) -> None:
-        """모델 적재·해제처럼 페이지와 무관한 고정 비용을 더한다."""
+    def observe_stage_startup(self, stage_name: str, elapsed_sec: float) -> None:
+        """단계 하나의 고정 시작 비용(컨테이너 기동·모델 적재)을 기록한다."""
 
-        if elapsed_sec > 0.0:
-            self._runtime_swap_sec += float(elapsed_sec)
+        if elapsed_sec <= 0.0:
+            return
+        stage = self._stages.get(stage_name)
+        if stage is None:
+            return
+        stage.startup_sec = float(elapsed_sec)
+        self._runtime_swap_sec += float(elapsed_sec)
+
+    def observe_runtime_swap(self, elapsed_sec: float) -> None:
+        """단계 경계 밖에서 일어난 런타임 교체 비용을 현재 단계에 더한다."""
+
+        if elapsed_sec <= 0.0:
+            return
+        self._runtime_swap_sec += float(elapsed_sec)
+        stage = self._stages.get(self._current_stage)
+        if stage is not None:
+            stage.startup_sec = float(stage.startup_sec or 0.0) + float(elapsed_sec)
+
+    def measured_startup_by_stage(self) -> dict[str, float]:
+        """이번 실행에서 측정한 단계별 시작 비용. 다음 실행의 씨앗이 된다."""
+
+        return {
+            name: stage.startup_sec
+            for name, stage in self._stages.items()
+            if stage.startup_sec is not None and stage.startup_sec > 0.0
+        }
+
+    def seed_startup_from_history(self, startup_by_stage: dict[str, float]) -> None:
+        """지난 실행에서 측정한 시작 비용을 아직 시작하지 않은 단계에 미리 채운다."""
+
+        for name, value in (startup_by_stage or {}).items():
+            if not isinstance(value, (int, float)) or float(value) <= 0.0:
+                continue
+            stage = self._stages.get(str(name))
+            if stage is None:
+                stage = _StageState(name=str(name))
+                self._stages[str(name)] = stage
+                self.stage_order = self.stage_order + (str(name),)
+                self.stage_weights.setdefault(str(name), 1.0)
+            self._seeded_startup[str(name)] = float(value)
+
+    def stage_startup_estimate(self, stage_name: str) -> float:
+        """단계 시작 비용 추정치(초). 실측이 있으면 실측, 없으면 이력, 없으면 0."""
+
+        stage = self._stages.get(stage_name)
+        if stage is not None and stage.startup_sec is not None:
+            return float(stage.startup_sec)
+        seeded = self._seeded_startup.get(stage_name)
+        if seeded is not None:
+            return float(seeded)
+        return 0.0
 
     # -- 추정 -------------------------------------------------------------
 
@@ -245,6 +303,10 @@ class StageSweepEtaEstimator:
             if not seen_current and stage.pages_done >= self.page_total:
                 continue
             if seen_current:
+                # 아직 시작하지 않은 단계는 페이지 비용에 더해 고정 시작 비용도
+                # 남아 있다. 이걸 빼놓으면 컨테이너 기동과 모델 적재에 드는
+                # 시간만큼 남은 시간을 계속 과소평가한다.
+                remaining += self.stage_startup_estimate(name)
                 remaining += per_page * self.page_total
             else:
                 # 현재 단계보다 앞인데 끝나지 않은 단계. 남은 페이지만 센다.

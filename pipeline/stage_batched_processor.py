@@ -358,6 +358,18 @@ class StageBatchedProcessor(BatchProcessor):
                     estimator.seed_from_history(reader())
                 except Exception:
                     logger.debug("Could not seed the stage ETA model.", exc_info=True)
+            # 컨테이너 기동·모델 적재처럼 페이지 수와 무관한 고정 비용도 이력에서
+            # 채운다. 이게 없으면 아직 시작하지 않은 단계의 시작 비용만큼 남은
+            # 시간을 계속 과소평가하고, 그 단계로 넘어가는 순간 위로 튄다.
+            startup_reader = getattr(tracker, "read_stage_startups", None)
+            if callable(startup_reader):
+                try:
+                    estimator.seed_startup_from_history(startup_reader())
+                except Exception:
+                    logger.debug(
+                        "Could not seed the stage startup costs.",
+                        exc_info=True,
+                    )
             self._stage_eta = estimator
         return estimator
 
@@ -369,12 +381,20 @@ class StageBatchedProcessor(BatchProcessor):
             return
         tracker = getattr(self.main_page, "_automatic_progress_tracker", None)
         writer = getattr(tracker, "record_stage_rates", None)
-        if not callable(writer):
-            return
-        try:
-            writer(estimator.measured_per_page_by_stage())
-        except Exception:
-            logger.debug("Could not persist the stage ETA model.", exc_info=True)
+        if callable(writer):
+            try:
+                writer(estimator.measured_per_page_by_stage())
+            except Exception:
+                logger.debug("Could not persist the stage ETA model.", exc_info=True)
+        startup_writer = getattr(tracker, "record_stage_startups", None)
+        if callable(startup_writer):
+            try:
+                startup_writer(estimator.measured_startup_by_stage())
+            except Exception:
+                logger.debug(
+                    "Could not persist the stage startup costs.",
+                    exc_info=True,
+                )
 
     def observe_progress(
         self,
