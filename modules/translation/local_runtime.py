@@ -44,11 +44,22 @@ from modules.utils.local_llama_router import (
     RouterPair,
     RouterRuntimeSpec,
 )
+from modules.utils.local_llama_router.contracts import (
+    ROUTER_GEMMA_HOST_PORT,
+    router_pair_for_engine_key,
+)
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
     inspect_llama_cpp_runtime,
     resolve_docker_compose_command,
     run_docker_command,
+)
+from modules.utils.managed_runtime_repair import (
+    ManagedRuntimeRepairError,
+    ManagedRuntimeRepairPlan,
+    describe_image_identity_drift,
+    is_image_identity_only_drift,
+    run_managed_runtime_preparation,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +72,19 @@ DEFAULT_GEMMA_STARTUP_TIMEOUT_SEC = 420
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
 
+# 프리페치 전용 컨테이너. 이름을 고정해 임의 이름 컨테이너가 생기지 않게 한다.
+GEMMA_PAGE_CACHE_PREFETCH_CONTAINER = "comic-translate-gemma-cache-warm"
+# 크기를 알아내는 컨테이너. 프리페치와 이름을 나눠 서로 정리를 방해하지 않게 한다.
+GEMMA_MODEL_SIZE_PROBE_CONTAINER = "comic-translate-gemma-cache-warm-size"
+
+class _GemmaVolumeNotProvisioned(RuntimeError):
+    """준비 볼륨이 아예 없거나 계약된 파일이 빠져 있다.
+
+    준비 스크립트를 돌리면 해결되는 상태다. 볼륨 라벨 불일치처럼 사람의 판단을
+    요구하는 상태와 구별하려고 따로 둔다.
+    """
+
+
 _RUNTIME_CONFIG = {
     "compose_file": ROOT_DIR / "docker-compose.yaml",
     "managed_url": DEFAULT_GEMMA_LOCAL_ENDPOINT,
@@ -69,6 +93,86 @@ _RUNTIME_CONFIG = {
     "settings_page_name": DEFAULT_GEMMA_SETTINGS_PAGE,
     "container_name": "gemma-local-server",
 }
+
+
+def _available_page_cache_bytes(
+    *,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> int:
+    """모델을 담을 수 있는 여유 메모리(바이트). 알 수 없으면 0.
+
+    호스트가 아니라 **Docker 가 도는 리눅스 쪽** 여유를 본다. Windows 에서 모델
+    페이지 캐시는 호스트 RAM 이 아니라 WSL VM 안에 잡히므로, 호스트 여유를 보면
+    엉뚱한 판단을 한다.
+    """
+
+    completed = run_docker_command(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            GEMMA_MODEL_SIZE_PROBE_CONTAINER + "-mem",
+            "--pull",
+            "never",
+            "--entrypoint",
+            "/bin/sh",
+            DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
+            "-ec",
+            "awk '/^MemAvailable:/ {print $2}' /proc/meminfo",
+        ],
+        check=False,
+        cancel_checker=cancel_checker,
+    )
+    if completed.returncode != 0:
+        return 0
+    try:
+        # /proc/meminfo 는 kB 단위다.
+        return int(str(completed.stdout or "").strip()) * 1024
+    except (TypeError, ValueError):
+        return 0
+
+
+def _volume_model_size_bytes(
+    *,
+    volume_name: str,
+    model_name: str,
+    image_ref: str,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> int:
+    """볼륨 안 모델 파일 크기(바이트). 알 수 없으면 0."""
+
+    from modules.utils.llama_cpp_runtime import remove_named_container
+
+    remove_named_container(GEMMA_MODEL_SIZE_PROBE_CONTAINER)
+    completed = run_docker_command(
+        [
+            "docker",
+            "run",
+            "--name",
+            GEMMA_MODEL_SIZE_PROBE_CONTAINER,
+            "--rm",
+            "--pull",
+            "never",
+            "-e",
+            f"MODEL_FILE={model_name}",
+            "--mount",
+            f"type=volume,source={volume_name},target=/models,readonly",
+            "--entrypoint",
+            "/bin/sh",
+            image_ref,
+            "-ec",
+            'stat -c %s "/models/$MODEL_FILE"',
+        ],
+        check=False,
+        cancel_checker=cancel_checker,
+    )
+    if completed.returncode != 0:
+        return 0
+    try:
+        return int(str(completed.stdout or "").strip())
+    except (TypeError, ValueError):
+        return 0
 
 
 def _normalize_url(url: str) -> str:
@@ -119,6 +223,9 @@ class LocalGemmaRuntimeManager:
         self._active_contract: GemmaRuntimeContract | None = None
         self._readiness_cache: set[tuple[str, str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
+        # 자가복구는 계약을 읽는 깊은 곳에서 일어난다. 진행 콜백을 그 경로 전체로
+        # 인자로 흘리는 대신 현재 기동의 콜백을 여기에 둔다.
+        self._startup_progress_callback: Callable[[dict[str, Any]], None] | None = None
         self._router_coordinator = router_coordinator
         self._router_spec: RouterRuntimeSpec | None = None
         self._router_pair: RouterPair | None = None
@@ -181,6 +288,73 @@ class LocalGemmaRuntimeManager:
             and coordinator is not None
             and coordinator.snapshot().pair == pair.kind.value
         )
+
+    def release_separate_server_for_router(self) -> bool:
+        """Router보다 먼저 이 제품의 separate-server Gemma 컨테이너를 정지한다.
+
+        Router는 18080을 publish하고, separate-server Gemma 컨테이너도 같은 포트를
+        쥔다. 제품 컨테이너만, 그리고 Docker가 실행 중이라고 보고할 때만 정지하므로
+        제품 소유가 아닌 listener는 여전히 Router adapter의 명시적 ownership 오류로
+        드러난다.
+        """
+
+        with self._lock:
+            if self._router_pair is not None:
+                return False
+            if not self._inspect_managed_container_running():
+                return False
+            self._stop_managed_container()
+            self._managed_active = False
+            self._managed_start_attempted = False
+            self._readiness_cache.clear()
+            logger.info(
+                "Stopped the separate-server Gemma container so the Router can bind port 18080."
+            )
+            return True
+
+    def _release_stale_router_gemma_port(
+        self,
+        api_base_url: str,
+        *,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        """Gemma 호스트 포트를 쥔 남은 Router 컨테이너를 회수한다.
+
+        Router는 OCR 포트와 함께 18080도 publish하므로, 이전 프로세스가 남긴
+        컨테이너는 separate-server Gemma compose의 바인딩을 영구히 막는다. 정확한
+        기본 Gemma 포트만, 그리고 Router 소유 컨테이너에서만 회수한다.
+        """
+
+        coordinator = self._router_coordinator
+        if coordinator is None or self._router_pair is not None:
+            return
+        # 모든 pair가 하나의 공유 Gemma 호스트 포트를 publish하므로, 어느 pair의
+        # 포트를 회수해도 다른 pair가 남긴 Gemma listener까지 함께 풀린다.
+        pair = router_pair_for_engine_key("PaddleOCR VL")
+        if pair is None:
+            return
+        try:
+            configured_port = urlparse(str(api_base_url or "").strip()).port
+        except ValueError:
+            return
+        if configured_port != ROUTER_GEMMA_HOST_PORT:
+            return
+        try:
+            released = coordinator.release_owned_pair_ports(
+                pair,
+                cancel_checker=cancel_checker,
+            )
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(str(exc)) from exc
+        if released:
+            logger.info(
+                "Released leftover Router container(s) %s so the separate-server "
+                "Gemma runtime can bind port %s.",
+                ", ".join(released),
+                pair.gemma_port,
+            )
 
     def _finish_router_for_selection_change(
         self,
@@ -292,6 +466,122 @@ class LocalGemmaRuntimeManager:
                 "runtime_options": dict(contract.runtime_options),
             }
 
+    def prefetch_model_into_page_cache(
+        self,
+        settings_page: Any,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """모델 파일을 순차로 읽어 호스트 페이지 캐시에 올린다. GPU 는 쓰지 않는다.
+
+        llama.cpp 는 mmap 으로 GGUF 를 읽는다. 즉 적재 시간은 페이지 폴트가 디스크를
+        때리느냐 캐시에 맞느냐로 갈린다. 실측(13.58 GB, Docker Desktop WSL VM):
+
+        * 캐시 미적중 순차 읽기 7.99초 (1,825 MB/s)
+        * 캐시 적중 순차 읽기 0.72~0.88초 (약 20 GB/s)
+        * 실제 Gemma 적재는 첫 실행 43.95초, 이후 4.53~12.28초
+
+        적재가 순차 읽기보다 5배 넘게 느린 이유는 mmap 페이지 폴트의 접근 패턴이
+        순차가 아니기 때문이다. 그래서 순차 읽기로 캐시를 먼저 채우면 폴트가 전부
+        캐시 적중이 되어 첫 실행 적재가 재실행 수준으로 내려간다.
+
+        이 작업은 디스크에서 RAM 으로만 옮기므로 OCR sweep 과 겹쳐도 VRAM 을 다투지
+        않는다. 기존 볼륨 프로브와 같은 기법을 쓴다 — 핀된 런타임 이미지,
+        ``--pull never``, 읽기 전용 볼륨 마운트.
+        """
+
+        with self._lock:
+            self._startup_cancel_checker = cancel_checker
+            try:
+                _endpoint, configured_model = self.router_credentials(settings_page)
+                model_name = validate_gemma_model_name(
+                    str(configured_model or DEFAULT_GEMMA_LOCAL_MODEL)
+                )
+                volume_name = self._configured_volume_name()
+                image_ref = DEFAULT_GEMMA_LLAMA_CPP_IMAGE
+            except Exception as exc:
+                logger.info("Gemma 페이지 캐시 프리페치를 건너뜁니다: %s", exc)
+                return {"performed": False, "reason": "contract-unavailable"}
+
+            headroom = _available_page_cache_bytes(cancel_checker=cancel_checker)
+            model_bytes = _volume_model_size_bytes(
+                volume_name=volume_name,
+                model_name=model_name,
+                image_ref=image_ref,
+                cancel_checker=cancel_checker,
+            )
+            if model_bytes and headroom and headroom < model_bytes:
+                # 여유보다 큰 파일을 읽어 캐시를 채우면 다른 단계가 쓰던 캐시를
+                # 밀어낸다. 이득보다 손해가 크다.
+                logger.info(
+                    "Gemma 페이지 캐시 프리페치를 건너뜁니다: 여유 %.1f GB < 모델 %.1f GB",
+                    headroom / 1e9,
+                    model_bytes / 1e9,
+                )
+                return {
+                    "performed": False,
+                    "reason": "insufficient-memory",
+                    "available_bytes": headroom,
+                    "model_bytes": model_bytes,
+                }
+
+            from modules.utils.llama_cpp_runtime import remove_named_container
+
+            remove_named_container(GEMMA_PAGE_CACHE_PREFETCH_CONTAINER)
+            started_at = time.perf_counter()
+            completed = run_docker_command(
+                [
+                    "docker",
+                    "run",
+                    "--name",
+                    GEMMA_PAGE_CACHE_PREFETCH_CONTAINER,
+                    "--rm",
+                    "--pull",
+                    "never",
+                    "-e",
+                    f"MODEL_FILE={model_name}",
+                    "--mount",
+                    f"type=volume,source={volume_name},target=/models,readonly",
+                    "--entrypoint",
+                    "/bin/sh",
+                    image_ref,
+                    "-ec",
+                    'test -f "/models/$MODEL_FILE" && '
+                    'cat "/models/$MODEL_FILE" > /dev/null',
+                ],
+                check=False,
+                cancel_checker=cancel_checker,
+            )
+            elapsed_sec = time.perf_counter() - started_at
+            if completed.returncode != 0:
+                # 프리페치는 최적화일 뿐이다. 실패해도 적재는 그대로 된다.
+                logger.info(
+                    "Gemma 페이지 캐시 프리페치가 실패했습니다(코드 %s). 계속 진행합니다.",
+                    completed.returncode,
+                )
+                return {
+                    "performed": False,
+                    "reason": "docker-failed",
+                    "elapsed_sec": elapsed_sec,
+                }
+            logger.info(
+                "Gemma 페이지 캐시 프리페치 완료: %.2f초, %.1f GB",
+                elapsed_sec,
+                (model_bytes or 0) / 1e9,
+            )
+            return {
+                "performed": True,
+                "elapsed_sec": elapsed_sec,
+                "model_bytes": model_bytes,
+            }
+
+    def _configured_volume_name(self) -> str:
+        volume_name = str(
+            os.environ.get("GEMMA_MODEL_VOLUME", DEFAULT_GEMMA_MODEL_VOLUME)
+            or DEFAULT_GEMMA_MODEL_VOLUME
+        ).strip()
+        return validate_gemma_volume_name(volume_name)
+
     def ensure_server(
         self,
         settings_page: Any,
@@ -304,6 +594,7 @@ class LocalGemmaRuntimeManager:
     ) -> None:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
+            self._startup_progress_callback = progress_callback
             router_pair = self._router_pair_for_server(settings_page)
             if router_pair is not None:
                 coordinator = self._router_coordinator
@@ -340,6 +631,11 @@ class LocalGemmaRuntimeManager:
             api_base_url, model_name = self._resolve_credentials(settings_page)
             if not api_base_url:
                 raise self._build_setup_error("Endpoint URL is empty.")
+
+            self._release_stale_router_gemma_port(
+                api_base_url,
+                cancel_checker=cancel_checker,
+            )
 
             managed = self.should_manage_server(settings_page)
             if self._is_cancelled(cancel_checker):
@@ -698,7 +994,12 @@ class LocalGemmaRuntimeManager:
             extra = f"{extra}\nRequested image: {requested_image}"
         raise self._build_setup_error(extra)
 
-    def _load_runtime_contract(self, model_name: str) -> GemmaRuntimeContract:
+    def _load_runtime_contract(
+        self,
+        model_name: str,
+        *,
+        allow_repair: bool = True,
+    ) -> GemmaRuntimeContract:
         image_ref = DEFAULT_GEMMA_LLAMA_CPP_IMAGE
         volume_name = str(
             os.environ.get("GEMMA_MODEL_VOLUME", DEFAULT_GEMMA_MODEL_VOLUME)
@@ -712,31 +1013,134 @@ class LocalGemmaRuntimeManager:
         except GemmaRuntimeContractError as exc:
             raise self._build_setup_error(str(exc)) from exc
         image_id = self._ensure_runtime_image_id(image_ref)
-        manifest_bytes, manifest_sha256, observed_model_bytes = self._probe_model_volume(
-            volume_name=volume_name,
-            model_name=model_file,
-            image_ref=image_ref,
-        )
         try:
+            (
+                manifest_bytes,
+                manifest_sha256,
+                observed_model_bytes,
+            ) = self._probe_model_volume(
+                volume_name=volume_name,
+                model_name=model_file,
+                image_ref=image_ref,
+            )
+        except _GemmaVolumeNotProvisioned as exc:
+            if not allow_repair:
+                raise self._build_setup_error(str(exc)) from exc
+            # 볼륨 자체가 없거나 비었다. 준비 스크립트가 원본을 찾아 채운다.
+            self._repair_runtime_volume(
+                volume_name=volume_name,
+                detail=str(exc),
+                message="Gemma 런타임 볼륨을 준비하는 중... 모델을 내려받아야 하면 오래 걸립니다.",
+            )
+            return self._load_runtime_contract(model_name, allow_repair=False)
+
+        def build(contract_image_ref: str, contract_image_id: str) -> GemmaRuntimeContract:
             return build_gemma_runtime_contract(
                 manifest_bytes=manifest_bytes,
                 manifest_sha256=manifest_sha256,
                 observed_model_bytes=observed_model_bytes,
                 volume_name=volume_name,
                 model_name=model_file,
-                image_ref=image_ref,
-                image_id=image_id,
+                image_ref=contract_image_ref,
+                image_id=contract_image_id,
                 compose_file=_RUNTIME_CONFIG["compose_file"],
                 environment=os.environ,
             )
+
+        try:
+            return build(image_ref, image_id)
         except (GemmaRuntimeContractError, OSError) as exc:
+            if allow_repair and is_image_identity_only_drift(
+                manifest_bytes,
+                current_image_id=image_id,
+                revalidate=build,
+            ):
+                # 봉인된 image identity 하나만 어긋났다. 모델 자체는 계약 그대로다.
+                # 원본 파일을 다시 구하지 않고 현재 image 로 다시 봉인한다.
+                self._repair_runtime_volume(
+                    volume_name=volume_name,
+                    detail=describe_image_identity_drift(
+                        manifest_bytes,
+                        current_image_id=image_id,
+                        runtime_label="Gemma",
+                    ),
+                )
+                return self._load_runtime_contract(model_name, allow_repair=False)
             raise self._build_setup_error(
                 (
                     f"Prepared Gemma runtime validation failed: {exc}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 in Prepare mode, "
-                    "or use Verify mode to recompute the model hashes."
+                    "Run scripts/prepare_gemma_runtime.ps1 in Auto mode to provision "
+                    "or reseal the volume, or use Verify mode to recompute the model hashes."
                 )
             ) from exc
+
+    def _gemma_repair_plan(self, volume_name: str) -> ManagedRuntimeRepairPlan:
+        return ManagedRuntimeRepairPlan(
+            runtime_label="Gemma",
+            prepare_script=ROOT_DIR / "scripts" / "prepare_gemma_runtime.ps1",
+            volume_name=volume_name,
+        )
+
+    def _repair_runtime_volume(
+        self,
+        *,
+        volume_name: str,
+        detail: str,
+        message: str = (
+            "Gemma 런타임 볼륨을 현재 llama.cpp 이미지에 맞춰 다시 봉인하는 중..."
+        ),
+    ) -> None:
+        """준비 스크립트를 ``Auto`` 로 돌려 볼륨을 계약에 맞춘다.
+
+        볼륨이 이미 계약된 모델을 담고 있으면 manifest 만 다시 봉인하고, 비어
+        있으면 원본을 찾아 채운다. 컨테이너가 실행 중이면 준비 스크립트가
+        거부한다. 이 시점의 컨테이너는 이미 계약을 만족하지 못하는 것이므로 먼저
+        정지한다.
+        """
+
+        logger.info("%s Running the preparation script.", detail)
+        self._emit_progress(
+            self._startup_progress_callback,
+            status="running",
+            step_key="runtime_repair",
+            message=message,
+            detail=detail,
+        )
+        if self._inspect_managed_container_running():
+            self._stop_managed_container()
+            self._managed_active = False
+            self._managed_start_attempted = False
+        self._readiness_cache.clear()
+        try:
+            run_managed_runtime_preparation(
+                self._gemma_repair_plan(volume_name),
+                mode="Auto",
+                allow_download=True,
+                cancel_checker=self._startup_cancel_checker,
+                progress=lambda text: self._emit_progress(
+                    self._startup_progress_callback,
+                    status="running",
+                    step_key="runtime_repair",
+                    message=text,
+                    detail=detail,
+                ),
+            )
+        except OperationCancelledError:
+            raise
+        except ManagedRuntimeRepairError as exc:
+            raise self._build_setup_error(
+                (
+                    f"{detail}\nAutomatic repair failed: {exc}\n"
+                    "Run scripts/prepare_gemma_runtime.ps1 -Mode Auto by hand."
+                )
+            ) from exc
+        self._emit_progress(
+            self._startup_progress_callback,
+            status="completed",
+            step_key="runtime_repair",
+            message="Gemma 런타임 볼륨 준비를 마쳤습니다.",
+            detail=detail,
+        )
 
     def _ensure_runtime_image_id(self, image_ref: str) -> str:
         inspect_command = [
@@ -796,12 +1200,8 @@ class LocalGemmaRuntimeManager:
             cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
-            raise self._build_setup_error(
-                (
-                    f"Prepared Gemma model volume does not exist: {volume_name}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 before starting "
-                    "the managed endpoint."
-                )
+            raise _GemmaVolumeNotProvisioned(
+                f"Prepared Gemma model volume does not exist: {volume_name}"
             )
         try:
             volume_labels = json.loads(
@@ -841,9 +1241,14 @@ printf 'manifest_base64='
 base64 -w 0 "$manifest_path"
 printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
 '''.strip()
+        from modules.utils.llama_cpp_runtime import remove_named_container
+
+        remove_named_container("comic-translate-gemma-volume-probe")
         command = [
             "docker",
             "run",
+            "--name",
+            "comic-translate-gemma-volume-probe",
             "--rm",
             "--pull",
             "never",
@@ -866,12 +1271,9 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
         )
         if completed.returncode != 0:
             detail = ((completed.stderr or "") + "\n" + (completed.stdout or "")).strip()
-            raise self._build_setup_error(
-                (
-                    f"Prepared Gemma model volume is unavailable or incomplete: {volume_name}\n"
-                    f"Configured model: {model_name}\n{detail}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 before starting the managed endpoint."
-                )
+            raise _GemmaVolumeNotProvisioned(
+                f"Prepared Gemma model volume is unavailable or incomplete: {volume_name}\n"
+                f"Configured model: {model_name}\n{detail}"
             )
 
         values: dict[str, str] = {}

@@ -14,6 +14,7 @@ OCR_MODE_MANGALMM = "mangalmm"
 
 OCR_DEFAULT_LABEL = "Default (existing auto: MangaOCR / PPOCR / Pororo...)"
 OCR_OPTIMAL_LABEL = "Optimal (HunyuanOCR / PaddleOCR VL)"
+OCR_MANGALMM_LABEL = "MangaLMM (Experimental, Slow)"
 _LEGACY_OPTIMAL_PLUS_MODE = "best_local_plus"
 _LEGACY_OPTIMAL_PLUS_LABEL = "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"
 
@@ -29,7 +30,7 @@ OCR_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
         "PaddleOCR VL Spotting (Full Page)",
     ),
     (OCR_MODE_HUNYUAN, "HunyuanOCR"),
-    (OCR_MODE_MANGALMM, "MangaLMM"),
+    (OCR_MODE_MANGALMM, OCR_MANGALMM_LABEL),
 )
 
 OCR_MODE_TO_ENGINE: dict[str, str] = {
@@ -90,6 +91,7 @@ _ALIASES: dict[str, str] = {
     OCR_MODE_HUNYUAN: OCR_MODE_HUNYUAN,
     "HunyuanOCR": OCR_MODE_HUNYUAN,
     OCR_MODE_MANGALMM: OCR_MODE_MANGALMM,
+    OCR_MANGALMM_LABEL: OCR_MODE_MANGALMM,
     "MangaLMM": OCR_MODE_MANGALMM,
 }
 _WORKFLOW_ALIASES: dict[str, str] = {

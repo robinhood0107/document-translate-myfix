@@ -52,6 +52,7 @@ def save_state_to_proj_file(
     *,
     checkpoint_reference: dict | ProjectCheckpointReference | None = None,
     update_project_reference: bool = True,
+    source_project_file: str | None = None,
 ):
     # Default writer: v2 SQLite container (incremental-friendly, portable).
     return save_state_to_proj_file_v2(
@@ -59,6 +60,7 @@ def save_state_to_proj_file(
         file_name,
         checkpoint_reference=checkpoint_reference,
         update_project_reference=update_project_reference,
+        source_project_file=source_project_file,
     )
 
 

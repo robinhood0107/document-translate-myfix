@@ -1,9 +1,21 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare', 'Verify')]
+    # Prepare seeds the volume from source files and seals it. Verify is a
+    # read-only check. Reseal leaves the volume contents alone, re-runs the real
+    # smoke against the current llama.cpp image, and rewrites the ready manifest.
+    # Auto picks Prepare or Reseal from the volume state; the app's self-repair
+    # path uses Auto.
+    [ValidateSet('Prepare', 'Verify', 'Reseal', 'Auto')]
     [string]$Mode = 'Prepare',
 
+    # Leave empty to fall back to the repository's testmodel/PaddleOCR-VL-1.6-GGUF.
     [string]$ModelDirectory = '',
+
+    # Fetch the registered official source only when no verified local copy exists.
+    [switch]$AllowDownload,
+
+    # Where downloaded sources land. Empty means the repository's testmodel/.
+    [string]$DownloadDirectory = '',
 
     [string]$VolumeName = (
         'comic-translate-paddleocr-vl-spotting-llamacpp-models-v2'
@@ -26,15 +38,19 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Force
+
 $PreparationVersion = 2
 $ManifestSchemaVersion = 1
 $ReadyManifestName = (
     '.comic-translate-paddleocr-vl-spotting-llamacpp-ready-v2.json'
 )
 $RuntimeName = 'PaddleOCR-VL-Spotting-llama.cpp'
-$ImageRef = (
-    'ghcr.io/ggml-org/llama.cpp@sha256:' +
-    '22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
+$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
+$SupportedImageRefs = @(
+    'ghcr.io/ggml-org/llama.cpp:server-cuda13',
+    'ghcr.io/ggml-org/llama.cpp:server-cuda'
 )
 $ManagedContainerName = 'paddleocr-spotting-llamacpp'
 $ModelAlias = 'PaddleOCR-VL-1.6-Spotting'
@@ -59,6 +75,12 @@ $ModelSpecs = @(
         )
         Role = 'vlm'
         DerivedFromSha256 = ''
+        # 공식 PaddleOCR-VL 1.6 GGUF. Spotting 대상 GGUF 는 crop VLM 과 바이트가
+        # 같으므로 같은 원본을 쓴다.
+        DownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF.gguf'
+        )
     }
     [pscustomobject][ordered]@{
         Name = 'PaddleOCR-VL-1.6-Spotting-mmproj.gguf'
@@ -72,6 +94,12 @@ $ModelSpecs = @(
         Role = 'vision-projector'
         DerivedFromSha256 = (
             '204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a'
+        )
+        # 이 항목은 파생물이다. 원본은 공식 crop projector 이고, 위
+        # DerivedFromSha256 이 그 원본의 해시다.
+        SourceDownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF-mmproj.gguf'
         )
     }
 )
@@ -179,9 +207,17 @@ function Invoke-NativeResult {
 
 function Invoke-DockerResult {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    # PowerShell here-strings carry CRLF line endings. The container's /bin/sh is
+    # dash, which reads a trailing CR as part of the token and dies on the first
+    # line with "set: Illegal option -". A CR is never meaningful in a docker
+    # argument, so normalize every argument in one place.
+    $NormalizedArguments = @(
+        $Arguments | ForEach-Object { [string]$_ -replace "`r`n", "`n" }
+    )
     return Invoke-NativeResult `
         -Executable $DockerExecutable `
-        -Arguments $Arguments
+        -Arguments $NormalizedArguments
 }
 
 function Invoke-Docker {
@@ -340,7 +376,7 @@ function Assert-ManifestContract {
         [int]$Manifest.preparation_version -ne $PreparationVersion -or
         [string]$Manifest.runtime -ne $RuntimeName -or
         [string]$Manifest.volume_name -ne $VolumeName -or
-        [string]$Manifest.source_image_ref -ne $ImageRef -or
+        $SupportedImageRefs -notcontains [string]$Manifest.source_image_ref -or
         [string]$Manifest.source_image_id -ne $ImageId -or
         $Manifest.ready -ne $true -or
         $Manifest.smoke_test.passed -ne $true -or
@@ -351,6 +387,17 @@ function Assert-ManifestContract {
         [int]$Manifest.spotting_contract.'clip.vision.image_max_pixels' -ne
             $SpottingImageMaxPixels
     ) {
+        if ([string]$Manifest.source_image_id -ne $ImageId) {
+            # When upstream refreshes a supported tag only the image identity
+            # drifts. Reseal recovers that without the original source files.
+            throw (
+                'Ready manifest header does not match the official ' +
+                'PaddleOCR-VL Spotting contract: the llama.cpp image identity ' +
+                "drifted (manifest=$($Manifest.source_image_id), " +
+                "actual=$ImageId). Run this script with -Mode Reseal to " +
+                're-smoke and re-seal.'
+            )
+        }
         throw (
             'Ready manifest header does not match the official ' +
             'PaddleOCR-VL Spotting contract.'
@@ -387,6 +434,61 @@ function Assert-ManifestContract {
 }
 
 $ImageId = Get-PinnedImageId
+
+function Get-VolumeFileSize {
+    param([Parameter(Mandatory = $true)][string]$FileName)
+
+    $Result = Invoke-DockerResult -Arguments @(
+        'run', '--rm', '--pull', 'never',
+        '-e', "MODEL_FILE=$FileName",
+        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
+        '--entrypoint', '/bin/sh',
+        $ImageRef,
+        '-ec', 'if test -f "/models/$MODEL_FILE"; then stat -c %s "/models/$MODEL_FILE"; fi'
+    )
+    if ($Result.ExitCode -ne 0) {
+        return [int64]-1
+    }
+    $Text = $Result.Output.Trim()
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return [int64]-1
+    }
+    return [int64]$Text
+}
+
+function Test-VolumeHoldsEveryModel {
+    <#
+    .SYNOPSIS
+    Report whether the volume already holds every contracted file, by size.
+
+    .DESCRIPTION
+    Used only to let Auto pick between Prepare and Reseal. Size alone keeps this
+    from hashing large GGUFs twice. The authoritative judgement is the SHA-256
+    pass Reseal runs before the smoke, and a mismatch there still fails.
+    #>
+
+    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
+        return $false
+    }
+    foreach ($Spec in $ModelSpecs) {
+        if ((Get-VolumeFileSize -FileName $Spec.Name) -ne $Spec.Bytes) {
+            return $false
+        }
+    }
+    return $true
+}
+
+if ($Mode -eq 'Auto') {
+    if (Test-VolumeHoldsEveryModel) {
+        Write-Host 'Auto mode: the volume already holds every model; resealing.'
+        $Mode = 'Reseal'
+    }
+    else {
+        Write-Host 'Auto mode: the volume is missing a model; preparing.'
+        $Mode = 'Prepare'
+    }
+}
+$IsReseal = $Mode -eq 'Reseal'
 
 if ($Mode -eq 'Verify') {
     if (
@@ -432,12 +534,26 @@ if ($Mode -eq 'Verify') {
     return
 }
 
-if ([string]::IsNullOrWhiteSpace($ModelDirectory)) {
+if (-not $IsReseal -and [string]::IsNullOrWhiteSpace($ModelDirectory)) {
+    # Fall back to the repository's gitignored model directory before asking the
+    # caller for a path they already have on disk.
+    $DefaultRoot = Get-ManagedRuntimeDefaultSearchDirectory
+    if (-not [string]::IsNullOrWhiteSpace($DefaultRoot)) {
+        $DefaultSpottingDirectory = Join-Path $DefaultRoot 'PaddleOCR-VL-1.6-GGUF'
+        if (Test-Path -LiteralPath $DefaultSpottingDirectory -PathType Container) {
+            Write-Host "Using the repository model directory: $DefaultSpottingDirectory"
+            $ModelDirectory = $DefaultSpottingDirectory
+        }
+    }
+}
+if (-not $IsReseal -and [string]::IsNullOrWhiteSpace($ModelDirectory)) {
     throw 'Prepare mode requires -ModelDirectory.'
 }
 Assert-ManagedContainerStopped
 Assert-BackgroundGpuUsage
-if (-not $SkipFreeSpaceCheck) {
+# Reseal leaves volume contents alone and copies nothing, so it needs neither a
+# source directory nor room for a copy.
+if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
     if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
@@ -449,97 +565,145 @@ if (-not $SkipFreeSpaceCheck) {
     }
 }
 
-$ResolvedDirectory = (Resolve-Path -LiteralPath $ModelDirectory).Path
 $TemporaryRoot = Join-Path (
     [System.IO.Path]::GetTempPath()
 ) "comic-translate-paddle-spotting-prepare-$PID"
 New-Item -ItemType Directory -Force -Path $TemporaryRoot | Out-Null
 
 try {
-    $TargetSpec = $ModelSpecs[0]
-    $TargetSourcePath = $null
-    foreach ($Candidate in $TargetSpec.SourceNames) {
-        $CandidatePath = Join-Path $ResolvedDirectory $Candidate
-        if (Test-Path -LiteralPath $CandidatePath -PathType Leaf) {
-            $TargetSourcePath = $CandidatePath
-            break
+    $PreparedSources = @()
+    if (-not $IsReseal) {
+        # The target GGUF is byte-identical to the official crop VLM, so an
+        # already-renamed Spotting copy and the upstream name both satisfy the
+        # contract. Try the explicit names first, then fall back to the shared
+        # resolver, which can also fetch the registered official source.
+        $ResolvedDirectory = ''
+        if (-not [string]::IsNullOrWhiteSpace($ModelDirectory)) {
+            $ResolvedDirectory = (Resolve-Path -LiteralPath $ModelDirectory).Path
         }
-    }
-    if ($null -eq $TargetSourcePath) {
-        throw (
-            'PaddleOCR-VL target GGUF was not found. Expected one of: ' +
-            ($TargetSpec.SourceNames -join ', ')
-        )
-    }
-    $TargetHash = (
-        Get-FileHash -LiteralPath $TargetSourcePath -Algorithm SHA256
-    ).Hash.ToLowerInvariant()
-    if (
-        (Get-Item -LiteralPath $TargetSourcePath).Length -ne
-            $TargetSpec.Bytes -or
-        $TargetHash -ne $TargetSpec.Sha256
-    ) {
-        throw (
-            "Target GGUF contract mismatch: $TargetSourcePath, " +
-            "sha256=$TargetHash"
-        )
-    }
-
-    $ProjectorSpec = $ModelSpecs[1]
-    $CropProjectorPath = Join-Path (
-        $ResolvedDirectory
-    ) $ProjectorSpec.SourceNames[0]
-    if (-not (Test-Path -LiteralPath $CropProjectorPath -PathType Leaf)) {
-        throw "Official crop OCR projector was not found: $CropProjectorPath"
-    }
-    $DerivedProjectorPath = Join-Path $TemporaryRoot $ProjectorSpec.Name
-    $Derive = Invoke-NativeResult `
-        -Executable $PythonExecutable `
-        -Arguments @(
-            $DeriveScript,
-            '--source', $CropProjectorPath,
-            '--output', $DerivedProjectorPath
-        )
-    if ($Derive.ExitCode -ne 0) {
-        throw "Spotting projector derivation failed.`n$($Derive.Output)"
-    }
-
-    $PreparedSources = @(
-        [pscustomobject]@{
-            Spec = $TargetSpec
-            Path = $TargetSourcePath
-        },
-        [pscustomobject]@{
-            Spec = $ProjectorSpec
-            Path = $DerivedProjectorPath
+        $TargetSpec = $ModelSpecs[0]
+        $TargetSourcePath = $null
+        if (-not [string]::IsNullOrWhiteSpace($ResolvedDirectory)) {
+            foreach ($Candidate in $TargetSpec.SourceNames) {
+                $CandidatePath = Join-Path $ResolvedDirectory $Candidate
+                if (Test-Path -LiteralPath $CandidatePath -PathType Leaf) {
+                    $TargetSourcePath = $CandidatePath
+                    break
+                }
+            }
         }
-    )
-    foreach ($Source in $PreparedSources) {
-        $ActualHash = (
-            Get-FileHash -LiteralPath $Source.Path -Algorithm SHA256
+        if ($null -eq $TargetSourcePath) {
+            $TargetSourcePath = (Resolve-ManagedRuntimeModelSource `
+                -FileName $TargetSpec.SourceNames[-1] `
+                -Bytes $TargetSpec.Bytes `
+                -Sha256 $TargetSpec.Sha256 `
+                -RequestedPath $ModelDirectory `
+                -DownloadUrl ([string]$TargetSpec.DownloadUrl) `
+                -DownloadDirectory $DownloadDirectory `
+                -AllowDownload:$AllowDownload).Path
+        }
+        $TargetHash = (
+            Get-FileHash -LiteralPath $TargetSourcePath -Algorithm SHA256
         ).Hash.ToLowerInvariant()
-        $ActualBytes = (Get-Item -LiteralPath $Source.Path).Length
         if (
-            $ActualBytes -ne $Source.Spec.Bytes -or
-            $ActualHash -ne $Source.Spec.Sha256
+            (Get-Item -LiteralPath $TargetSourcePath).Length -ne
+                $TargetSpec.Bytes -or
+            $TargetHash -ne $TargetSpec.Sha256
         ) {
             throw (
-                "Prepared source contract mismatch: {0}, bytes={1}, " +
-                "sha256={2}" -f
-                $Source.Spec.Name,
-                $ActualBytes,
-                $ActualHash
+                "Target GGUF contract mismatch: $TargetSourcePath, " +
+                "sha256=$TargetHash"
+            )
+        }
+
+        # The Spotting projector is derived locally from the official crop
+        # projector, so the source is pinned by DerivedFromSha256 rather than by
+        # the derived file's own hash.
+        $ProjectorSpec = $ModelSpecs[1]
+        $CropProjectorPath = $null
+        if (-not [string]::IsNullOrWhiteSpace($ResolvedDirectory)) {
+            $CropCandidate = Join-Path (
+                $ResolvedDirectory
+            ) $ProjectorSpec.SourceNames[0]
+            if (Test-Path -LiteralPath $CropCandidate -PathType Leaf) {
+                $CropProjectorPath = $CropCandidate
+            }
+        }
+        if ($null -eq $CropProjectorPath) {
+            $CropProjectorPath = (Resolve-ManagedRuntimeModelSource `
+                -FileName $ProjectorSpec.SourceNames[0] `
+                -Bytes $ProjectorSpec.Bytes `
+                -Sha256 $ProjectorSpec.DerivedFromSha256 `
+                -RequestedPath $ModelDirectory `
+                -DownloadUrl ([string]$ProjectorSpec.SourceDownloadUrl) `
+                -DownloadDirectory $DownloadDirectory `
+                -AllowDownload:$AllowDownload).Path
+        }
+        $DerivedProjectorPath = Join-Path $TemporaryRoot $ProjectorSpec.Name
+        $Derive = Invoke-NativeResult `
+            -Executable $PythonExecutable `
+            -Arguments @(
+                $DeriveScript,
+                '--source', $CropProjectorPath,
+                '--output', $DerivedProjectorPath
+            )
+        if ($Derive.ExitCode -ne 0) {
+            throw "Spotting projector derivation failed.`n$($Derive.Output)"
+        }
+
+        $PreparedSources = @(
+            [pscustomobject]@{
+                Spec = $TargetSpec
+                Path = $TargetSourcePath
+            },
+            [pscustomobject]@{
+                Spec = $ProjectorSpec
+                Path = $DerivedProjectorPath
+            }
+        )
+        foreach ($Source in $PreparedSources) {
+            $ActualHash = (
+                Get-FileHash -LiteralPath $Source.Path -Algorithm SHA256
+            ).Hash.ToLowerInvariant()
+            $ActualBytes = (Get-Item -LiteralPath $Source.Path).Length
+            if (
+                $ActualBytes -ne $Source.Spec.Bytes -or
+                $ActualHash -ne $Source.Spec.Sha256
+            ) {
+                throw (
+                    "Prepared source contract mismatch: {0}, bytes={1}, " +
+                    "sha256={2}" -f
+                    $Source.Spec.Name,
+                    $ActualBytes,
+                    $ActualHash
+                )
+            }
+        }
+    }
+
+    if ($IsReseal) {
+        if (
+            (
+                Invoke-DockerResult -Arguments @(
+                    'volume', 'inspect', $VolumeName
+                )
+            ).ExitCode -ne 0
+        ) {
+            throw (
+                "The volume to reseal does not exist: $VolumeName. " +
+                'Run this script in Prepare or Auto mode first.'
             )
         }
     }
-
-    Invoke-Docker -Arguments @(
-        'volume', 'create',
-        '--label', "comic-translate.runtime=$RuntimeName",
-        '--label',
-        "comic-translate.preparation-version=$PreparationVersion",
-        $VolumeName
-    ) | Out-Null
+    else {
+        Invoke-Docker -Arguments @(
+            'volume', 'create',
+            '--label', "comic-translate.runtime=$RuntimeName",
+            '--label',
+            "comic-translate.preparation-version=$PreparationVersion",
+            $VolumeName
+        ) | Out-Null
+    }
     Assert-VolumeLabels
     Invoke-Docker -Arguments @(
         'run', '--rm', '--pull', 'never',
@@ -597,7 +761,13 @@ mv -f "$partial" "$target"
     foreach ($Spec in $ModelSpecs) {
         $ActualHash = Get-VolumeFileHash -FileName $Spec.Name
         if ($ActualHash -ne $Spec.Sha256) {
-            throw "Copied file SHA-256 mismatch: $($Spec.Name)"
+            $Recovery = if ($IsReseal) {
+                ' Reseal never copies model data, so run -Mode Prepare instead.'
+            }
+            else {
+                ''
+            }
+            throw ("Volume file SHA-256 mismatch: $($Spec.Name)." + $Recovery)
         }
         $Entry = [ordered]@{
             name = $Spec.Name
@@ -910,8 +1080,9 @@ mv -f "$partial" "$target"
         'set -eu; sha256sum "/models/$READY_MANIFEST" | cut -d " " -f 1'
     )
     [ordered]@{
-        mode = 'Prepare'
+        mode = $Mode
         prepared = $true
+        resealed = $IsReseal
         volume_name = $VolumeName
         ready_manifest = $ReadyManifestName
         ready_manifest_sha256 = $ManifestSha256

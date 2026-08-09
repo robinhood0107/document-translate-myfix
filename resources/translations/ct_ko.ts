@@ -122,6 +122,10 @@
         <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>자동번역 진행 중</source>
         <translation>자동번역 진행 중</translation>
     </message>
@@ -836,14 +840,14 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds
-- Temperature: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
+- Temperature: 0.5
+- Top K / Top P / Min P: 32 / 1.0 / 0.0</source>
         <translation>기본 제공 Gemma 런타임의 승격 기본값:
 - 청크 크기: 6
 - 최대 완료 토큰: 512
 - 요청 타임아웃: 180초
-- 온도: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</translation>
+- 온도: 0.5
+- Top K / Top P / Min P: 32 / 1.0 / 0.0</translation>
     </message>
 </context>
 <context>
@@ -1091,8 +1095,8 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
 <context>
     <name>MangaLMMOCRPage</name>
     <message>
-        <source>MangaLMM Settings</source>
-        <translation>MangaLMM 설정</translation>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
+        <translation>MangaLMM(실험용, 느림) 설정</translation>
     </message>
     <message>
         <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
@@ -1430,10 +1434,6 @@ Please check your internet connection.</source>
         <translation>{service} 설정 누락</translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation>{service} 런타임 준비 실패</translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation>Stage-Batched Pipeline은 현재 제품 모드에서 단일 런타임 OCR 경로만 지원합니다.</translation>
     </message>
@@ -1688,6 +1688,10 @@ PSD 기능을 사용하려면 설치하세요.</translation>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
         <translation>
         최적값 (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
     </message>
     <message>
         <source>Comic Translate</source>
@@ -2239,6 +2243,10 @@ detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 na
         <translation>자동</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>Calculating</source>
         <translation>계산 중</translation>
     </message>
@@ -2509,6 +2517,25 @@ This folder is separate from Auto-Recover snapshots.</source>
     <message>
         <source>Search Action...</source>
         <translation>닫기</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesBreadcrumbBar</name>
+    <message>
+        <source>Not Synced</source>
+        <translation>미반영</translation>
+    </message>
+    <message>
+        <source>This chapter has changes that are not written back to the series project yet.</source>
+        <translation>이 세부 프로젝트에 아직 시리즈 프로젝트로 반영되지 않은 변경이 있습니다.</translation>
+    </message>
+    <message>
+        <source>Back to the series board</source>
+        <translation>시리즈 보드로 돌아가기</translation>
+    </message>
+    <message>
+        <source>Back</source>
+        <translation>뒤로</translation>
     </message>
 </context>
 <context>
@@ -3273,6 +3300,10 @@ Restart now?</source>
         <translation>PaddleOCR VL Spotting(전체 페이지)</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation>MangaLMM</translation>
     </message>
@@ -3303,10 +3334,6 @@ Restart now?</source>
     <message>
         <source>HunyuanOCR Settings</source>
         <translation>HunyuanOCR 설정</translation>
-    </message>
-    <message>
-        <source>MangaLMM Settings</source>
-        <translation>MangaLMM 설정</translation>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
@@ -3393,6 +3420,10 @@ Restart now?</source>
         <translation>도구</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
+        <translation>MangaLMM(실험용, 느림) 설정</translation>
+    </message>
+    <message>
         <source>Text Rendering</source>
         <translation>텍스트 렌더링</translation>
     </message>
@@ -3434,6 +3465,14 @@ Restart now?</source>
     <message>
         <source>Delete the currently selected text or block box.</source>
         <translation>현재 선택한 텍스트 상자 또는 블록 상자를 삭제합니다.</translation>
+    </message>
+    <message>
+        <source>Back to Series Board</source>
+        <translation>시리즈 보드로 돌아가기</translation>
+    </message>
+    <message>
+        <source>Leave the current series chapter and go back to the series board.</source>
+        <translation>현재 세부 프로젝트를 벗어나 시리즈 보드로 돌아갑니다.</translation>
     </message>
     <message>
         <source>Restore Text Blocks</source>
@@ -3706,6 +3745,10 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     <message>
         <source>HD Strategy</source>
         <translation>HD 전략</translation>
+    </message>
+    <message>
+        <source>개발자/성능모드</source>
+        <translation>개발자/성능모드</translation>
     </message>
     <message>
         <source>Resize</source>
@@ -5076,6 +5119,14 @@ It may have been moved, renamed, or deleted.
         <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.</translation>
     </message>
     <message>
+        <source>Could not write this chapter&apos;s changes back to the series project.</source>
+        <translation>이 세부 프로젝트의 변경을 시리즈 프로젝트에 반영하지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>The working copy was kept so nothing is lost: {path}</source>
+        <translation>변경이 사라지지 않도록 작업본을 남겨 두었습니다: {path}</translation>
+    </message>
+    <message>
         <source>The selected series project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -5132,6 +5183,12 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>No supported files were found in the selected folder.</source>
         <translation>선택한 폴더에서 지원되는 파일을 찾지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.
+현재 실행 중 항목은 고정되며, 변경은 실행 종료 후 가능합니다.</translation>
     </message>
     <message>
         <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
@@ -5338,16 +5395,16 @@ It may have been moved, renamed, or deleted.
         <translation>HunyuanOCR</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation>MangaLMM(실험용, 느림)</translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation>MangaLMM</translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>크기 조정</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>크롭</translation>
+        <source>Original</source>
+        <translation type="unfinished">원본</translation>
     </message>
 </context>
 <context>
@@ -5402,6 +5459,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>자르기</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">원본</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

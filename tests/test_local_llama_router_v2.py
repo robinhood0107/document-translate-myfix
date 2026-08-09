@@ -1001,8 +1001,39 @@ class LocalLlamaRouterCoordinatorTests(unittest.TestCase):
             router_attribution_timeout_sec=0.0,
         )
 
-        with self.assertRaisesRegex(RouterSetupError, "attributable GPU worker"):
-            coordinator.load(spec, spec.ocr_model.alias, service="ocr")
+        # 기본값은 강건성 우선이다. WSL의 NVML 호환 계층이 worker 를 보고하지
+        # 않아도 모델은 적재됐으므로 기동을 막지 않는다.
+        coordinator.load(spec, spec.ocr_model.alias, service="ocr")
+        self.assertEqual(coordinator.snapshot().loaded_model, spec.ocr_model.alias)
+
+        # 진단용 강제를 켜면 예전처럼 실패한다.
+        adapter2 = _FakeAdapter(_contract(spec))
+        sampler2 = _SequenceSampler(
+            [
+                _gpu_snapshot(108.0, set()),
+                _gpu_snapshot(108.0, set()),
+                _gpu_snapshot(
+                    1200.0,
+                    set(),
+                    router_worker_ids={100},
+                    router_worker_alias=DEFAULT_GEMMA_ROUTER_MODEL,
+                ),
+                _gpu_snapshot(108.0, set(), router_worker_ids=set()),
+            ]
+        )
+        coordinator2 = LocalLlamaRouterCoordinator(
+            adapter=adapter2,
+            gpu_sampler=sampler2,
+            router_release_timeout_sec=0.0,
+            router_attribution_timeout_sec=0.0,
+        )
+        with mock.patch(
+            "modules.utils.local_llama_router.coordinator."
+            "gpu_release_enforcement_enabled",
+            return_value=True,
+        ):
+            with self.assertRaisesRegex(RouterSetupError, "GPU worker"):
+                coordinator2.load(spec, spec.ocr_model.alias, service="ocr")
 
     def test_kept_container_release_allows_only_owned_worker_pid_to_disappear(self) -> None:
         spec = _spec()
@@ -1063,6 +1094,15 @@ class LocalLlamaRouterCoordinatorTests(unittest.TestCase):
         self.assertEqual(adapter.stop_calls, 1)
 
     def test_release_failure_keeps_arbiter_ownership_and_blocks_next_load(self) -> None:
+        # 이 두 테스트는 RELEASE_FAILED 상태 기계 자체가 대상이다. 그 상태는 진단용
+        # 강제를 켰을 때만 도달하므로 여기서 명시적으로 켠다.
+        patcher = mock.patch(
+            "modules.utils.local_llama_router.coordinator."
+            "gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         spec, _adapter, coordinator = self._coordinator(bad_release=True)
         arbiter = RuntimeResourceArbiter()
         coordinator.load(
@@ -1092,6 +1132,15 @@ class LocalLlamaRouterCoordinatorTests(unittest.TestCase):
             )
 
     def test_failed_model_release_can_only_recover_through_terminal_stop(self) -> None:
+        # 이 두 테스트는 RELEASE_FAILED 상태 기계 자체가 대상이다. 그 상태는 진단용
+        # 강제를 켰을 때만 도달하므로 여기서 명시적으로 켠다.
+        patcher = mock.patch(
+            "modules.utils.local_llama_router.coordinator."
+            "gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         spec = _spec()
         adapter = _FakeAdapter(_contract(spec))
         sampler = _SequenceSampler(

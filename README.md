@@ -4,7 +4,7 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-The fork's product release version is `1.3.0`. Upstream `2.7.1` is recorded
+The fork's product release version is `1.5.0`. Upstream `2.7.1` is recorded
 separately as the latest selective-backport lineage and is not this fork's
 product version.
 
@@ -288,9 +288,11 @@ Official ntfy docs:
 
 Tracked compose/runtime images used by the repo:
 
-- Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
-- HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL inference: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+Every managed llama.cpp runtime (Gemma, PaddleOCR VL, PaddleOCR VL Spotting,
+HunyuanOCR, MangaLMM, and the Router) uses one CUDA server image:
+
+- Default: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
+- Also supported: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 
 ## Reference Setup Docs
 

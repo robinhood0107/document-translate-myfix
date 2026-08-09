@@ -122,6 +122,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>자동번역 진행 중</source>
         <translation type="unfinished"></translation>
     </message>
@@ -827,8 +831,8 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds
-- Temperature: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
+- Temperature: 0.5
+- Top K / Top P / Min P: 32 / 1.0 / 0.0</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -1071,7 +1075,7 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
 <context>
     <name>MangaLMMOCRPage</name>
     <message>
-        <source>MangaLMM Settings</source>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1396,10 +1400,6 @@ Please check your internet connection.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>{service} runtime setup failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1653,6 +1653,10 @@ Install it to use PSD features.</source>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
         <translation>
         最佳（HunyuanOCR / PaddleOCR VL）</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Comic Translate</source>
@@ -2197,6 +2201,10 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
         <translation>自动</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Calculating</source>
         <translation>计算中</translation>
     </message>
@@ -2466,6 +2474,25 @@ This folder is separate from Auto-Recover snapshots.</source>
     <message>
         <source>Search Action...</source>
         <translation>关闭</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesBreadcrumbBar</name>
+    <message>
+        <source>Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This chapter has changes that are not written back to the series project yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back to the series board</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3269,6 +3296,10 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3311,7 +3342,7 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>MangaLMM Settings</source>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3391,6 +3422,14 @@ Restart now?</source>
     </message>
     <message>
         <source>Delete the currently selected text or block box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back to Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave the current series chapter and go back to the series board.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3651,6 +3690,10 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     </message>
     <message>
         <source>precision</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>개발자/성능모드</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5010,6 +5053,14 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Could not write this chapter&apos;s changes back to the series project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The working copy was kept so nothing is lost: {path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>The selected series project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -5079,6 +5130,11 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Series Project</source>
         <translation>系列项目</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Add Files To Series</source>
@@ -5268,16 +5324,16 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resize</source>
-        <translation>缩放</translation>
-    </message>
-    <message>
-        <source>Crop</source>
-        <translation>裁剪</translation>
+        <source>Original</source>
+        <translation type="unfinished">原始</translation>
     </message>
 </context>
 <context>
@@ -5332,6 +5388,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>裁剪</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation type="unfinished">原始</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>

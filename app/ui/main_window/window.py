@@ -202,6 +202,9 @@ class ComicTranslateUI(
         self._center_stack.addWidget(self.settings_page)
 
         self._center_stack.setCurrentWidget(self.startup_home)
+        # 설정 페이지를 벗어나면 대기 중인 저장을 곧바로 확정한다. 250 ms 디바운스
+        # 안에서 페이지를 떠나면 마지막 변경이 그대로 사라졌다.
+        self._center_stack.currentChanged.connect(self._flush_settings_on_leave)
         self._set_document_tools_visible(False)
 
         self.main_layout.addWidget(self._center_stack)
@@ -233,6 +236,19 @@ class ComicTranslateUI(
             self.title_bar.set_autosave_visible(visible)
             if hasattr(self.title_bar, "webtoon_toggle"):
                 self.title_bar.webtoon_toggle.setVisible(visible)
+
+    def refresh_series_breadcrumb(self) -> None:
+        """자식 프로젝트가 활성일 때만 시리즈 컨텍스트 표시줄을 노출한다."""
+        breadcrumb = getattr(self, "series_breadcrumb", None)
+        if breadcrumb is None:
+            return
+        series_ctrl = getattr(self, "series_ctrl", None)
+        state = series_ctrl.breadcrumb_state() if series_ctrl is not None else None
+        if not state:
+            breadcrumb.setVisible(False)
+            return
+        breadcrumb.set_context(**state)
+        breadcrumb.setVisible(True)
 
     def _set_series_tools_visible(self, visible: bool) -> None:
         if hasattr(self, "insert_button"):
@@ -266,6 +282,14 @@ class ComicTranslateUI(
     def show_home(self) -> None:
         self.show_home_screen()
 
+    def _flush_settings_on_leave(self, _index: int) -> None:
+        settings_page = getattr(self, "settings_page", None)
+        if settings_page is None:
+            return
+        if self._center_stack.currentWidget() is settings_page:
+            return
+        settings_page.flush_pending_save()
+
     def show_settings_page(self):
         if not self.settings_page:
             self.settings_page = SettingsPage(self)
@@ -281,6 +305,7 @@ class ComicTranslateUI(
             self._workspace_initialized = True
             self._set_series_tools_visible(False)
             self._set_document_tools_visible(True)
+            self.refresh_series_breadcrumb()
             self._center_stack.setCurrentWidget(self.main_content_widget)
             self._set_nav_checked_state("main")
             if getattr(self, "_batch_active", False):
