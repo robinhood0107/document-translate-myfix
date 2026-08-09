@@ -127,6 +127,10 @@ from modules.utils.ocr_debug import (
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import VERTICAL_ALIGNMENT_CENTER
+from pipeline.inpaint_cleanup_job import (
+    InpaintCleanupInput,
+    run_inpaint_cleanup,
+)
 from modules.utils.run_report import build_run_report, write_run_report
 from modules.utils.text_normalization import RENDER_NORMALIZABLE_GLYPHS
 from modules.utils.textblock import ensure_text_block_id, sort_blk_list
@@ -2989,6 +2993,18 @@ class StageBatchedProcessor(BatchProcessor):
                     skip_reason="no_text_detected",
                     project_checkpoint_status="skipped",
                 )
+                # 인페인팅은 건너뛰어도 **출력은 반드시 나가야 한다.** 이 분기가
+                # 렌더 제출 없이 넘어가는 바람에, 텍스트가 없다고 판정된 페이지는
+                # 정상 경로로 파일을 남기지 못했다. 실측 366장에서 15장이 여기로
+                # 빠져 배치 끝 폴백이 대신 저장했고, 실패가 아닌데도 실패 경로로
+                # 처리됐다. 글자가 없으면 렌더할 텍스트가 없을 뿐, 페이지 자체는
+                # 그대로 내보내면 된다.
+                self._submit_or_inline_render(
+                    ctx,
+                    index=index,
+                    total_images=total_images,
+                    export_settings=export_settings,
+                )
                 continue
             self._emit_benchmark_event(
                 "inpaint_start",
@@ -3337,62 +3353,34 @@ class StageBatchedProcessor(BatchProcessor):
                         "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
                     },
                 ):
-                    ctx.inpaint_input_img = imk.convert_scale_abs(
-                        ctx.inpaint_input_img
+                    cleanup = run_inpaint_cleanup(
+                        InpaintCleanupInput(
+                            image=ctx.image,
+                            inpaint_input_img=ctx.inpaint_input_img,
+                            mask=ctx.mask,
+                            mask_details=ctx.mask_details,
+                            inpaint_blocks=inpaint_blocks,
+                            config=config,
+                            page_label=f"{index + 1}/{total_images}",
+                            inpaint_edit_mask=getattr(
+                                self.inpainting,
+                                "last_inpaint_edit_mask",
+                                None,
+                            ),
+                        )
                     )
-                    inpaint_edit_mask = getattr(
-                        self.inpainting,
-                        "last_inpaint_edit_mask",
-                        None,
-                    )
-                    if inpaint_edit_mask is not None:
-                        ctx.mask = np.where(
-                            (ctx.mask > 0) | (inpaint_edit_mask > 0),
-                            255,
-                            0,
-                        ).astype(np.uint8)
-                    (
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.cleanup_stats,
-                    ) = refine_bubble_residue_inpaint(
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        inpaint_blocks,
-                        self.inpainting.inpainter_cache,
-                        config,
-                        page_label=f"{index + 1}/{total_images}",
-                    )
+                    ctx.inpaint_input_img = cleanup.inpaint_input_img
+                    ctx.mask = cleanup.mask
+                    ctx.cleanup_stats = cleanup.cleanup_stats
+                    outside_before_restore = cleanup.outside_before_restore
+                    outside_after_restore = cleanup.outside_after_restore
+                    # 진행 보고는 파이프라인 스레드에 남긴다. 계산과 달리 이건
+                    # 시그널을 건드린다.
                     self._report_residue_cleanup(
                         index=index,
                         total=total_images,
                         image_path=ctx.image_path,
                         cleanup_stats=ctx.cleanup_stats,
-                    )
-                    (
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.cleanup_stats,
-                    ) = apply_duplicate_bubble_inner_fill(
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                        ctx.mask_details,
-                        ctx.cleanup_stats,
-                    )
-                    outside_before_restore = count_changed_outside_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                    )
-                    ctx.inpaint_input_img = composite_with_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
-                    )
-                    outside_after_restore = count_changed_outside_edit_mask(
-                        ctx.image,
-                        ctx.inpaint_input_img,
-                        ctx.mask,
                     )
                 ctx.inpaint_diagnostics[
                     "outside_mask_changed_before_restore"
