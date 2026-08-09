@@ -1,9 +1,20 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare', 'Verify')]
+    # Prepare 는 원본을 볼륨에 넣고 봉인한다. Verify 는 읽기 전용 검사다.
+    # Reseal 은 볼륨 내용을 그대로 두고 현재 llama.cpp image 로 smoke 를 다시
+    # 통과시킨 뒤 ready manifest 만 다시 쓴다. Auto 는 볼륨 상태를 보고 Prepare 와
+    # Reseal 중 맞는 쪽을 고르며, 앱의 자가복구 경로가 쓰는 모드다.
+    [ValidateSet('Prepare', 'Verify', 'Reseal', 'Auto')]
     [string]$Mode = 'Prepare',
 
+    # 비우면 저장소의 `testmodel/`, 그다음 다운로드 캐시를 차례로 찾는다.
     [string]$ModelDirectory = '',
+
+    # 로컬에서 검증된 원본을 못 찾았을 때만 등록된 원본을 내려받는다.
+    [switch]$AllowDownload,
+
+    # 내려받은 원본을 둘 위치. 비우면 저장소의 `testmodel/`.
+    [string]$DownloadDirectory = '',
 
     [string]$VolumeName = 'comic-translate-paddleocr-vl-llamacpp-models-v1',
 
@@ -24,6 +35,8 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Force
+
 $PreparationVersion = 1
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'
@@ -43,12 +56,20 @@ $ModelSpecs = @(
         Bytes = [int64]935769056
         Sha256 = 'f3ae46ec885050acf4b3d31944431e1fd90d50664fb09126af4a3c050ba14ee8'
         Role = 'vlm'
+        DownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF.gguf'
+        )
     }
     [pscustomobject][ordered]@{
         Name = 'PaddleOCR-VL-1.6-GGUF-mmproj.gguf'
         Bytes = [int64]881770560
         Sha256 = '204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a'
         Role = 'vision-projector'
+        DownloadUrl = (
+            'https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/' +
+            'resolve/main/PaddleOCR-VL-1.6-GGUF-mmproj.gguf'
+        )
     }
 )
 
@@ -102,10 +123,18 @@ function ConvertTo-NativeArgument {
 function Invoke-DockerResult {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
+    # PowerShell here-string 은 줄 끝을 CRLF 로 담는다. 컨테이너의 `/bin/sh` 가
+    # dash 이면 줄 끝의 CR 을 토큰의 일부로 읽어 첫 줄 `set -eu` 부터
+    # "Illegal option -" 로 죽는다. docker 인자에 CR 이 의미를 갖는 경우는 없으므로
+    # 여기서 한 번에 정규화한다.
+    $NormalizedArguments = @(
+        $Arguments | ForEach-Object { [string]$_ -replace "`r`n", "`n" }
+    )
+
     $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $StartInfo.FileName = $DockerExecutable
     $StartInfo.Arguments = (
-        $Arguments |
+        $NormalizedArguments |
             ForEach-Object { ConvertTo-NativeArgument -Argument $_ }
     ) -join ' '
     $StartInfo.UseShellExecute = $false
@@ -265,6 +294,15 @@ function Assert-ManifestContract {
         $Manifest.ready -ne $true -or
         $Manifest.smoke_test.passed -ne $true
     ) {
+        if ([string]$Manifest.source_image_id -ne $ImageId) {
+            # 지원 태그가 업스트림에서 갱신되면 image identity 만 어긋난다. 이때는
+            # 원본 파일 없이 Reseal 로 복구된다.
+            throw (
+                'Ready manifest header does not match the PaddleOCR llama.cpp contract: the ' +
+                "llama.cpp image identity drifted (manifest=$($Manifest.source_image_id), " +
+                "actual=$ImageId). Run this script with -Mode Reseal to re-smoke and re-seal."
+            )
+        }
         throw 'Ready manifest header does not match the PaddleOCR llama.cpp contract.'
     }
     if (@($Manifest.files).Count -ne $ModelSpecs.Count) {
@@ -284,6 +322,60 @@ function Assert-ManifestContract {
 }
 
 $ImageId = Get-PinnedImageId
+
+function Get-VolumeFileSize {
+    param([Parameter(Mandatory = $true)][string]$FileName)
+
+    $Result = Invoke-DockerResult -Arguments @(
+        'run', '--rm', '--pull', 'never',
+        '-e', "MODEL_FILE=$FileName",
+        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
+        '--entrypoint', '/bin/sh',
+        $ImageRef,
+        '-ec', 'if test -f "/models/$MODEL_FILE"; then stat -c %s "/models/$MODEL_FILE"; fi'
+    )
+    if ($Result.ExitCode -ne 0) {
+        return [int64]-1
+    }
+    $Text = $Result.Output.Trim()
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return [int64]-1
+    }
+    return [int64]$Text
+}
+
+function Test-VolumeHoldsEveryModel {
+    <#
+    .SYNOPSIS
+    볼륨이 계약된 모든 파일을 이미 담고 있는가(크기 기준).
+
+    .DESCRIPTION
+    `Auto` 가 Prepare 와 Reseal 중 무엇을 할지 고르는 데만 쓴다. 크기만 보는 이유는
+    대형 GGUF 를 두 번 해시하지 않기 위해서다. 권위 있는 판정은 Reseal 이 smoke 앞에서
+    수행하는 SHA-256 검증이고, 거기서 어긋나면 그대로 실패한다.
+    #>
+
+    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
+        return $false
+    }
+    foreach ($Spec in $ModelSpecs) {
+        if ((Get-VolumeFileSize -FileName $Spec.Name) -ne $Spec.Bytes) {
+            return $false
+        }
+    }
+    return $true
+}
+
+if ($Mode -eq 'Auto') {
+    if (Test-VolumeHoldsEveryModel) {
+        Write-Host 'Auto mode: the volume already holds every model; resealing.'
+        $Mode = 'Reseal'
+    }
+    else {
+        Write-Host 'Auto mode: the volume is missing a model; preparing.'
+        $Mode = 'Prepare'
+    }
+}
 
 if ($Mode -eq 'Verify') {
     if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
@@ -322,12 +414,13 @@ if ($Mode -eq 'Verify') {
     return
 }
 
-if ([string]::IsNullOrWhiteSpace($ModelDirectory)) {
-    throw 'Prepare mode requires -ModelDirectory.'
-}
+$IsReseal = $Mode -eq 'Reseal'
+
 Assert-ManagedContainerStopped
 
-if (-not $SkipFreeSpaceCheck) {
+# Reseal 은 볼륨 안 파일을 그대로 두고 manifest 만 다시 쓴다. 원본을 복사하지
+# 않으므로 원본 경로도, 복사할 여유 공간도 필요 없다.
+if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
     if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
@@ -338,44 +431,48 @@ if (-not $SkipFreeSpaceCheck) {
     }
 }
 
-$ResolvedDirectory = (Resolve-Path -LiteralPath $ModelDirectory).Path
 $PreparedSources = @()
-foreach ($Spec in $ModelSpecs) {
-    $SourcePath = Join-Path $ResolvedDirectory $Spec.Name
-    $Item = Get-Item -LiteralPath $SourcePath
-    if ($Item.Length -ne $Spec.Bytes) {
-        throw (
-            "Source size mismatch: {0}, expected={1}, actual={2}" -f
-            $Spec.Name,
-            $Spec.Bytes,
-            $Item.Length
-        )
-    }
-    Write-Host "Checking source SHA-256: $($Spec.Name)"
-    $SourceHash = (
-        Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256
-    ).Hash.ToLowerInvariant()
-    if ($SourceHash -ne $Spec.Sha256) {
-        throw (
-            "Source SHA-256 mismatch: {0}, expected={1}, actual={2}" -f
-            $Spec.Name,
-            $Spec.Sha256,
-            $SourceHash
-        )
-    }
-    $PreparedSources += [pscustomobject]@{
-        Spec = $Spec
-        Directory = Split-Path -Parent $SourcePath
-        FileName = Split-Path -Leaf $SourcePath
+if (-not $IsReseal) {
+    foreach ($Spec in $ModelSpecs) {
+        # 볼륨이 이미 계약된 파일을 담고 있으면 원본을 아예 찾지 않는다. 대형
+        # GGUF 를 헛되이 내려받거나 해시하지 않기 위해서다.
+        if ((Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256) {
+            Write-Host "Reusing verified volume file: $($Spec.Name)"
+            continue
+        }
+        $Resolved = Resolve-ManagedRuntimeModelSource `
+            -FileName $Spec.Name `
+            -Bytes $Spec.Bytes `
+            -Sha256 $Spec.Sha256 `
+            -RequestedPath $ModelDirectory `
+            -DownloadUrl ([string]$Spec.DownloadUrl) `
+            -DownloadDirectory $DownloadDirectory `
+            -AllowDownload:$AllowDownload
+        $PreparedSources += [pscustomobject]@{
+            Spec = $Spec
+            Directory = $Resolved.Directory
+            FileName = $Resolved.FileName
+            Origin = $Resolved.Origin
+        }
     }
 }
 
-Invoke-Docker -Arguments @(
-    'volume', 'create',
-    '--label', "comic-translate.runtime=$RuntimeName",
-    '--label', "comic-translate.preparation-version=$PreparationVersion",
-    $VolumeName
-) | Out-Null
+if ($IsReseal) {
+    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
+        throw (
+            "The volume to reseal does not exist: $VolumeName. " +
+            'Run this script in Prepare or Auto mode first.'
+        )
+    }
+}
+else {
+    Invoke-Docker -Arguments @(
+        'volume', 'create',
+        '--label', "comic-translate.runtime=$RuntimeName",
+        '--label', "comic-translate.preparation-version=$PreparationVersion",
+        $VolumeName
+    ) | Out-Null
+}
 Assert-VolumeLabels
 
 Invoke-Docker -Arguments @(
@@ -389,12 +486,8 @@ Invoke-Docker -Arguments @(
 ) | Out-Null
 
 foreach ($Source in $PreparedSources) {
+    # 볼륨에 이미 있는 파일은 위에서 걸러졌다. 여기 남은 것은 반드시 복사한다.
     $Spec = $Source.Spec
-    $ExistingHash = Get-VolumeFileHash -FileName $Spec.Name -AllowMissing
-    if ($ExistingHash -eq $Spec.Sha256) {
-        Write-Host "Reusing verified volume file: $($Spec.Name)"
-        continue
-    }
     Write-Host "Copying and verifying: $($Spec.Name)"
     Invoke-Docker -Arguments @(
         'run', '--rm', '--pull', 'never',
@@ -429,7 +522,13 @@ $VerifiedFiles = @()
 foreach ($Spec in $ModelSpecs) {
     $ActualHash = Get-VolumeFileHash -FileName $Spec.Name
     if ($ActualHash -ne $Spec.Sha256) {
-        throw "Copied file SHA-256 mismatch: $($Spec.Name)"
+        $Recovery = if ($IsReseal) {
+            ' Reseal never copies model data, so run this script with -Mode Prepare.'
+        }
+        else {
+            ''
+        }
+        throw ("Volume file SHA-256 mismatch: $($Spec.Name)." + $Recovery)
     }
     $VerifiedFiles += [pscustomobject][ordered]@{
         name = $Spec.Name
@@ -667,7 +766,8 @@ $ManifestSha256 = Invoke-Docker -Arguments @(
 )
 
 [ordered]@{
-    mode = 'Prepare'
+    mode = $Mode
+    resealed = $IsReseal
     prepared = $true
     volume_name = $VolumeName
     ready_manifest = $ReadyManifestName
