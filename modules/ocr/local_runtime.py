@@ -100,10 +100,26 @@ from modules.utils.llama_cpp_runtime import (
     inspect_llama_cpp_runtime,
     resolve_docker_compose_command,
 )
+from modules.utils.managed_runtime_repair import (
+    ManagedRuntimeRepairError,
+    ManagedRuntimeRepairPlan,
+    describe_image_identity_drift,
+    is_image_identity_only_drift,
+    run_managed_runtime_preparation,
+)
 
 logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+
+
+class _ManagedVolumeNotProvisioned(RuntimeError):
+    """준비 볼륨이 아예 없거나 계약된 파일이 빠져 있다.
+
+    준비 스크립트를 돌리면 해결되는 상태다. 볼륨 라벨 불일치처럼 사람의 판단을
+    요구하는 상태와 구별하려고 따로 둔다.
+    """
+
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
 PADDLEOCR_LLAMA_CPP_IMAGE_REF = DEFAULT_PADDLE_LLAMA_CPP_IMAGE
@@ -212,6 +228,9 @@ class LocalOCRRuntimeManager:
         self._managed_start_attempted_engine: str | None = None
         self._readiness_cache: set[tuple[str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
+        # 자가복구는 계약을 읽는 깊은 곳에서 일어난다. 진행 콜백을 그 경로 전체로
+        # 인자로 흘리는 대신 현재 기동의 콜백을 여기에 둔다.
+        self._startup_progress_callback: Callable[[dict[str, Any]], None] | None = None
         self._paddle_runtime_contract_cache: PaddleLlamaRuntimeContract | None = None
         self._paddle_spotting_runtime_contract_cache: (
             PaddleSpottingRuntimeContract | None
@@ -765,6 +784,7 @@ class LocalOCRRuntimeManager:
     ) -> None:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
+            self._startup_progress_callback = progress_callback
             router_pair = self.router_pair_for_engine(engine_key, settings_page)
             if router_pair is not None:
                 self._ensure_router_engine(
@@ -1660,10 +1680,128 @@ class LocalOCRRuntimeManager:
         names = config.get("container_names") or [config.get("container_name")]
         return [str(name).strip() for name in names if str(name or "").strip()]
 
+    # 관리형 OCR 런타임별 준비 스크립트. 자가복구가 Reseal 로 호출한다.
+    _PREPARE_SCRIPTS: dict[str, str] = {
+        "PaddleOCR VL": "prepare_paddleocr_llamacpp_runtime.ps1",
+        "PaddleOCR VL Spotting": "prepare_paddleocr_spotting_llamacpp_runtime.ps1",
+        "MangaLMM": "prepare_mangalmm_llamacpp_runtime.ps1",
+        "HunyuanOCR": "prepare_hunyuanocr_llamacpp_runtime.ps1",
+    }
+
+    def _contract_or_reseal(
+        self,
+        *,
+        engine_key: str,
+        volume_name: str,
+        manifest_bytes: bytes,
+        image_ref: str,
+        image_id: str,
+        build: Callable[[str, str], Any],
+        allow_repair: bool,
+        retry: Callable[[], Any],
+    ) -> Any:
+        """계약을 세우되, 어긋난 것이 이미지 identity 뿐이면 한 번 다시 봉인한다.
+
+        모델 해시 불일치처럼 실제로 볼륨을 신뢰할 수 없는 상태는 복구하지 않고
+        그대로 올린다. 신뢰할 수 없는 볼륨에 유효 도장을 찍어서는 안 된다.
+        """
+
+        try:
+            return build(image_ref, image_id)
+        except Exception:
+            if not allow_repair or not is_image_identity_only_drift(
+                manifest_bytes,
+                current_image_id=image_id,
+                revalidate=build,
+            ):
+                raise
+        self._repair_managed_runtime_volume(
+            engine_key=engine_key,
+            volume_name=volume_name,
+            detail=describe_image_identity_drift(
+                manifest_bytes,
+                current_image_id=image_id,
+                runtime_label=engine_key,
+            ),
+        )
+        return retry()
+
+    def _repair_managed_runtime_volume(
+        self,
+        *,
+        engine_key: str,
+        volume_name: str,
+        detail: str,
+        message: str = "",
+    ) -> None:
+        """준비 스크립트를 ``Auto`` 로 돌려 볼륨을 계약에 맞춘다.
+
+        볼륨이 이미 계약된 파일을 담고 있으면 manifest 만 다시 봉인하고, 비어
+        있으면 원본을 찾아 채운다. 준비 스크립트는 관리 컨테이너가 실행 중이면
+        거부한다. 이 시점의 컨테이너는 이미 계약을 만족하지 못하는 것이므로 먼저
+        정지한다.
+        """
+
+        logger.info("%s Running the preparation script.", detail)
+        self._emit_progress(
+            self._startup_progress_callback,
+            engine_key,
+            status="running",
+            step_key="runtime_repair",
+            message=message
+            or (
+                f"{engine_key} 런타임 볼륨을 현재 llama.cpp 이미지에 맞춰 "
+                "다시 봉인하는 중..."
+            ),
+            detail=detail,
+        )
+        if self._running_managed_container_names(engine_key):
+            self._stop_engine(engine_key)
+        self._readiness_cache.clear()
+        plan = ManagedRuntimeRepairPlan(
+            runtime_label=engine_key,
+            prepare_script=ROOT_DIR / "scripts" / self._PREPARE_SCRIPTS[engine_key],
+            volume_name=volume_name,
+        )
+        try:
+            run_managed_runtime_preparation(
+                plan,
+                mode="Auto",
+                allow_download=True,
+                cancel_checker=self._startup_cancel_checker,
+                progress=lambda text: self._emit_progress(
+                    self._startup_progress_callback,
+                    engine_key,
+                    status="running",
+                    step_key="runtime_repair",
+                    message=text,
+                    detail=detail,
+                ),
+            )
+        except OperationCancelledError:
+            raise
+        except ManagedRuntimeRepairError as exc:
+            raise self._build_setup_error(
+                engine_key,
+                (
+                    f"{detail}\nAutomatic repair failed: {exc}\n"
+                    f"Run scripts/{self._PREPARE_SCRIPTS[engine_key]} -Mode Auto by hand."
+                ),
+            ) from exc
+        self._emit_progress(
+            self._startup_progress_callback,
+            engine_key,
+            status="completed",
+            step_key="runtime_repair",
+            message=f"{engine_key} 런타임 볼륨 준비를 마쳤습니다.",
+            detail=detail,
+        )
+
     def _paddle_runtime_contract(
         self,
         *,
         force_refresh: bool = False,
+        allow_repair: bool = True,
     ) -> PaddleLlamaRuntimeContract:
         if self._paddle_runtime_contract_cache is not None and not force_refresh:
             return self._paddle_runtime_contract_cache
@@ -1677,14 +1815,29 @@ class LocalOCRRuntimeManager:
                 DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
             )
         )
-        (
-            manifest_bytes,
-            manifest_sha256,
-            observed_file_bytes,
-        ) = self._probe_paddle_model_volume(
-            volume_name=volume_name,
-            image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
-        )
+        try:
+            (
+                manifest_bytes,
+                manifest_sha256,
+                observed_file_bytes,
+            ) = self._probe_paddle_model_volume(
+                volume_name=volume_name,
+                image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+            )
+        except _ManagedVolumeNotProvisioned as exc:
+            if not allow_repair:
+                raise self._build_setup_error("PaddleOCR VL", str(exc)) from exc
+            # 볼륨 자체가 없거나 비었다. 준비 스크립트가 원본을 찾아 채운다.
+            self._repair_managed_runtime_volume(
+                engine_key="PaddleOCR VL",
+                volume_name=volume_name,
+                detail=str(exc),
+                message=(
+                    "PaddleOCR VL 런타임 볼륨을 준비하는 중... "
+                    "모델을 내려받아야 하면 오래 걸립니다."
+                ),
+            )
+            return self._paddle_runtime_contract(force_refresh=True, allow_repair=False)
         llama_image_id = self._inspect_docker_image_id(
             PADDLEOCR_LLAMA_CPP_IMAGE_REF
         )
@@ -1692,15 +1845,30 @@ class LocalOCRRuntimeManager:
             raise PaddleLlamaRuntimeContractError(
                 "Pinned PaddleOCR llama.cpp image is not installed."
             )
-        contract = build_paddle_llama_runtime_contract(
-            manifest_bytes=manifest_bytes,
-            manifest_sha256=manifest_sha256,
-            observed_file_bytes=observed_file_bytes,
+        def build(image_ref: str, image_id: str) -> PaddleLlamaRuntimeContract:
+            return build_paddle_llama_runtime_contract(
+                manifest_bytes=manifest_bytes,
+                manifest_sha256=manifest_sha256,
+                observed_file_bytes=observed_file_bytes,
+                volume_name=volume_name,
+                llama_image_ref=image_ref,
+                llama_image_id=image_id,
+                compose_file=compose_file,
+                environment=os.environ,
+            )
+
+        contract = self._contract_or_reseal(
+            engine_key="PaddleOCR VL",
             volume_name=volume_name,
-            llama_image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
-            llama_image_id=llama_image_id,
-            compose_file=compose_file,
-            environment=os.environ,
+            manifest_bytes=manifest_bytes,
+            image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+            image_id=llama_image_id,
+            build=build,
+            allow_repair=allow_repair,
+            retry=lambda: self._paddle_runtime_contract(
+                force_refresh=True,
+                allow_repair=False,
+            ),
         )
         self._paddle_runtime_contract_cache = contract
         return contract
@@ -1731,6 +1899,7 @@ class LocalOCRRuntimeManager:
         self,
         *,
         force_refresh: bool = False,
+        allow_repair: bool = True,
     ) -> PaddleSpottingRuntimeContract:
         if (
             self._paddle_spotting_runtime_contract_cache is not None
@@ -1749,14 +1918,29 @@ class LocalOCRRuntimeManager:
                 DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
             )
         )
-        (
-            manifest_bytes,
-            manifest_sha256,
-            observed_file_bytes,
-        ) = self._probe_paddle_spotting_model_volume(
-            volume_name=volume_name,
-            image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
-        )
+        try:
+            (
+                manifest_bytes,
+                manifest_sha256,
+                observed_file_bytes,
+            ) = self._probe_paddle_spotting_model_volume(
+                volume_name=volume_name,
+                image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
+            )
+        except _ManagedVolumeNotProvisioned as exc:
+            if not allow_repair:
+                raise self._build_setup_error("PaddleOCR VL Spotting", str(exc)) from exc
+            # 볼륨 자체가 없거나 비었다. 준비 스크립트가 원본을 찾아 채운다.
+            self._repair_managed_runtime_volume(
+                engine_key="PaddleOCR VL Spotting",
+                volume_name=volume_name,
+                detail=str(exc),
+                message=(
+                    "PaddleOCR VL Spotting 런타임 볼륨을 준비하는 중... "
+                    "모델을 내려받아야 하면 오래 걸립니다."
+                ),
+            )
+            return self._paddle_spotting_runtime_contract(force_refresh=True, allow_repair=False)
         llama_image_id = self._inspect_docker_image_id(
             PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF
         )
@@ -1765,15 +1949,30 @@ class LocalOCRRuntimeManager:
                 "Pinned PaddleOCR-VL Spotting llama.cpp image is not "
                 "installed."
             )
-        contract = build_paddle_spotting_runtime_contract(
-            manifest_bytes=manifest_bytes,
-            manifest_sha256=manifest_sha256,
-            observed_file_bytes=observed_file_bytes,
+        def build(image_ref: str, image_id: str) -> PaddleSpottingRuntimeContract:
+            return build_paddle_spotting_runtime_contract(
+                manifest_bytes=manifest_bytes,
+                manifest_sha256=manifest_sha256,
+                observed_file_bytes=observed_file_bytes,
+                volume_name=volume_name,
+                llama_image_ref=image_ref,
+                llama_image_id=image_id,
+                compose_file=compose_file,
+                environment=os.environ,
+            )
+
+        contract = self._contract_or_reseal(
+            engine_key="PaddleOCR VL Spotting",
             volume_name=volume_name,
-            llama_image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
-            llama_image_id=llama_image_id,
-            compose_file=compose_file,
-            environment=os.environ,
+            manifest_bytes=manifest_bytes,
+            image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
+            image_id=llama_image_id,
+            build=build,
+            allow_repair=allow_repair,
+            retry=lambda: self._paddle_spotting_runtime_contract(
+                force_refresh=True,
+                allow_repair=False,
+            ),
         )
         self._paddle_spotting_runtime_contract_cache = contract
         return contract
@@ -1810,6 +2009,7 @@ class LocalOCRRuntimeManager:
         self,
         *,
         force_refresh: bool = False,
+        allow_repair: bool = True,
     ) -> MangaLMMRuntimeContract:
         if (
             self._mangalmm_runtime_contract_cache is not None
@@ -1826,14 +2026,29 @@ class LocalOCRRuntimeManager:
                 DEFAULT_MANGALMM_MODEL_VOLUME,
             )
         )
-        (
-            manifest_bytes,
-            manifest_sha256,
-            observed_file_bytes,
-        ) = self._probe_mangalmm_model_volume(
-            volume_name=volume_name,
-            image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
-        )
+        try:
+            (
+                manifest_bytes,
+                manifest_sha256,
+                observed_file_bytes,
+            ) = self._probe_mangalmm_model_volume(
+                volume_name=volume_name,
+                image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
+            )
+        except _ManagedVolumeNotProvisioned as exc:
+            if not allow_repair:
+                raise self._build_setup_error("MangaLMM", str(exc)) from exc
+            # 볼륨 자체가 없거나 비었다. 준비 스크립트가 원본을 찾아 채운다.
+            self._repair_managed_runtime_volume(
+                engine_key="MangaLMM",
+                volume_name=volume_name,
+                detail=str(exc),
+                message=(
+                    "MangaLMM 런타임 볼륨을 준비하는 중... "
+                    "모델을 내려받아야 하면 오래 걸립니다."
+                ),
+            )
+            return self._mangalmm_runtime_contract(force_refresh=True, allow_repair=False)
         llama_image_id = self._inspect_docker_image_id(
             MANGALMM_LLAMA_CPP_IMAGE_REF
         )
@@ -1841,15 +2056,30 @@ class LocalOCRRuntimeManager:
             raise MangaLMMRuntimeContractError(
                 "Pinned MangaLMM llama.cpp image is not installed."
             )
-        contract = build_mangalmm_runtime_contract(
-            manifest_bytes=manifest_bytes,
-            manifest_sha256=manifest_sha256,
-            observed_file_bytes=observed_file_bytes,
+        def build(image_ref: str, image_id: str) -> MangaLMMRuntimeContract:
+            return build_mangalmm_runtime_contract(
+                manifest_bytes=manifest_bytes,
+                manifest_sha256=manifest_sha256,
+                observed_file_bytes=observed_file_bytes,
+                volume_name=volume_name,
+                llama_image_ref=image_ref,
+                llama_image_id=image_id,
+                compose_file=compose_file,
+                environment=os.environ,
+            )
+
+        contract = self._contract_or_reseal(
+            engine_key="MangaLMM",
             volume_name=volume_name,
-            llama_image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
-            llama_image_id=llama_image_id,
-            compose_file=compose_file,
-            environment=os.environ,
+            manifest_bytes=manifest_bytes,
+            image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
+            image_id=llama_image_id,
+            build=build,
+            allow_repair=allow_repair,
+            retry=lambda: self._mangalmm_runtime_contract(
+                force_refresh=True,
+                allow_repair=False,
+            ),
         )
         self._mangalmm_runtime_contract_cache = contract
         return contract
@@ -1898,14 +2128,9 @@ class LocalOCRRuntimeManager:
             cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
-            raise self._build_setup_error(
-                "PaddleOCR VL",
-                (
-                    "Prepared PaddleOCR llama.cpp model volume does not exist: "
-                    f"{volume_name}\n"
-                    "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 before "
-                    "starting the managed endpoint."
-                )
+            raise _ManagedVolumeNotProvisioned(
+                "Prepared PaddleOCR llama.cpp model volume does not exist: "
+                f"{volume_name}"
             )
         try:
             volume_labels = json.loads(
@@ -1983,14 +2208,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             detail = (
                 (completed.stderr or "") + "\n" + (completed.stdout or "")
             ).strip()
-            raise self._build_setup_error(
-                "PaddleOCR VL",
-                (
-                    "Prepared PaddleOCR llama.cpp model volume is incomplete: "
-                    f"{volume_name}\n{detail}\n"
-                    "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 in "
-                    "Prepare or Verify mode."
-                )
+            raise _ManagedVolumeNotProvisioned(
+                "Prepared PaddleOCR llama.cpp model volume is incomplete: "
+                f"{volume_name}\n{detail}"
             )
 
         values: dict[str, str] = {}
@@ -2037,14 +2257,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
-            raise self._build_setup_error(
-                "MangaLMM",
-                (
-                    "Prepared MangaLMM model volume does not exist: "
-                    f"{volume_name}\n"
-                    "Run scripts/prepare_mangalmm_llamacpp_runtime.ps1 before "
-                    "starting the managed endpoint."
-                ),
+            raise _ManagedVolumeNotProvisioned(
+                "Prepared MangaLMM model volume does not exist: "
+                f"{volume_name}"
             )
         try:
             volume_labels = json.loads(
@@ -2122,14 +2337,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             detail = (
                 (completed.stderr or "") + "\n" + (completed.stdout or "")
             ).strip()
-            raise self._build_setup_error(
-                "MangaLMM",
-                (
-                    "Prepared MangaLMM model volume is incomplete: "
-                    f"{volume_name}\n{detail}\n"
-                    "Run scripts/prepare_mangalmm_llamacpp_runtime.ps1 in "
-                    "Prepare or Verify mode."
-                ),
+            raise _ManagedVolumeNotProvisioned(
+                "Prepared MangaLMM model volume is incomplete: "
+                f"{volume_name}\n{detail}"
             )
 
         values: dict[str, str] = {}
@@ -2159,6 +2369,7 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
         self,
         *,
         force_refresh: bool = False,
+        allow_repair: bool = True,
     ) -> HunyuanOCRRuntimeContract:
         if (
             self._hunyuan_ocr_runtime_contract_cache is not None
@@ -2175,14 +2386,29 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                 DEFAULT_HUNYUAN_OCR_MODEL_VOLUME,
             )
         )
-        (
-            manifest_bytes,
-            manifest_sha256,
-            observed_file_bytes,
-        ) = self._probe_hunyuan_ocr_model_volume(
-            volume_name=volume_name,
-            image_ref=HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF,
-        )
+        try:
+            (
+                manifest_bytes,
+                manifest_sha256,
+                observed_file_bytes,
+            ) = self._probe_hunyuan_ocr_model_volume(
+                volume_name=volume_name,
+                image_ref=HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF,
+            )
+        except _ManagedVolumeNotProvisioned as exc:
+            if not allow_repair:
+                raise self._build_setup_error("HunyuanOCR", str(exc)) from exc
+            # 볼륨 자체가 없거나 비었다. 준비 스크립트가 원본을 찾아 채운다.
+            self._repair_managed_runtime_volume(
+                engine_key="HunyuanOCR",
+                volume_name=volume_name,
+                detail=str(exc),
+                message=(
+                    "HunyuanOCR 런타임 볼륨을 준비하는 중... "
+                    "모델을 내려받아야 하면 오래 걸립니다."
+                ),
+            )
+            return self._hunyuan_ocr_runtime_contract(force_refresh=True, allow_repair=False)
         llama_image_id = self._inspect_docker_image_id(
             HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF
         )
@@ -2190,15 +2416,30 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             raise HunyuanOCRRuntimeContractError(
                 "고정된 HunyuanOCR llama.cpp 이미지가 설치되어 있지 않습니다."
             )
-        contract = build_hunyuan_ocr_runtime_contract(
-            manifest_bytes=manifest_bytes,
-            manifest_sha256=manifest_sha256,
-            observed_file_bytes=observed_file_bytes,
+        def build(image_ref: str, image_id: str) -> HunyuanOCRRuntimeContract:
+            return build_hunyuan_ocr_runtime_contract(
+                manifest_bytes=manifest_bytes,
+                manifest_sha256=manifest_sha256,
+                observed_file_bytes=observed_file_bytes,
+                volume_name=volume_name,
+                llama_image_ref=image_ref,
+                llama_image_id=image_id,
+                compose_file=compose_file,
+                environment=os.environ,
+            )
+
+        contract = self._contract_or_reseal(
+            engine_key="HunyuanOCR",
             volume_name=volume_name,
-            llama_image_ref=HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF,
-            llama_image_id=llama_image_id,
-            compose_file=compose_file,
-            environment=os.environ,
+            manifest_bytes=manifest_bytes,
+            image_ref=HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF,
+            image_id=llama_image_id,
+            build=build,
+            allow_repair=allow_repair,
+            retry=lambda: self._hunyuan_ocr_runtime_contract(
+                force_refresh=True,
+                allow_repair=False,
+            ),
         )
         self._hunyuan_ocr_runtime_contract_cache = contract
         return contract
@@ -2247,14 +2488,8 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
-            raise self._build_setup_error(
-                "HunyuanOCR",
-                (
-                    "준비된 HunyuanOCR 모델 volume이 없습니다: "
-                    f"{volume_name}\n"
-                    "관리형 endpoint를 시작하기 전에 "
-                    "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1을 실행하세요."
-                ),
+            raise _ManagedVolumeNotProvisioned(
+                f"준비된 HunyuanOCR 모델 volume이 없습니다: {volume_name}"
             )
         try:
             volume_labels = json.loads(
@@ -2332,14 +2567,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             detail = (
                 (completed.stderr or "") + "\n" + (completed.stdout or "")
             ).strip()
-            raise self._build_setup_error(
-                "HunyuanOCR",
-                (
-                    "준비된 HunyuanOCR 모델 volume이 불완전합니다: "
-                    f"{volume_name}\n{detail}\n"
-                    "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1을 Prepare "
-                    "또는 Verify 모드로 실행하세요."
-                ),
+            raise _ManagedVolumeNotProvisioned(
+                "준비된 HunyuanOCR 모델 volume이 불완전합니다: "
+                f"{volume_name}\n{detail}"
             )
 
         values: dict[str, str] = {}
@@ -2386,15 +2616,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
-            raise self._build_setup_error(
-                "PaddleOCR VL Spotting",
-                (
-                    "Prepared PaddleOCR-VL Spotting model volume does "
-                    f"not exist: {volume_name}\n"
-                    "Run scripts/"
-                    "prepare_paddleocr_spotting_llamacpp_runtime.ps1 "
-                    "before starting the managed endpoint."
-                ),
+            raise _ManagedVolumeNotProvisioned(
+                "Prepared PaddleOCR-VL Spotting model volume does not exist: "
+                f"{volume_name}"
             )
         try:
             volume_labels = json.loads(
@@ -2485,15 +2709,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                 + "\n"
                 + (completed.stdout or "")
             ).strip()
-            raise self._build_setup_error(
-                "PaddleOCR VL Spotting",
-                (
-                    "Prepared PaddleOCR-VL Spotting model volume is "
-                    f"incomplete: {volume_name}\n{detail}\n"
-                    "Run scripts/"
-                    "prepare_paddleocr_spotting_llamacpp_runtime.ps1 "
-                    "in Prepare or Verify mode."
-                ),
+            raise _ManagedVolumeNotProvisioned(
+                "Prepared PaddleOCR-VL Spotting model volume is incomplete: "
+                f"{volume_name}\n{detail}"
             )
 
         values: dict[str, str] = {}

@@ -15,6 +15,7 @@ PNG 인코딩)를 전용 단일 스레드에 숨기기 위해 분리한 모듈�
 from __future__ import annotations
 
 import copy
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -83,6 +84,9 @@ class RenderJobInput:
     output_path: str
     output_format: str
     is_cancelled: Callable[[], bool] = field(default=lambda: False)
+    # 파이프라인 스레드가 이 작업을 제출한 시각(`time.monotonic`). 워커가 집어드는
+    # 시각과의 차이가 큐 대기 시간이다.
+    submitted_monotonic: float = 0.0
 
 
 @dataclass
@@ -95,6 +99,12 @@ class RenderJobResult:
     mask: np.ndarray | None
     patches: list[dict[str, Any]]
     final_output_path: str
+    # 워커 스레드가 실제로 일한 시간(초). 파이프라인 스레드는 제출만 하고 떠나므로
+    # 이 값 없이는 렌더가 얼마나 비싼지 알 방법이 없다.
+    worker_seconds: float = 0.0
+    # 워커가 이 작업을 집어들기까지 큐에서 기다린 시간(초). 이 값이 커지면
+    # 렌더가 인페인팅을 따라가지 못하고 병목이 됐다는 직접 증거다.
+    queue_wait_seconds: float = 0.0
 
 
 def _check_cancelled(is_cancelled: Callable[[], bool]) -> None:
@@ -438,6 +448,12 @@ def run_render_job(job: RenderJobInput) -> RenderJobResult:
 
     입력은 전부 값, 출력은 전부 값이다. `main_page`를 참조하지 않는다.
     """
+    started_monotonic = time.monotonic()
+    queue_wait_seconds = (
+        max(0.0, started_monotonic - float(job.submitted_monotonic))
+        if job.submitted_monotonic
+        else 0.0
+    )
     _check_cancelled(job.is_cancelled)
 
     canonical_translations = [
@@ -523,4 +539,6 @@ def run_render_job(job: RenderJobInput) -> RenderJobResult:
         mask=mask,
         patches=patches,
         final_output_path=final_output_path,
+        worker_seconds=max(0.0, time.monotonic() - started_monotonic),
+        queue_wait_seconds=queue_wait_seconds,
     )

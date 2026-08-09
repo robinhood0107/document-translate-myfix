@@ -159,6 +159,19 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 그대로 재사용합니다. 준비가 끝나면 CUDA 모델 적재 스모크를 실행하고 그 결과를
 ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 씁니다.
 
+### 준비 볼륨이 갑자기 거부될 때
+
+모든 준비 스크립트는 `-Mode Auto`를 받습니다. 볼륨이 비어 있으면 준비하고,
+이미 계약된 파일을 담고 있으면 다시 봉인합니다. 업스트림이 llama.cpp 태그를
+갱신해 image digest가 움직이면 모델이 멀쩡한데도 manifest만 어긋나는데, 이때
+`Auto`(내부적으로 `Reseal`)가 원본 파일 없이 복구합니다. 앱도 같은 상태를
+스스로 감지해 한 번 복구합니다. `Reseal`은 볼륨 내용을 그대로 두고 모델
+SHA-256을 재검증한 뒤 현재 이미지로 GPU 스모크를 다시 돌리고 manifest만 다시
+씁니다.
+
+`-ModelDirectory`를 생략하면 저장소의 gitignore된 `testmodel/`과 그 바로 아래
+하위 폴더를 먼저 찾습니다.
+
 과거 HunyuanOCR은 `testmodel` 폴더를 bind mount하고 Gemma와 이름이 겹치는
 `LLAMA_CTX_SIZE` 같은 일반 환경변수를 읽었습니다. 이제는 준비된 volume과
 `HUNYUAN_OCR_LLAMA_*` 전용 이름을 사용하므로, 한쪽을 조정해도 다른 엔진이
