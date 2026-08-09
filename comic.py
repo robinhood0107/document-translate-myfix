@@ -50,6 +50,67 @@ def _is_packaged_app() -> bool:
     return bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
 
 
+def _configure_file_logging() -> str:
+    """앱 로그를 파일로도 남긴다. 실패하면 조용히 콘솔 전용으로 둔다.
+
+    지금까지 로깅은 stderr 로만 나갔다. 콘솔 없이 실행하는 일반 사용 경로에서는
+    그대로 사라졌고, 실제로 배치 도중 터진 MemoryError traceback 이 아무 데도
+    남지 않아 사후 진단이 불가능했다. 로그가 없으면 무슨 일이 있었는지 물어볼
+    데가 없다.
+    """
+
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        from modules.utils.paths import get_user_data_dir
+
+        log_dir = os.path.join(get_user_data_dir(), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "comic-translate.log")
+        handler = RotatingFileHandler(
+            log_path,
+            maxBytes=8 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+        handler.setLevel(logging.INFO)
+        logging.getLogger().addHandler(handler)
+        return log_path
+    except Exception:
+        logging.warning("Could not attach the log file handler.", exc_info=True)
+        return ""
+
+
+def _install_unhandled_exception_logging() -> None:
+    """죽기 전 마지막 traceback 을 반드시 로그에 남긴다."""
+
+    previous = sys.excepthook
+
+    def hook(exc_type, exc_value, exc_tb) -> None:
+        if not issubclass(exc_type, KeyboardInterrupt):
+            logging.getLogger("comic").critical(
+                "Unhandled exception",
+                exc_info=(exc_type, exc_value, exc_tb),
+            )
+        previous(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = hook
+    try:
+        threading.excepthook = lambda args: logging.getLogger("comic").critical(
+            "Unhandled exception in thread %s",
+            getattr(args, "thread", None),
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+    except Exception:
+        logging.debug("Could not install the thread exception hook.", exc_info=True)
+
+
 def _configure_portable_io_dirs() -> None:
     if not _is_packaged_app():
         return
@@ -175,6 +236,10 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
     )
+    log_path = _configure_file_logging()
+    _install_unhandled_exception_logging()
+    if log_path:
+        logging.getLogger("comic").info("Logging to %s", log_path)
     _configure_portable_io_dirs()
     
     if sys.platform == "win32":
