@@ -47,7 +47,7 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
@@ -64,7 +64,7 @@ Then choose `Custom Local Server(Gemma)` in the app. The managed runtime mounts 
 ### HunyuanOCR local runtime
 
 - Compose file: `/hunyuanocr_docker_files/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
 - Runtime/model references:
   - [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
@@ -134,6 +134,44 @@ This route fixes the official `Spotting:` prompt, `--special` location-token
 mode, and `1,605,632` projector pixel budget. The crop route keeps its original
 `1,003,520` projector. See
 [/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md).
+
+### HunyuanOCR route
+
+This is the engine the Optimal choice uses for Chinese. Prepare its versioned
+external model volume once, under the same contract as the other managed
+engines. Put these two files in one model directory:
+
+- `HunyuanOCR.Q8_0.gguf`
+- `HunyuanOCR.mmproj-Q8_0.gguf`
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_hunyuanocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\HunyuanOCR-GGUF'
+```
+
+The tool reuses a file already present in the volume when its SHA-256 matches
+instead of copying it again. It then runs a CUDA model-load smoke test and
+records the result in the ready manifest. Use `-Mode Verify` to re-check only.
+
+### When a prepared volume is suddenly rejected
+
+Every preparation script accepts `-Mode Auto`: it prepares an empty volume and
+reseals one that already holds the contracted files. When upstream refreshes the
+llama.cpp tag the image digest moves, so the models stay correct while the ready
+manifest no longer matches; `Auto` (internally `Reseal`) recovers that without
+the original source files. The app detects the same state and repairs it once on
+its own. See the Korean guide at
+[docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
+
+Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and
+its immediate subdirectories first.
+
+HunyuanOCR previously bind-mounted the `testmodel` folder and read generic
+environment names such as `LLAMA_CTX_SIZE`, which it shared with Gemma. It now
+uses the prepared volume and dedicated `HUNYUAN_OCR_LLAMA_*` names, so tuning
+one engine no longer changes another.
 
 ## 4. Recommended app settings
 

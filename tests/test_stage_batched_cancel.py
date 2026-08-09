@@ -21,6 +21,7 @@ from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.utils.textblock import TextBlock
+from pipeline import render_worker
 from pipeline.runtime_resource_arbiter import RuntimeLeaseConflictError
 from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 from modules.utils.exceptions import OperationCancelledError
@@ -1218,7 +1219,9 @@ class StageBatchedCancellationTests(unittest.TestCase):
             ocr_non_empty_block_count=1,
         )
         processor._log_page_done.assert_called_once_with(0, 2, "success.png")
-        processor.emit_progress.assert_called_once_with(0, 2, 10, 10, False)
+        processor.emit_progress.assert_called_once_with(
+            0, 2, 10, 10, False, stage_name='save-and-finish'
+        )
 
     def test_stage_transition_continues_after_verified_stop_retry(self) -> None:
         processor = self._processor(cancelled=False)
@@ -1323,6 +1326,13 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
 
     def test_unobserved_managed_runtime_release_keeps_gpu_lease(self) -> None:
+        # 미확인 해제를 실패로 처리하는 계약이 대상이므로 진단용 강제를 켠다.
+        patcher = mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         processor = self._processor(cancelled=False)
         processor._record_runtime_transition = mock.Mock()
         processor._record_runtime_performance = mock.Mock()
@@ -1414,6 +1424,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(snapshot.states["gemma"], "stopped")
 
     def test_cancelled_start_with_unobserved_cleanup_keeps_gpu_lease(self) -> None:
+        # 이 테스트들은 미확인 해제를 실패로 처리하는 계약 자체가 대상이다. 그
+        # 처리는 진단용 강제를 켰을 때만 일어나므로 여기서 명시적으로 켠다.
+        patcher = mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         processor = self._processor(cancelled=False)
         processor._record_runtime_transition = mock.Mock()
         processor._record_runtime_performance = mock.Mock()
@@ -1640,6 +1658,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor.emit_progress = mock.Mock()
         processor._emit_benchmark_event = mock.Mock()
         processor._finish_inpaint_page = mock.Mock()
+        processor._submit_or_inline_render = mock.Mock()
         processor._ensure_inpainter = mock.Mock()
         processor.inpainting = SimpleNamespace(
             inpainter_cache=None,
@@ -1746,6 +1765,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor.emit_progress = mock.Mock()
         processor._emit_benchmark_event = mock.Mock()
         processor._finish_inpaint_page = mock.Mock()
+        processor._submit_or_inline_render = mock.Mock()
         processor._ensure_inpainter = mock.Mock()
         processor.inpainting = SimpleNamespace(
             inpainter_cache=None,
@@ -1840,6 +1860,10 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor.emit_progress = mock.Mock()
         processor._emit_benchmark_event = mock.Mock()
         processor._ensure_inpainter = mock.Mock()
+        # 이 테스트는 인페인트 단계의 skipped-stage 핑거프린트만 검증한다 — 페이지
+        # N 인페인팅 완료 즉시 제출되는 렌더(Phase 3a 융합)는 별도로 검증되므로
+        # 여기서는 무동작으로 둔다.
+        processor._submit_or_inline_render = mock.Mock()
         processor.inpainting = SimpleNamespace(
             inpainter_cache=None,
             release_inpainter_resources=mock.Mock(),
@@ -2043,33 +2067,17 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
 
     def test_preserve_block_never_creates_render_item(self) -> None:
-        processor = self._processor(cancelled=False)
-        processor.main_page.curr_img_idx = -1
-        processor.main_page.image_files = []
-        processor.main_page.button_to_alignment = {1: 1}
-        processor.main_page.button_to_vertical_alignment = {1: 1}
-        processor.main_page.image_ctrl = SimpleNamespace(
-            mark_processing_stage=mock.Mock(),
-        )
-        processor.main_page.render_state_ready = SimpleNamespace(
-            emit=mock.Mock(),
-        )
-        page_state = {"viewer_state": {}}
-        processor._ensure_page_state = mock.Mock(return_value=page_state)
+        # `_render_page_text_items`의 순수 계산은 Phase 3a 로 `render_worker.
+        # _compute_render_text_items`(전용 렌더 워커에서 실행)로 옮겨졌다.
+        # 이 테스트는 그 순수 함수만 직접 검증한다 — 시그널 발신·page_state
+        # 기록은 `_finish_render_page_bookkeeping`(파이프라인 스레드) 쪽이며
+        # `tests/test_render_worker.py`에서 별도로 다룬다.
         block = TextBlock(
             text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
             text="ドン",
             translation="쾅",
             text_class="sfx",
             block_id="sfx-stable",
-        )
-        page = StagePageContext(
-            image_path="page.png",
-            image_name="page.png",
-            source_lang="Japanese",
-            target_lang="Korean",
-            image=np.zeros((10, 10, 3), dtype=np.uint8),
-            blk_list=[block],
         )
         render_settings = SimpleNamespace(
             font_family="Arial",
@@ -2078,33 +2086,26 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "pipeline.stage_batched_processor.pyside_word_wrap",
+            "pipeline.render_worker.pyside_word_wrap",
             side_effect=AssertionError(
                 "preserved text must not reach render layout"
             ),
         ):
-            processor._render_page_text_items(
-                page,
+            text_items_state, blk_rendered_events = render_worker._compute_render_text_items(
+                [block],
+                image_path="page.png",
                 render_settings=render_settings,
                 trg_lng_cd="Korean",
+                strict_render_symbols=False,
+                alignment=1,
+                vertical_alignment=1,
             )
 
-        self.assertEqual(
-            page_state["viewer_state"]["text_items_state"],
-            [],
-        )
+        self.assertEqual(text_items_state, [])
+        self.assertEqual(blk_rendered_events, [])
         self.assertEqual(
             block._render_skip_reason,
             "processing_action_preserve",
-        )
-        processor.main_page.image_ctrl.mark_processing_stage.assert_any_call(
-            "page.png",
-            "render",
-            "completed",
-            text_item_count=0,
-        )
-        processor.main_page.render_state_ready.emit.assert_called_once_with(
-            "page.png"
         )
 
     def test_project_render_all_hit_skips_renderer_and_output_encode(
@@ -2125,9 +2126,10 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._write_json_exports = mock.Mock()
         processor._emit_benchmark_event = mock.Mock()
         processor._restore_render_project_state = mock.Mock()
-        processor._render_page_text_items = mock.Mock()
-        processor._write_final_render_export = mock.Mock()
+        processor._reserve_render_output_path = mock.Mock()
+        processor._warm_render_font_caches = mock.Mock()
         processor._log_page_done = mock.Mock()
+        processor._pending_render_jobs = []
         page = StagePageContext(
             image_path="page.png",
             image_name="page.png",
@@ -2161,22 +2163,33 @@ class StageBatchedCancellationTests(unittest.TestCase):
             "pipeline.stage_batched_processor.materialize_render_checkpoint_output",
             return_value="cached.png",
         ) as materialize:
-            processor._render_all([page])
+            processor._submit_or_inline_render(
+                page, index=0, total_images=1, export_settings={}
+            )
 
         materialize.assert_called_once_with(result)
         processor._restore_render_project_state.assert_called_once_with(page)
-        processor._render_page_text_items.assert_not_called()
-        processor._write_final_render_export.assert_not_called()
+        # 체크포인트가 적중했으므로 전용 렌더 워커에 제출할 필요가 없다.
+        processor._reserve_render_output_path.assert_not_called()
+        self.assertEqual(processor._pending_render_jobs, [])
 
     def test_render_materialization_error_falls_back_to_renderer(self) -> None:
+        # 체크포인트 materialize 가 실패하면 "miss" 취급으로 떨어져 정상 렌더
+        # 경로로 넘어간다. Phase 3a 이후 정상 경로는 즉시 렌더하지 않고 전용
+        # 단일 워커에 작업을 제출한다 — 여기서는 그 제출이 일어났는지만 본다.
+        # 워커가 실제로 하는 순수 계산은 tests/test_render_worker.py 가 다룬다.
         processor = self._processor(cancelled=False)
         processor.main_page.lang_mapping = {"Korean": "Korean"}
         processor.main_page.render_settings = mock.Mock(
-            return_value=SimpleNamespace(upper_case=False)
+            return_value=SimpleNamespace(upper_case=False, alignment_id=1)
         )
         processor.main_page.image_ctrl = SimpleNamespace(
             update_processing_summary=mock.Mock(),
         )
+        processor.main_page.curr_img_idx = -1
+        processor.main_page.image_files = []
+        processor.main_page.button_to_alignment = {1: 1}
+        processor.main_page.button_to_vertical_alignment = {1: 1}
         page_state = {"viewer_state": {}}
         processor._ensure_page_state = mock.Mock(return_value=page_state)
         processor._effective_export_settings = mock.Mock(return_value={})
@@ -2185,11 +2198,15 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._write_json_exports = mock.Mock()
         processor._emit_benchmark_event = mock.Mock()
         processor._restore_render_project_state = mock.Mock()
-        processor._render_page_text_items = mock.Mock()
-        processor._write_final_render_export = mock.Mock(
-            return_value=("fresh.png", ".")
+        processor._reserve_render_output_path = mock.Mock(
+            return_value=("fresh.png", ".", "png")
         )
+        processor._warm_render_font_caches = mock.Mock()
         processor._log_page_done = mock.Mock()
+        processor._pending_render_jobs = []
+        processor._render_cancel_event = threading.Event()
+        fake_executor = SimpleNamespace(submit=mock.Mock(return_value=mock.Mock()))
+        processor._ensure_render_executor = mock.Mock(return_value=fake_executor)
         page = StagePageContext(
             image_path="page.png",
             image_name="page.png",
@@ -2218,13 +2235,26 @@ class StageBatchedCancellationTests(unittest.TestCase):
             "pipeline.stage_batched_processor.materialize_render_checkpoint_output",
             side_effect=ValueError("invalid cached output"),
         ):
-            processor._render_all([page])
+            processor._submit_or_inline_render(
+                page, index=0, total_images=1, export_settings={}
+            )
 
         processor._restore_render_project_state.assert_not_called()
-        processor._render_page_text_items.assert_called_once()
-        processor._write_final_render_export.assert_called_once()
+        self.assertEqual(page.project_render_checkpoint_status, "miss")
+        fake_executor.submit.assert_called_once()
+        self.assertEqual(len(processor._pending_render_jobs), 1)
+        submitted_job = fake_executor.submit.call_args.args[1]
+        self.assertEqual(submitted_job.output_path, "fresh.png")
 
     def test_cache_state_change_cannot_bypass_unobserved_vram_release_gate(self) -> None:
+        # 이 테스트들은 미확인 해제를 실패로 처리하는 계약 자체가 대상이다. 그
+        # 처리는 진단용 강제를 켰을 때만 일어나므로 여기서 명시적으로 켠다.
+        patcher = mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=True,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         processor = self._processor(cancelled=False)
         processor.main_page.settings_page = SimpleNamespace(
             get_llm_settings=lambda: {"extra_context": "context"},

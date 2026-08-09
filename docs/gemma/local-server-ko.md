@@ -32,10 +32,30 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare_gemma_runtime.ps1 -Mode Verify
 ```
 
+`-ModelPath`를 생략하면 저장소의 gitignore된 `testmodel/`을 먼저 찾고, 거기에도
+없으면 `-AllowDownload`를 줬을 때만 등록된 Hugging Face 원본을 내려받습니다.
+따라서 아무 인자 없이도 준비가 끝납니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Auto -AllowDownload
+```
+
+업스트림이 지원 llama.cpp 태그를 갱신하면 모델은 멀쩡한데 manifest에 봉인된
+image identity만 어긋납니다. 이때는 `-Mode Reseal`이 원본 없이 스모크를 다시
+통과시키고 manifest만 다시 씁니다. 앱도 같은 상태를 스스로 감지해 한 번
+복구합니다. 자세한 내용은
+[관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
+참고하세요.
+
 준비 스크립트의 공개 옵션은 아래와 같습니다.
 
-- `-Mode`: `Prepare` 또는 `Verify`이며 기본값은 `Prepare`입니다.
-- `-ModelPath`: `Prepare`에서만 필요한 최종 IQ4_NL GGUF 경로입니다.
+- `-Mode`: `Prepare`, `Verify`, `Reseal`, `Auto`이며 기본값은 `Prepare`입니다.
+  `Auto`는 볼륨 상태를 보고 `Prepare`와 `Reseal` 중 맞는 쪽을 고릅니다.
+- `-ModelPath`: `Prepare`에서만 쓰는 최종 IQ4_NL GGUF 경로입니다. 비우면
+  `testmodel/`과 다운로드 캐시를 차례로 찾습니다.
+- `-AllowDownload`: 검증된 로컬 원본을 못 찾았을 때만 등록된 원본을 내려받습니다.
+- `-DownloadDirectory`: 내려받은 원본을 둘 위치입니다. 비우면 `testmodel/`입니다.
 - `-VolumeName`: 기본값은 `comic-translate-gemma-models-v2`입니다. 다른 이름을 쓰면 앱 실행 전 `GEMMA_MODEL_VOLUME`에도 같은 값을 설정해야 합니다.
 - `-SmokePort`: 실제 GPU smoke 서버의 로컬 포트이며 기본값은 `18082`입니다.
 - `-SmokeTimeoutSec`: smoke 준비 제한 시간이며 `30`~`900`초, 기본값은 `420`초입니다.
@@ -83,9 +103,9 @@ docker compose `
 
 ## 현재 활성 요청값
 
-- `temperature=0.7`
-- `top_k=64`
-- `top_p=0.95`
+- `temperature=0.5`
+- `top_k=32`
+- `top_p=1.0`
 - `min_p=0.0`
 - `Chunk Size=6`
 - `Max Completion Tokens=512`
@@ -115,13 +135,15 @@ batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같�
 이 명시적 command 계약이 처음 적용될 때 기존 번역 result-cache 항목은
 삭제되지 않지만 이전 runtime fingerprint라서 재사용되지 않습니다.
 
-현재 pinned llama.cpp에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
+현재 llama.cpp 런타임 이미지에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
 
-## 고정 runtime image
+## runtime image
 
-- Image: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- Image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - 관측 image label version: `b10133`
 - Pull policy: `missing`
+- 태그는 moving tag이므로, 이미지가 바뀌면 ready manifest에 기록된 image ID와
+  달라집니다. 그때는 준비 스크립트를 다시 실행해야 합니다.
 
 벤치마크 preset, raw 결과, 보고서, 차트는 제품 브랜치가 아니라 `benchmarking/lab` 또는 Git 밖의 검증 로그 폴더에서 관리합니다.
 

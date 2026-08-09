@@ -1,9 +1,22 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare', 'Verify')]
+    # Prepare 는 원본 GGUF 를 볼륨에 넣고 봉인한다.  Verify 는 읽기 전용 검사다.
+    # Reseal 은 이미 검증된 볼륨 내용을 그대로 두고, 현재 llama.cpp image 로 실제
+    # smoke 를 다시 통과시킨 뒤 ready manifest 만 다시 쓴다.  업스트림이 지원 태그를
+    # 갱신해 image digest 가 움직였을 때 원본 파일 없이 복구하는 유일한 경로다.
+    # Auto 는 볼륨 상태를 보고 Prepare 와 Reseal 중 맞는 쪽을 고른다. 앱의 자가복구
+    # 경로가 쓰는 모드다.
+    [ValidateSet('Prepare', 'Verify', 'Reseal', 'Auto')]
     [string]$Mode = 'Prepare',
 
+    # 비우면 저장소의 `testmodel/`, 그다음 다운로드 캐시를 차례로 찾는다.
     [string]$ModelPath = '',
+
+    # 로컬에서 검증된 원본을 못 찾았을 때만 등록된 Hugging Face 원본을 내려받는다.
+    [switch]$AllowDownload,
+
+    # 내려받은 원본을 둘 위치. 비우면 저장소의 `testmodel/`.
+    [string]$DownloadDirectory = '',
 
     [string]$VolumeName = 'comic-translate-gemma-models-v2',
 
@@ -21,14 +34,17 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Force
+
 $PreparationVersion = 2
 $ManifestSchemaVersion = 2
 $ReadyManifestName = '.comic-translate-gemma-ready-v2.json'
-$ImageRef = (
-    'ghcr.io/ggml-org/llama.cpp@sha256:' +
-    '22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
+$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
+$SupportedImageRefs = @(
+    'ghcr.io/ggml-org/llama.cpp:server-cuda13',
+    'ghcr.io/ggml-org/llama.cpp:server-cuda'
 )
-$ImageDigest = 'sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
 $ManagedContainerName = 'gemma-local-server'
 
 if ($VolumeName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
@@ -81,10 +97,18 @@ function ConvertTo-NativeArgument {
 function Invoke-DockerResult {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
+    # PowerShell here-string 은 줄 끝을 CRLF 로 담는다. 컨테이너의 `/bin/sh` 가
+    # dash 이면 줄 끝의 CR 을 토큰의 일부로 읽어 첫 줄 `set -eu` 부터
+    # "Illegal option -" 로 죽는다. docker 인자에 CR 이 의미를 갖는 경우는 없으므로
+    # 여기서 한 번에 정규화한다.
+    $NormalizedArguments = @(
+        $Arguments | ForEach-Object { [string]$_ -replace "`r`n", "`n" }
+    )
+
     $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $StartInfo.FileName = $DockerExecutable
     $StartInfo.Arguments = (
-        $Arguments |
+        $NormalizedArguments |
             ForEach-Object { ConvertTo-NativeArgument -Argument $_ }
     ) -join ' '
     $StartInfo.UseShellExecute = $false
@@ -224,12 +248,68 @@ $ModelSpecs = @(
         Sha256 = '768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8'
         Role = 'product-default'
         SourcePath = $ModelPath
+        DownloadUrl = (
+            'https://huggingface.co/Vastopian/' +
+            'gemma-4-26B-A4B-it-abliterated-GGUF/resolve/main/' +
+            'gemma-4-26B-IQ4_NL.gguf'
+        )
     }
 )
 
 $ImageId = Get-PinnedImageId
-if ($ImageId -ne $ImageDigest) {
-    throw "Pinned image ID mismatch: expected=$ImageDigest, actual=$ImageId"
+
+function Get-VolumeFileSize {
+    param([Parameter(Mandatory = $true)][string]$FileName)
+
+    $Result = Invoke-DockerResult -Arguments @(
+        'run', '--rm', '--pull', 'never',
+        '-e', "MODEL_FILE=$FileName",
+        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
+        '--entrypoint', '/bin/sh',
+        $ImageRef,
+        '-ec', 'if test -f "/models/$MODEL_FILE"; then stat -c %s "/models/$MODEL_FILE"; fi'
+    )
+    if ($Result.ExitCode -ne 0) {
+        return [int64]-1
+    }
+    $Text = $Result.Output.Trim()
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return [int64]-1
+    }
+    return [int64]$Text
+}
+
+function Test-VolumeHoldsEveryModel {
+    <#
+    .SYNOPSIS
+    볼륨이 계약된 모든 모델 파일을 이미 담고 있는가(크기 기준).
+
+    .DESCRIPTION
+    `Auto` 가 Prepare 와 Reseal 중 무엇을 할지 고르는 데만 쓴다. 크기만 보는 이유는
+    수십 GB 를 두 번 해시하지 않기 위해서다. 권위 있는 판정은 Reseal 이 smoke 앞에서
+    수행하는 SHA-256 검증이고, 거기서 어긋나면 그대로 실패한다.
+    #>
+
+    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
+        return $false
+    }
+    foreach ($Spec in $ModelSpecs) {
+        if ((Get-VolumeFileSize -FileName $Spec.Name) -ne $Spec.Bytes) {
+            return $false
+        }
+    }
+    return $true
+}
+
+if ($Mode -eq 'Auto') {
+    if (Test-VolumeHoldsEveryModel) {
+        Write-Host 'Auto mode: the volume already holds every verified model; resealing.'
+        $Mode = 'Reseal'
+    }
+    else {
+        Write-Host 'Auto mode: the volume is missing a verified model; preparing.'
+        $Mode = 'Prepare'
+    }
 }
 
 if ($Mode -eq 'Verify') {
@@ -258,8 +338,8 @@ if ($Mode -eq 'Verify') {
         [int]$Manifest.preparation_version -ne $PreparationVersion -or
         [string]$Manifest.runtime -ne 'Gemma' -or
         [string]$Manifest.volume_name -ne $VolumeName -or
-        [string]$Manifest.source_image_ref -ne $ImageRef -or
-        [string]$Manifest.source_image_digest -ne $ImageDigest -or
+        $SupportedImageRefs -notcontains [string]$Manifest.source_image_ref -or
+        [string]$Manifest.source_image_digest -ne $ImageId -or
         [string]$Manifest.source_image_id -ne $ImageId -or
         [string]$Manifest.default_model -ne 'gemma-4-26B-IQ4_NL.gguf' -or
         $Manifest.ready -ne $true -or
@@ -275,7 +355,21 @@ if ($Mode -eq 'Verify') {
         [string]$Manifest.runtime_configuration.speculative_type -ne 'none' -or
         [int]$Manifest.runtime_configuration.speculative_draft_max -ne 8
     ) {
-        throw 'Ready manifest header does not match the current Gemma runtime contract.'
+        $Hint = if (
+            [string]$Manifest.source_image_digest -ne $ImageId -or
+            [string]$Manifest.source_image_id -ne $ImageId
+        ) {
+            # 지원 태그가 업스트림에서 갱신되면 digest 만 어긋난다. 이때는 원본
+            # 파일 없이 Reseal 로 복구된다.
+            " The llama.cpp image identity drifted (manifest=$($Manifest.source_image_id), actual=$ImageId). Run this script with -Mode Reseal to re-smoke and re-seal the volume."
+        }
+        else {
+            ''
+        }
+        throw (
+            'Ready manifest header does not match the current Gemma runtime contract.' +
+            $Hint
+        )
     }
     if (@($Manifest.files).Count -ne $ModelSpecs.Count) {
         throw 'Ready manifest model registry does not match the product registry.'
@@ -324,16 +418,13 @@ if ($Mode -eq 'Verify') {
     return
 }
 
-if ([string]::IsNullOrWhiteSpace($ModelPath)) {
-    throw (
-        'Prepare mode requires -ModelPath. ' +
-        'Verify mode never requires the original host files.'
-    )
-}
+$IsReseal = $Mode -eq 'Reseal'
 
 Test-ManagedContainerStopped
 
-if (-not $SkipFreeSpaceCheck) {
+# Reseal 은 볼륨 안 파일을 그대로 두고 manifest 만 다시 쓴다. 원본을 복사하지
+# 않으므로 원본 경로도, 복사할 여유 공간도 필요 없다.
+if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
     if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
@@ -345,41 +436,48 @@ if (-not $SkipFreeSpaceCheck) {
 }
 
 $PreparedSources = @()
-foreach ($Spec in $ModelSpecs) {
-    $ResolvedPath = (Resolve-Path -LiteralPath $Spec.SourcePath).Path
-    $Item = Get-Item -LiteralPath $ResolvedPath
-    if ($Item.Length -ne $Spec.Bytes) {
-        throw (
-            "Source model size mismatch: {0}, expected={1}, actual={2}" -f
-            $Spec.Name,
-            $Spec.Bytes,
-            $Item.Length
-        )
-    }
-    Write-Host "Checking source SHA-256: $($Spec.Name)"
-    $SourceHash = (Get-FileHash -LiteralPath $ResolvedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($SourceHash -ne $Spec.Sha256) {
-        throw (
-            "Source model SHA-256 mismatch: {0}, expected={1}, actual={2}" -f
-            $Spec.Name,
-            $Spec.Sha256,
-            $SourceHash
-        )
-    }
-    $PreparedSources += [pscustomobject]@{
-        Spec = $Spec
-        Path = $ResolvedPath
-        Directory = Split-Path -Parent $ResolvedPath
-        FileName = Split-Path -Leaf $ResolvedPath
+if (-not $IsReseal) {
+    foreach ($Spec in $ModelSpecs) {
+        # 볼륨이 이미 계약된 파일을 담고 있으면 원본을 아예 찾지 않는다. 수십 GB
+        # 를 헛되이 내려받거나 해시하지 않기 위해서다.
+        if ((Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256) {
+            Write-Host "Reusing already verified volume model: $($Spec.Name)"
+            continue
+        }
+        $Resolved = Resolve-ManagedRuntimeModelSource `
+            -FileName $Spec.Name `
+            -Bytes $Spec.Bytes `
+            -Sha256 $Spec.Sha256 `
+            -RequestedPath $Spec.SourcePath `
+            -DownloadUrl $Spec.DownloadUrl `
+            -DownloadDirectory $DownloadDirectory `
+            -AllowDownload:$AllowDownload
+        $PreparedSources += [pscustomobject]@{
+            Spec = $Spec
+            Path = $Resolved.Path
+            Directory = $Resolved.Directory
+            FileName = $Resolved.FileName
+            Origin = $Resolved.Origin
+        }
     }
 }
 
-Invoke-Docker -Arguments @(
-    'volume', 'create',
-    '--label', 'comic-translate.runtime=Gemma',
-    '--label', "comic-translate.preparation-version=$PreparationVersion",
-    $VolumeName
-) | Out-Null
+if ($IsReseal) {
+    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
+        throw (
+            "Gemma volume to reseal does not exist: $VolumeName. " +
+            'Run this script in Prepare or Auto mode first.'
+        )
+    }
+}
+else {
+    Invoke-Docker -Arguments @(
+        'volume', 'create',
+        '--label', 'comic-translate.runtime=Gemma',
+        '--label', "comic-translate.preparation-version=$PreparationVersion",
+        $VolumeName
+    ) | Out-Null
+}
 Assert-GemmaVolumeLabels
 
 Invoke-Docker -Arguments @(
@@ -393,13 +491,8 @@ Invoke-Docker -Arguments @(
 ) | Out-Null
 
 foreach ($Source in $PreparedSources) {
+    # 볼륨에 이미 있는 파일은 위에서 걸러졌다. 여기 남은 것은 반드시 복사한다.
     $Spec = $Source.Spec
-    $ExistingHash = Get-VolumeFileHash -FileName $Spec.Name -AllowMissing
-    if ($ExistingHash -eq $Spec.Sha256) {
-        Write-Host "Reusing already verified volume model: $($Spec.Name)"
-        continue
-    }
-
     Write-Host "Copying into the volume and verifying: $($Spec.Name)"
     Invoke-Docker -Arguments @(
         'run', '--rm', '--pull', 'never',
@@ -434,11 +527,18 @@ $VerifiedFiles = @()
 foreach ($Spec in $ModelSpecs) {
     $ActualHash = Get-VolumeFileHash -FileName $Spec.Name
     if ($ActualHash -ne $Spec.Sha256) {
+        $Recovery = if ($IsReseal) {
+            ' Reseal never copies model data, so run this script with -Mode Prepare to replace the file.'
+        }
+        else {
+            ''
+        }
         throw (
-            "Copied model SHA-256 mismatch: {0}, expected={1}, actual={2}" -f
-            $Spec.Name,
-            $Spec.Sha256,
-            $ActualHash
+            ("Volume model SHA-256 mismatch after {0}: {1}, expected={2}, actual={3}." -f
+                $Mode,
+                $Spec.Name,
+                $Spec.Sha256,
+                $ActualHash) + $Recovery
         )
     }
     $VerifiedFiles += [pscustomobject][ordered]@{
@@ -589,7 +689,7 @@ $Manifest = [ordered]@{
     volume_name = $VolumeName
     ready = $true
     source_image_ref = $ImageRef
-    source_image_digest = $ImageDigest
+    source_image_digest = $ImageId
     source_image_id = $ImageId
     default_model = 'gemma-4-26B-IQ4_NL.gguf'
     runtime_configuration = [ordered]@{
@@ -653,8 +753,14 @@ $ManifestSha256 = Invoke-Docker -Arguments @(
 )
 
 [ordered]@{
-    mode = 'Prepare'
+    mode = $Mode
     prepared = $true
+    resealed = $IsReseal
+    model_sources = @(
+        $PreparedSources | ForEach-Object {
+            [ordered]@{ name = $_.Spec.Name; origin = $_.Origin }
+        }
+    )
     volume_name = $VolumeName
     ready_manifest = $ReadyManifestName
     ready_manifest_sha256 = $ManifestSha256

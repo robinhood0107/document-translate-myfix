@@ -9,15 +9,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from modules.utils.llama_cpp_runtime import (
+    DEFAULT_LLAMA_CPP_IMAGE,
+    is_supported_llama_cpp_image,
+)
+
 
 MANGALMM_RUNTIME_MANIFEST_SCHEMA_VERSION = 1
 MANGALMM_RUNTIME_PREPARATION_VERSION = 2
 DEFAULT_MANGALMM_MODEL_VOLUME = "comic-translate-mangalmm-models-v2"
 DEFAULT_MANGALMM_READY_MANIFEST = ".comic-translate-mangalmm-ready-v2.json"
-DEFAULT_MANGALMM_LLAMA_CPP_IMAGE = (
-    "ghcr.io/ggml-org/llama.cpp@sha256:"
-    "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
-)
+DEFAULT_MANGALMM_LLAMA_CPP_IMAGE = DEFAULT_LLAMA_CPP_IMAGE
 
 MANGALMM_MODEL_NAME = "MangaLMM.Q8_0.gguf"
 MANGALMM_MMPROJ_NAME = "MangaLMM.mmproj-Q8_0.gguf"
@@ -257,7 +259,6 @@ def build_mangalmm_runtime_contract(
         "preparation_version": MANGALMM_RUNTIME_PREPARATION_VERSION,
         "volume_name": safe_volume,
         "ready": True,
-        "source_image_ref": llama_image_ref,
         "source_image_id": llama_image_id,
     }
     for key, expected in required_header.items():
@@ -265,6 +266,16 @@ def build_mangalmm_runtime_contract(
             raise MangaLMMRuntimeContractError(
                 f"MangaLMM manifest field {key!r} does not match the runtime contract."
             )
+    # CUDA 12 태그로 준비한 볼륨도 CUDA 13 기본값에서 그대로 통과해야 한다.
+    # 실제 이미지 동일성은 위의 source_image_id 비교가 지킨다.
+    manifest_image_ref = manifest.get("source_image_ref")
+    if manifest_image_ref != llama_image_ref and not is_supported_llama_cpp_image(
+        manifest_image_ref
+    ):
+        raise MangaLMMRuntimeContractError(
+            "MangaLMM manifest field 'source_image_ref' does not name a "
+            "supported llama.cpp image."
+        )
     smoke_test = manifest.get("smoke_test")
     if not isinstance(smoke_test, dict) or smoke_test.get("passed") is not True:
         raise MangaLMMRuntimeContractError(

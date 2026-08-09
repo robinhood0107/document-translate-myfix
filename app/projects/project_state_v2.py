@@ -219,7 +219,15 @@ def save_state_to_proj_file_v2(
     *,
     checkpoint_reference: dict | ProjectCheckpointReference | None = None,
     update_project_reference: bool = True,
+    source_project_file: str | None = None,
 ) -> None:
+    """`source_project_file` 은 temp_dir 하위 페이지의 출처로 기록할 프로젝트다.
+
+    비워 두면 종전대로 `comic_translate.project_file` 을 읽는다. 시리즈 자식
+    저장처럼 "지금 열려 있는 프로젝트"와 "쓰는 대상"이 다른 경우, 예전에는
+    호출자가 `comic_translate.project_file` 을 잠시 바꿔치기했다가 되돌렸다.
+    그 전역 조작은 저장을 워커 스레드로 옮기는 순간 메인 스레드와 경합한다.
+    """
     encoder = ProjectEncoder()
     saved_checkpoint_reference = checkpoint_reference_for_save(
         checkpoint_reference
@@ -388,7 +396,7 @@ def save_state_to_proj_file_v2(
                 "source_path": os.path.abspath(archive_path),
             }
 
-        project_file = getattr(comic_translate, "project_file", None)
+        project_file = source_project_file or getattr(comic_translate, "project_file", None)
         temp_dir = getattr(comic_translate, "temp_dir", None)
         abs_path = os.path.abspath(path)
         if project_file and temp_dir:

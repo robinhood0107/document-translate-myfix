@@ -49,7 +49,7 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
@@ -67,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ### HunyuanOCR 로컬 런타임
 
 - compose 파일: `/hunyuanocr_docker_files/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
 - 참고 링크:
   - [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
@@ -139,6 +139,43 @@ Spotting 경로는 공식 `Spotting:` prompt, `--special` 좌표 token 모드,
 `1,003,520` projector를 그대로 유지합니다. 자세한 내용은
 [/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md)를
 참고하세요.
+
+### HunyuanOCR 경로
+
+최적값의 중국어 분기가 쓰는 엔진입니다. 다른 관리형 엔진과 같은 규약으로
+versioned external model volume을 한 번 준비합니다. 필요한 파일은
+
+- `HunyuanOCR.Q8_0.gguf`
+- `HunyuanOCR.mmproj-Q8_0.gguf`
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_hunyuanocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\HunyuanOCR-GGUF'
+```
+
+준비 도구는 volume에 이미 있는 파일의 SHA-256이 일치하면 다시 복사하지 않고
+그대로 재사용합니다. 준비가 끝나면 CUDA 모델 적재 스모크를 실행하고 그 결과를
+ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 씁니다.
+
+### 준비 볼륨이 갑자기 거부될 때
+
+모든 준비 스크립트는 `-Mode Auto`를 받습니다. 볼륨이 비어 있으면 준비하고,
+이미 계약된 파일을 담고 있으면 다시 봉인합니다. 업스트림이 llama.cpp 태그를
+갱신해 image digest가 움직이면 모델이 멀쩡한데도 manifest만 어긋나는데, 이때
+`Auto`(내부적으로 `Reseal`)가 원본 파일 없이 복구합니다. 앱도 같은 상태를
+스스로 감지해 한 번 복구합니다. 자세한 내용은
+[관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
+참고하세요.
+
+`-ModelDirectory`를 생략하면 저장소의 gitignore된 `testmodel/`과 그 바로 아래
+하위 폴더를 먼저 찾습니다.
+
+과거 HunyuanOCR은 `testmodel` 폴더를 bind mount하고 Gemma와 이름이 겹치는
+`LLAMA_CTX_SIZE` 같은 일반 환경변수를 읽었습니다. 이제는 준비된 volume과
+`HUNYUAN_OCR_LLAMA_*` 전용 이름을 사용하므로, 한쪽을 조정해도 다른 엔진이
+바뀌지 않습니다.
 
 ## 4. 권장 앱 설정
 

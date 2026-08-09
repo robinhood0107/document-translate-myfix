@@ -15,6 +15,12 @@ Do not create a worktree. Work in the checkout, protect `main` and `develop`,
 keep `main`, `develop`, and `benchmarking/lab`, and use only the supported
 Windows environments named in `rules.md` for repository workflows.
 
+For Gemma sampler work, judge only the normalized translated sentence. Preserve
+meaning and naturalness; accept meaning-preserving wording or onomatopoeia
+variation; strip known channel/thought framing; and retain envelope shape only
+as private diagnostics. The complete invariant and reuse rule are in
+`rules.md`; do not replay completed raw responses merely to apply it.
+
 ## Skill routing
 
 Use an installed, namespaced gstack skill when its task matches. In particular:

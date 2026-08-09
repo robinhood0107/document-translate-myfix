@@ -180,8 +180,12 @@ class AutomaticProgressTracker:
         self.reset()
 
     def reset(self, *, page_total: int = 0, run_type: str = "batch") -> None:
+        self._supplied_eta_sec = None
+        self._supplied_progress_percent = None
         now = time.monotonic()
         self.run_started_at = now
+        # 사용자가 '모두 번역'을 누른 벽시계 시각. 실행 리포트가 이 값을 쓴다.
+        self.run_started_wall = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.page_total = max(int(page_total or 0), 0)
         self.run_type = str(run_type or "batch")
         self.current_page_started_at: float | None = None
@@ -269,6 +273,19 @@ class AutomaticProgressTracker:
 
     def _estimate_eta(self, event: dict[str, Any], now: float) -> tuple[float | None, str]:
         phase = str(event.get("phase") or "")
+        # 파이프라인이 남은 시간을 실어 보냈으면 그것이 유일한 출처다. 여기서 다시
+        # 추정하면 두 값이 갈린다. 실제로 같은 순간에 2초와 23분이 찍혔다.
+        supplied = event.get("eta_seconds")
+        if isinstance(supplied, (int, float)) and not isinstance(supplied, bool):
+            self._supplied_eta_sec = max(float(supplied), 0.0)
+            return self._supplied_eta_sec, AUTOMATIC_PROGRESS_TRANSLATIONS["live_stable"]
+        # 미리보기 알림처럼 sweep 이 아닌 이벤트는 추정을 싣지 않는다. 그때 자체
+        # 계산으로 되돌아가면 남은 시간이 튄다. 실제로 인페인팅 sweep 이 끝난 직후
+        # 미리보기 알림 네 줄에서 3분 33초가 24분 08초로 뛰었다. 파이프라인이 준
+        # 마지막 값을 유지한다.
+        last_supplied = getattr(self, "_supplied_eta_sec", None)
+        if last_supplied is not None:
+            return last_supplied, AUTOMATIC_PROGRESS_TRANSLATIONS["live_stable"]
         if phase in {"gemma_startup", "ocr_startup"}:
             return self._estimate_startup_eta(event, now)
         if phase == "pipeline":
@@ -332,6 +349,20 @@ class AutomaticProgressTracker:
         return max(estimated_total - elapsed, 0.0), used_history
 
     def _estimate_progress(self, event: dict[str, Any]) -> float:
+        # 남은 시간과 같은 이유로, 파이프라인이 준 진행률을 우선한다. 단계 sweep
+        # 모델에서는 페이지 인덱스만으로 진행률을 되계산할 수 없다.
+        supplied = event.get("progress_fraction")
+        if isinstance(supplied, (int, float)) and not isinstance(supplied, bool):
+            self._supplied_progress_percent = min(
+                max(float(supplied) * 100.0, 0.0), 100.0
+            )
+            return self._supplied_progress_percent
+        # sweep 이 아닌 이벤트에서 진행률이 뒤로 가지 않게, 마지막 값을 유지한다.
+        # 미리보기 알림은 page_index 를 0 으로 보고하므로 되계산하면 진행률이
+        # 처음으로 돌아간다.
+        last_percent = getattr(self, "_supplied_progress_percent", None)
+        if last_percent is not None:
+            return last_percent
         if str(event.get("phase") or "") != "pipeline":
             return 0.0
         page_total = int(event.get("page_total") or self.page_total or 0)
@@ -366,6 +397,91 @@ class AutomaticProgressTracker:
         units = page_total * 8
         current_units = min(max(page_index * 8 + stage_order.get(stage_name, 0), 0), units)
         return round((current_units / units) * 100.0, 1) if units else 0.0
+
+    STAGE_RATE_GROUP = "automatic_progress/stage_rates"
+    STAGE_STARTUP_GROUP = "automatic_progress/stage_startup"
+
+    def read_stage_startups(self) -> dict[str, float]:
+        """지난 실행들에서 측정한 단계별 고정 시작 비용의 중앙값(초).
+
+        컨테이너 기동과 모델 적재처럼 페이지 수와 무관한 비용이다. 이 값이 없으면
+        아직 시작하지 않은 단계의 시작 비용이 남은 시간에서 통째로 빠진다.
+        """
+
+        return self._read_median_group(self.STAGE_STARTUP_GROUP)
+
+    def record_stage_startups(self, startup_by_stage: dict[str, float]) -> None:
+        """이번 실행의 단계별 시작 비용을 이력에 더한다."""
+
+        self._append_positive_numbers(self.STAGE_STARTUP_GROUP, startup_by_stage)
+
+    def _read_median_group(self, group: str) -> dict[str, float]:
+        self.settings.beginGroup(group)
+        keys = list(self.settings.childKeys())
+        medians: dict[str, float] = {}
+        for key in keys:
+            samples = self.settings.value(key, [], type=list) or []
+            values = []
+            for sample in samples:
+                try:
+                    parsed = float(sample)
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0.0:
+                    values.append(parsed)
+            if values:
+                values.sort()
+                medians[str(key)] = values[len(values) // 2]
+        self.settings.endGroup()
+        return medians
+
+    def _append_positive_numbers(self, group: str, values: dict[str, float]) -> None:
+        for name, raw in (values or {}).items():
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value <= 0.0:
+                continue
+            self._append_history(group, str(name), value)
+
+    def read_stage_rates(self) -> dict[str, float]:
+        """지난 실행들에서 측정한 단계별 페이지당 속도의 중앙값.
+
+        단계 sweep 추정기는 이 값을 비중으로 써서 첫 페이지부터 맞는 남은 시간을 낸다.
+        표본이 없으면 빈 사전을 돌려주고, 추정기는 내장 사전 비중으로 시작한다.
+        """
+
+        self.settings.beginGroup(self.STAGE_RATE_GROUP)
+        keys = list(self.settings.childKeys())
+        rates: dict[str, float] = {}
+        for key in keys:
+            samples = self.settings.value(key, [], type=list) or []
+            values = []
+            for sample in samples:
+                try:
+                    parsed = float(sample)
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0.0:
+                    values.append(parsed)
+            if values:
+                values.sort()
+                rates[str(key)] = values[len(values) // 2]
+        self.settings.endGroup()
+        return rates
+
+    def record_stage_rates(self, per_page_by_stage: dict[str, float]) -> None:
+        """이번 실행의 단계별 속도를 이력에 더한다. 중앙값이라 이상값에 흔들리지 않는다."""
+
+        for name, rate in (per_page_by_stage or {}).items():
+            try:
+                value = float(rate)
+            except (TypeError, ValueError):
+                continue
+            if value <= 0.0:
+                continue
+            self._append_history(self.STAGE_RATE_GROUP, str(name), value)
 
     def _append_history(self, group: str, key: str, value: Any) -> None:
         history = self._read_history(group, key)

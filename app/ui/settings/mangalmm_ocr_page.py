@@ -31,7 +31,9 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        title_label = MLabel(self.tr("MangaLMM Settings")).h3()
+        title_label = MLabel(
+            self.tr("MangaLMM (Experimental, Slow) Settings")
+        ).h3()
         layout.addWidget(title_label)
 
         note = MLabel(

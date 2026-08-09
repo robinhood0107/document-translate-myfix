@@ -73,7 +73,10 @@ TRANSLATOR_REQUIREMENTS = {
 
 def get_config(settings_page: SettingsPage):
     strategy_settings = settings_page.get_hd_strategy_settings()
-    if strategy_settings['strategy'] == settings_page.ui.tr("Resize"):
+    if strategy_settings.get("developer_performance_mode") is False and "developer_performance_mode" in strategy_settings:
+        return Config(hd_strategy="Original")
+
+    if strategy_settings["strategy"] == settings_page.ui.tr("Resize"):
         return Config(hd_strategy="Resize", hd_strategy_resize_limit=strategy_settings['resize_limit'])
     if strategy_settings['strategy'] == settings_page.ui.tr("Crop"):
         return Config(
@@ -81,6 +84,8 @@ def get_config(settings_page: SettingsPage):
             hd_strategy_crop_margin=strategy_settings['crop_margin'],
             hd_strategy_crop_trigger_size=strategy_settings['crop_trigger_size'],
         )
+    if strategy_settings['strategy'] != settings_page.ui.tr("Original"):
+        return Config(hd_strategy="Original")
     return Config(hd_strategy="Original")
 
 
@@ -115,7 +120,6 @@ def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_
 def validate_ocr(
     main: ComicTranslate,
     source_lang: str | None = None,
-    preflight_cache: dict[str, str] | None = None,
 ):
     settings_page = main.settings_page
     ocr_tool = settings_page.get_tool_selection("ocr")
@@ -192,33 +196,12 @@ def validate_ocr(
                 settings_page_name=settings_page_name,
             )
             return False
-        runtime_manager = getattr(main, "local_ocr_runtime_manager", None)
-        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
-            runtime_manager = LocalOCRRuntimeManager()
-            main.local_ocr_runtime_manager = runtime_manager
-        try:
-            runtime_manager.validate_engine(normalized_tool, settings_page)
-        except LocalServiceSetupError as exc:
-            if hasattr(main, "batch_report_ctrl"):
-                main.batch_report_ctrl.register_preflight_error(
-                    QCoreApplication.translate("Messages", "{service} runtime setup failed").format(service=service_name),
-                    str(exc),
-                )
-            Messages.show_local_service_error(
-                main,
-                details=str(exc),
-                service_name=service_name,
-                settings_page_name=settings_page_name,
-                error_kind="setup",
-            )
-            return False
-        cache_key = runtime_manager.preflight_cache_key(normalized_tool, settings_page)
-        if cache_key:
-            probe_result = preflight_cache.get(cache_key) if preflight_cache is not None else None
-            if probe_result is None:
-                probe_result = runtime_manager.probe_managed_engine(normalized_tool, settings_page)
-                if preflight_cache is not None:
-                    preflight_cache[cache_key] = probe_result
+        # 런타임 준비 상태는 여기서 확인하지 않는다. compose 확인, 이미지 확인,
+        # 준비 볼륨 계약 검증은 모두 Docker 호출이고, 파이프라인의 ensure_engine 이
+        # 어차피 같은 일을 한 번 더 한다. GUI 스레드에서 미리 하면 진행 표시도 없이
+        # 창이 멈추고, 366장 아카이브에서는 Windows 가 "응답하지 않습니다"를 띄운다.
+        # 사전 검사는 즉시 읽을 수 있는 설정만 보고, 런타임 오류는 파이프라인이
+        # 작업 스레드에서 진행 패널과 함께 보고한다.
         return True
 
     provider = OCR_REQUIREMENTS.get(normalized_tool)
@@ -351,11 +334,10 @@ def validate_settings(
     main: ComicTranslate,
     target_lang: str,
     source_lang: str | None = None,
-    preflight_cache: dict[str, str] | None = None,
 ):
     if not validate_workflow_mode(main, source_lang=source_lang):
         return False
-    if not validate_ocr(main, source_lang=source_lang, preflight_cache=preflight_cache):
+    if not validate_ocr(main, source_lang=source_lang):
         return False
     if not validate_translator(main, target_lang):
         return False

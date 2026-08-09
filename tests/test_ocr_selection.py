@@ -5,7 +5,9 @@ import unittest
 from modules.ocr.selection import (
     OCR_MODE_BEST_LOCAL,
     OCR_MODE_DEFAULT,
+    OCR_MODE_MANGALMM,
     OCR_MODE_PADDLE_VL_SPOTTING,
+    OCR_MANGALMM_LABEL,
     OCR_OPTIMAL_LABEL,
     STAGE_BATCHED_WORKFLOW_MODE,
     normalize_ocr_mode,
@@ -29,6 +31,10 @@ class OCRSelectionTests(unittest.TestCase):
             normalize_ocr_mode("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"),
             OCR_MODE_BEST_LOCAL,
         )
+
+    def test_mangalmm_experimental_label_and_legacy_label_normalize(self) -> None:
+        self.assertEqual(normalize_ocr_mode(OCR_MANGALMM_LABEL), OCR_MODE_MANGALMM)
+        self.assertEqual(normalize_ocr_mode("MangaLMM"), OCR_MODE_MANGALMM)
 
     def test_best_local_routes_chinese_to_hunyuan(self) -> None:
         self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "Chinese"), "HunyuanOCR")
