@@ -30,6 +30,16 @@ PADDLE_DIRECT_TRANSPORT_SCHEMA_VERSION = 1
 PADDLE_DIRECT_PARSER_SCHEMA_VERSION = "paddle_llamacpp_chat_response_v1"
 
 
+class PaddleDirectOcrTruncatedError(LocalServiceResponseError):
+    """모델이 토큰 한도에 걸려 OCR 응답이 잘렸다.
+
+    잘린 텍스트를 그대로 쓰지 않는 판단은 옳다. 다만 이건 **말풍선 하나**의
+    문제이고 토큰 한도라는 원인까지 분명하므로, 별도 타입으로 올려서 호출부가
+    더 큰 한도로 다시 요청하거나 그 블록만 비우고 지나갈 수 있게 한다. 예전에는
+    일반 응답 오류와 구분되지 않아 페이지 전체가 출력에서 사라졌다.
+    """
+
+
 def is_direct_llama_cpp_endpoint(server_url: str) -> bool:
     """Return whether *server_url* exposes llama.cpp chat completions."""
 
@@ -137,7 +147,7 @@ def extract_direct_ocr_text(payload: Any) -> str:
         )
     finish_reason = str(choice.get("finish_reason", "") or "").strip().lower()
     if finish_reason == "length":
-        raise LocalServiceResponseError(
+        raise PaddleDirectOcrTruncatedError(
             "Direct Paddle llama.cpp OCR response was truncated.",
             service_name="PaddleOCR VL",
             settings_page_name="PaddleOCR VL Settings",

@@ -82,4 +82,4 @@ llama.cpp의 `cache_prompt`와 `cache-ram`은 prompt prefill 계산을 재사용
 현재 제품 runtime은 `cache-ram=0`을 유지합니다. 54블록 fast-path 검증에서 전체 result-cache hit와 승인 TM hit는 각각 HTTP 0회로 완료됐지만, 이 결과는 최종 대규모 번역 품질 승인을 대신하지 않습니다.
 
 재실행 cache, project checkpoint, cold path의 최종 범위와 측정치는
-`benchmarking/lab`의 캐시·cold path 결정 기록을 참고하세요.
+`benchmarking/lab`의 캐시·cold path 결정 기록에서 관리합니다.
