@@ -732,6 +732,20 @@ class PaddleOCRVLEngine(OCREngine):
             self._request_telemetry_context.record = record
             try:
                 raw_text = self._request_ocr_text_from_encoded(bytes(image_bytes))
+            except PaddleDirectOcrTruncatedError:
+                # 한도를 올린 재시도까지 잘렸다. 이 말풍선만 비우고 페이지는
+                # 계속 간다. 영구 캐시 경로도 일반 sweep 과 똑같이 동작해야 한다.
+                # 실측: 366장 배치에서 4장이 이 경로로만 실패해 원본 그대로
+                # 나갔다. 같은 잘림이 sweep 경로에서는 이미 격리되고 있었다.
+                self._mark_empty(outcome_block, self.TRUNCATED_OCR_REASON)
+                outcome_block.ocr_reject_reason = self.TRUNCATED_OCR_REASON
+                record["status"] = "truncated_after_retry"
+                logger.warning(
+                    "Leaving one cached-path block empty because its OCR "
+                    "response stayed truncated: bbox=%s",
+                    job.get("bbox"),
+                )
+                return snapshot_raw_ocr_result(outcome_block)
             finally:
                 self._request_telemetry_context.record = None
             self._raise_if_cancelled()

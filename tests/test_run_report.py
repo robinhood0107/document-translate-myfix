@@ -17,14 +17,28 @@ from modules.utils.run_report import (  # noqa: E402
 )
 
 
+# `stages` 는 중첩·동시 측정까지 전부 더한 값이라 실행 시간을 넘길 수 있다.
+# 단계가 실제로 점유한 구간은 `stage_details[...]["stage_window"]` 하나뿐이다.
+def _window(seconds: float, count: int = 1) -> dict:
+    return {"stage_window": {"wall_ms": seconds * 1000.0, "count": count}}
+
+
 TELEMETRY = {
+    "stage_details": {
+        "detect": _window(60.0),
+        "ocr": _window(71.0),
+        "translate": _window(900.0),
+        "inpaint": _window(467.0),
+        "render": _window(110.0),
+    },
     "stages": {
         "detect": {"wall_ms": 60_000.0, "count": 366},
         "ocr": {"wall_ms": 71_000.0, "count": 366},
         "translate": {"wall_ms": 900_000.0, "count": 366},
-        "inpaint": {"wall_ms": 467_000.0, "count": 366},
-        "render": {"wall_ms": 110_000.0, "count": 366},
-    }
+        # 페이지별 측정의 합. 벽시계 구간(467s)보다 크며, 그 차이가 겹쳐 숨긴 양이다.
+        "inpaint": {"wall_ms": 232_411_000.0, "count": 347},
+        "render": {"wall_ms": 802_100.0, "count": 347},
+    },
 }
 
 OUTPUT_SUMMARY = {
@@ -95,7 +109,28 @@ class BuildRunReportTests(unittest.TestCase):
     def test_missing_telemetry_does_not_break_the_report(self) -> None:
         report = _report(telemetry={})
         self.assertEqual(report["stages"], [])
+        self.assertEqual(report["stage_work"], [])
         self.assertEqual(report["total_wall_text"], "00:26:48")
+
+    def test_stage_time_uses_the_window_not_the_sum_of_nested_measurements(self) -> None:
+        # 실측 사고: 41분 실행에서 inpaint 가 64시간으로 찍혔다. 페이지별 측정을
+        # 전부 더했기 때문이다. 단계 시간은 벽시계 구간이어야 한다.
+        report = _report()
+        inpaint = next(r for r in report["stages"] if r["stage"] == "inpaint")
+
+        self.assertEqual(inpaint["seconds"], 467.0)
+        self.assertLess(inpaint["seconds"], report["total_wall_sec"])
+        for row in report["stages"]:
+            self.assertLessEqual(row["seconds"], report["total_wall_sec"])
+
+    def test_work_totals_are_reported_separately_from_the_window(self) -> None:
+        # 작업 합계는 그대로 유용하다. 벽시계 구간과의 차이가 동시성으로 숨긴 양이다.
+        report = _report()
+        inpaint = next(r for r in report["stage_work"] if r["stage"] == "inpaint")
+
+        self.assertEqual(inpaint["work_seconds"], 232411.0)
+        self.assertEqual(inpaint["count"], 347)
+        self.assertAlmostEqual(inpaint["seconds_per_measurement"], 669.7723, places=3)
 
 
 class RenderRunReportTests(unittest.TestCase):
