@@ -34,6 +34,9 @@ htmlcov/
 .idea/
 .DS_Store
 
+# 앱 로그와 실행 리포트. 저장소 안에 모아 두되 추적하지는 않는다.
+/logs/
+
 #ai models
 /models/
 testmodel
