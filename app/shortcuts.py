@@ -39,6 +39,15 @@ SHORTCUT_DEFINITIONS: tuple[ShortcutDefinition, ...] = (
         default="Delete",
     ),
     ShortcutDefinition(
+        id="series_back",
+        label=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Back to Series Board"),
+        description=QT_TRANSLATE_NOOP(
+            "ShortcutDefinitions",
+            "Leave the current series chapter and go back to the series board.",
+        ),
+        default="Alt+Left",
+    ),
+    ShortcutDefinition(
         id="restore_text_blocks",
         label=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Restore Text Blocks"),
         description=QT_TRANSLATE_NOOP(
