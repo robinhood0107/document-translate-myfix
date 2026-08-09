@@ -4850,9 +4850,9 @@ class StageBatchedProcessor(BatchProcessor):
             started_at_local=self._run_started_wall_text(),
         )
         try:
-            from modules.utils.paths import get_user_data_dir
+            from modules.utils.paths import get_log_dir
 
-            log_dir = os.path.join(get_user_data_dir(), "logs", "runs")
+            log_dir = get_log_dir("runs")
         except Exception:
             logger.debug("Could not resolve the run report directory.", exc_info=True)
             return ""
