@@ -184,6 +184,8 @@ class AutomaticProgressTracker:
         self._supplied_progress_percent = None
         now = time.monotonic()
         self.run_started_at = now
+        # 사용자가 '모두 번역'을 누른 벽시계 시각. 실행 리포트가 이 값을 쓴다.
+        self.run_started_wall = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.page_total = max(int(page_total or 0), 0)
         self.run_type = str(run_type or "batch")
         self.current_page_started_at: float | None = None
