@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 import tempfile
 import types
@@ -225,6 +226,20 @@ class OutputReconciliationTests(unittest.TestCase):
 
         self.assertIsNone(ctx.image)
         self.assertIsNone(ctx.inpaint_input_img)
+
+
+class NoTextPageRenderTests(unittest.TestCase):
+    def test_a_no_text_page_still_submits_a_render(self) -> None:
+        # OCR 후 유효 텍스트가 없다고 판정된 페이지는 인페인팅을 건너뛴다. 그런데
+        # 렌더 제출까지 건너뛰는 바람에 정상 경로로 파일을 남기지 못했고, 실측
+        # 366장에서 15장이 배치 끝 폴백으로만 저장됐다. 글자가 없으면 렌더할
+        # 텍스트가 없을 뿐, 페이지는 그대로 내보내야 한다.
+        source = inspect.getsource(StageBatchedProcessor._inpaint_pages)
+        branch = source.index('skip_reason="no_text_detected"')
+        submit = source.index("_submit_or_inline_render", branch)
+        following_continue = source.index("continue", branch)
+
+        self.assertLess(submit, following_continue)
 
 
 class BatchProcessWiringTests(unittest.TestCase):
