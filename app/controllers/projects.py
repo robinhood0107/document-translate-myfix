@@ -105,6 +105,21 @@ class ProjectController:
     def _current_project_kind(self) -> str:
         return str(getattr(self.main, "project_kind", PROJECT_KIND_SINGLE) or PROJECT_KIND_SINGLE)
 
+    def _series_child_is_active(self) -> bool:
+        """시리즈의 한 화를 실제로 편집 중인지.
+
+        `project_kind` 는 자식을 열어도 `PROJECT_KIND_SERIES` 로 고정된다.
+        "시리즈 프로젝트인가"와 "지금 자식을 편집 중인가"는 다른 질문이고,
+        저장 분기가 필요로 하는 것은 후자다.
+        """
+        series_ctrl = getattr(self.main, "series_ctrl", None)
+        if series_ctrl is None:
+            return False
+        try:
+            return bool(series_ctrl.is_child_project_active())
+        except Exception:
+            return False
+
     def _project_extension(self, kind: str | None = None) -> str:
         return project_extension_for_kind(kind or self._current_project_kind())
 
@@ -400,7 +415,14 @@ class ProjectController:
         (which the batch processor uses for cancel detection). A GenericWorker
         is started directly on the shared threadpool instead.
         """
+        if self._series_child_is_active():
+            # 시리즈 자식을 편집하는 중이다. 페이지마다 저장하면 시리즈 파일
+            # 전체를 매번 다시 쓰게 된다. 챕터가 끝나면
+            # `SeriesController.on_batch_process_finished` 가
+            # `sync_active_child_to_series` 로 한 번에 반영한다.
+            return
         if self._current_project_kind() == PROJECT_KIND_SERIES:
+            # 시리즈 보드 화면 — 저장할 페이지 상태 자체가 없다.
             return
         if self._batch_autosave_deferred:
             # 인페인팅+렌더 융합 sweep 이 진행 중이다 — sweep 종료 시
