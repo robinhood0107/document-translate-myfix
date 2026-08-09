@@ -11,6 +11,7 @@ import unittest
 from modules.utils.stage_sweep_eta import (
     DEFAULT_STAGE_ORDER,
     DEFAULT_STAGE_WEIGHTS,
+    FUSED_STAGES,
     StageSweepEtaEstimator,
 )
 
@@ -40,10 +41,11 @@ class StageSweepEtaTests(unittest.TestCase):
         self.assertIsNotNone(remaining)
         # 검출이 페이지당 1초였고 검출 비중이 1.0 이므로, 남은 단계들의 비중 합
         # 만큼이 남아야 한다. 비중은 실측으로 갱신되므로 표에서 계산한다.
+        # 융합된 단계(렌더)는 감싸는 단계 안에서 도므로 따로 세지 않는다.
         remaining_weight = sum(
             weight
             for name, weight in DEFAULT_STAGE_WEIGHTS.items()
-            if name != "detect-all"
+            if name != "detect-all" and name not in FUSED_STAGES
         )
         self.assertAlmostEqual(remaining, 366 * remaining_weight, delta=366 * 0.5)
 
