@@ -62,10 +62,9 @@ def _configure_file_logging() -> str:
     try:
         from logging.handlers import RotatingFileHandler
 
-        from modules.utils.paths import get_user_data_dir
+        from modules.utils.paths import get_log_dir
 
-        log_dir = os.path.join(get_user_data_dir(), "logs")
-        os.makedirs(log_dir, exist_ok=True)
+        log_dir = get_log_dir()
         log_path = os.path.join(log_dir, "comic-translate.log")
         handler = RotatingFileHandler(
             log_path,
