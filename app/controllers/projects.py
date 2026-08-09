@@ -590,20 +590,34 @@ class ProjectController:
             return
 
         autosave_start_revision = self.main._dirty_revision
-        self._autosave_save_pending = True
+        series_ctrl = self.main.series_ctrl
+        series_file = str(series_ctrl.series_file or "")
+        # 원본 시리즈 파일에 직접 쓰는 것은 자동저장이 실제로 켜져 있을 때뿐이다.
+        # 예전에는 자동저장이 꺼져 있어도 동기 sync 가 원본을 갱신해서,
+        # "저장하지 않음"을 기대한 흐름과 어긋났다.
+        writes_original = bool(use_project_file and target_file == series_file)
+
+        # 1단계만 메인 스레드에서 한다. 예전에는 자식 프로젝트 직렬화와 시리즈
+        # 임베드까지 전부 GUI 스레드에서 돌아, 페이지가 많은 화에서는 자동저장
+        # 주기마다 UI 가 멈췄다.
         try:
-            self.main.series_ctrl.sync_active_child_to_series()
+            sync_payload = series_ctrl.prepare_active_child_sync()
         except Exception:
             self._autosave_save_pending = False
             logger.warning("Series autosave sync failed.", exc_info=True)
             return
 
         def worker() -> str:
-            current_series = str(self.main.series_ctrl.series_file or "")
-            if not current_series:
+            if not series_file:
                 raise FileNotFoundError("Series project file is not available for autosave.")
-            if target_file != current_series:
-                shutil.copyfile(current_series, target_file)
+            if writes_original:
+                if sync_payload is not None:
+                    series_ctrl.write_active_child_sync(sync_payload)
+                return target_file
+            # 복구 스냅샷 경로: 원본을 뜬 다음 사본에만 자식 변경을 반영한다.
+            shutil.copyfile(series_file, target_file)
+            if sync_payload is not None:
+                series_ctrl.write_active_child_sync(sync_payload, series_target_file=target_file)
             return target_file
 
         def on_error(error_tuple):
@@ -616,14 +630,22 @@ class ProjectController:
 
         def on_finished():
             self._autosave_save_pending = False
-            if use_project_file and self.main._dirty_revision == autosave_start_revision:
-                self.main.set_project_clean()
-                self.add_recent_project(target_file)
-                self._refresh_home_screen()
+            if writes_original:
+                # 원본이 실제로 바뀐 경우에만 메모리 매니페스트를 맞춘다.
+                # 복구 스냅샷만 쓴 경우 자식은 여전히 미반영 상태다.
+                try:
+                    series_ctrl.finalize_active_child_sync()
+                except Exception:
+                    logger.warning("Series autosave finalize failed.", exc_info=True)
+                if self.main._dirty_revision == autosave_start_revision:
+                    self.main.set_project_clean()
+                    self.add_recent_project(target_file)
+                    self._refresh_home_screen()
             if self._autosave_retrigger_requested:
                 self._autosave_retrigger_requested = False
                 self._realtime_autosave_timer.start()
 
+        self._autosave_save_pending = True
         self.main.run_threaded(worker, None, on_error, on_finished)
 
     def prompt_restore_recovery_if_available(self) -> bool:
