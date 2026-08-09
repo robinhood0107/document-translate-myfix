@@ -14,7 +14,10 @@ from modules.translation.gemma_runtime_contract import (
     DEFAULT_GEMMA_MODEL_VOLUME,
     GEMMA_RUNTIME_PREPARATION_VERSION,
 )
-from modules.translation.local_runtime import LocalGemmaRuntimeManager
+from modules.translation.local_runtime import (
+    LocalGemmaRuntimeManager,
+    _GemmaVolumeNotProvisioned,
+)
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
@@ -708,11 +711,13 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
             stderr="No such volume",
         )
 
+        # 없는 볼륨은 준비 스크립트로 해결되는 상태다. 계약을 읽는 쪽이 자동
+        # 프로비저닝과 최종 오류를 구분할 수 있도록 전용 표식으로 올린다.
         with mock.patch(
             "modules.translation.local_runtime.run_docker_command",
             return_value=missing,
         ) as run, self.assertRaisesRegex(
-            LocalServiceSetupError,
+            _GemmaVolumeNotProvisioned,
             "does not exist",
         ):
             manager._probe_model_volume(
