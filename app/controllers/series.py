@@ -16,11 +16,11 @@ from app.projects.project_state import (
 )
 from app.projects.project_types import (
     PROJECT_KIND_SERIES,
-    PROJECT_KIND_SINGLE,
     SERIES_PROJECT_FILE_EXT,
     ensure_project_extension,
 )
 from app.projects.series_state_v1 import (
+    SERIES_FIELD_UNSET,
     add_series_paths,
     build_series_item_from_path,
     build_series_run_summary,
@@ -56,7 +56,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_UNSET = object()
+# 시리즈 상태 모듈과 **같은** sentinel 을 써야 한다. 여기서 별도 `object()` 를
+# 만들면 생략한 인자가 저쪽에서 "빈 값이 주어졌다"로 해석돼 큐 런타임 필드가
+# 통째로 지워진다.
+_UNSET = SERIES_FIELD_UNSET
 
 
 class SeriesController(QtCore.QObject):
@@ -994,6 +997,11 @@ class SeriesController(QtCore.QObject):
             self.main.loading.setVisible(False)
             self.main.default_error_handler(error_tuple)
             shutil.rmtree(work_dir, ignore_errors=True)
+            # 실패 경로에서도 직전 작업본을 정리한다. 정상 경로(`on_finished`)
+            # 에서만 지우면 열기 실패가 누적될수록 `series_child_*` 가 쌓인다.
+            if old_temp_dir and old_temp_dir != work_dir:
+                shutil.rmtree(old_temp_dir, ignore_errors=True)
+                self.active_child_temp_dir = None
 
         def on_finished() -> None:
             Messages.close_busy(busy_dialog)
@@ -1393,21 +1401,58 @@ class SeriesController(QtCore.QObject):
     def sync_active_child_to_series(self) -> None:
         if not self.is_child_project_active() or not self.series_file:
             return
+        payload = self.prepare_active_child_sync()
+        if payload is None:
+            return
+        self.write_active_child_sync(payload)
+        self.finalize_active_child_sync()
+
+    def prepare_active_child_sync(self) -> dict[str, str] | None:
+        """1단계 (메인 스레드): UI 상태를 수집하고 쓰기에 필요한 값만 뽑는다.
+
+        `save_current_state` 는 화면의 편집 결과를 페이지 상태로 옮기는
+        일이라 반드시 메인 스레드여야 한다. 나머지 단계는 값만 있으면 된다.
+        """
+        if not self.is_child_project_active() or not self.series_file:
+            return None
         self.main.project_ctrl.save_current_state()
-        previous_project_file = self.main.project_file
-        previous_project_kind = getattr(self.main, "project_kind", PROJECT_KIND_SERIES)
-        self.main.project_file = self.active_child_project_path
-        self.main.project_kind = PROJECT_KIND_SINGLE
-        try:
-            save_state_to_proj_file(self.main, self.active_child_project_path)
-        finally:
-            self.main.project_file = previous_project_file
-            self.main.project_kind = previous_project_kind
-        update_series_child_from_file(
-            self.series_file,
-            series_item_id=str(self.active_child_item_id),
-            child_project_path=self.active_child_project_path,
+        return {
+            "series_file": str(self.series_file),
+            "child_project_path": str(self.active_child_project_path),
+            "series_item_id": str(self.active_child_item_id),
+        }
+
+    def write_active_child_sync(
+        self,
+        payload: dict[str, str],
+        *,
+        series_target_file: str | None = None,
+    ) -> None:
+        """2단계 (워커 가능): 자식 프로젝트를 쓰고 시리즈에 임베드한다.
+
+        예전에는 `main.project_file` 을 자식 경로로 잠시 바꿔치기했다. 저장을
+        워커로 옮기면 그 전역 조작이 메인 스레드와 경합하므로,
+        `source_project_file` 인자로 대체했다.
+
+        `series_target_file` 을 주면 원본 대신 그 파일에 임베드한다. 자동저장이
+        꺼져 있을 때 원본 시리즈 파일을 건드리지 않기 위한 경로다.
+        """
+        child_project_path = payload["child_project_path"]
+        save_state_to_proj_file(
+            self.main,
+            child_project_path,
+            source_project_file=child_project_path,
         )
+        update_series_child_from_file(
+            series_target_file or payload["series_file"],
+            series_item_id=payload["series_item_id"],
+            child_project_path=child_project_path,
+        )
+
+    def finalize_active_child_sync(self) -> None:
+        """3단계 (메인 스레드): 갱신된 매니페스트를 다시 읽고 UI 를 맞춘다."""
+        if not self.series_file:
+            return
         loaded = load_series_project(self.series_file)
         self.series_manifest = dict(loaded["manifest"])
         self.series_items = list(loaded["items"])
@@ -1514,9 +1559,11 @@ class SeriesController(QtCore.QObject):
             last_run_finished_at=last_run_finished_at,
             last_run_summary=last_run_summary,
         )
-        loaded = load_series_project(self.series_file)
-        self.series_manifest = dict(loaded["manifest"])
-        self.series_items = list(loaded["items"])
+        # `update_series_queue_runtime` 이 이미 갱신된 매니페스트를 돌려주고,
+        # 큐 런타임은 manifest 필드라 items 는 바뀌지 않는다. 예전에는 여기서
+        # 파일을 통째로 다시 읽어, 큐 아이템이 넘어갈 때마다 GUI 스레드에서
+        # load 가 두 번씩 돌았다.
+        self.series_manifest = dict(self.series_manifest)
         # 큐 상태가 바뀌면 표시줄의 히스토리 잠금 사유도 함께 바뀐다.
         self._refresh_breadcrumb()
 
