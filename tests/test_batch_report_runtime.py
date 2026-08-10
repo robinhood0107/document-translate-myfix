@@ -5,7 +5,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from app.controllers.batch_report import BatchReportController
 from app.controllers.image import ImageStateController
@@ -64,6 +64,50 @@ class BatchReportRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(reexported)
         self.assertEqual(reexported["preflight_errors"], payload["preflight_errors"])
         self.assertTrue(imported_main.batch_report_button.enabled)
+
+    def test_preflight_warnings_are_deduplicated_and_preserved(self) -> None:
+        main = _FakeMain()
+        ctrl = BatchReportController(main)
+        ctrl.start_batch_report(["/tmp/page-001.png"], run_type="batch")
+        ctrl.register_preflight_warning(
+            "PDF import memory limit applied",
+            "Pages: 3. Requested/applied sizes: 3: 30000×20000 → 12247×8165.",
+        )
+        ctrl.register_preflight_warning(
+            "PDF import memory limit applied",
+            "Pages: 3. Requested/applied sizes: 3: 30000×20000 → 12247×8165.",
+        )
+        finalized = ctrl.finalize_batch_report(False)
+
+        self.assertIsNotNone(finalized)
+        self.assertEqual(len(finalized["preflight_warnings"]), 1)
+        payload = ctrl.export_latest_report_for_project()
+        imported = BatchReportController(_FakeMain())
+        imported.import_latest_report_from_project(payload)
+        self.assertEqual(
+            imported.export_latest_report_for_project()["preflight_warnings"],
+            payload["preflight_warnings"],
+        )
+
+    def test_compiled_korean_pdf_warning_is_available(self) -> None:
+        translator = QtCore.QTranslator()
+        qm_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "resources",
+            "translations",
+            "compiled",
+            "ct_ko.qm",
+        )
+        self.assertTrue(translator.load(qm_path))
+        self._app.installTranslator(translator)
+        try:
+            translated = QtCore.QCoreApplication.translate(
+                "PdfImport", "PDF import memory limit applied"
+            )
+        finally:
+            self._app.removeTranslator(translator)
+
+        self.assertEqual(translated, "PDF 가져오기 메모리 한도 적용")
 
     def test_inpaint_skip_preserves_stage_and_boundary_reason(self) -> None:
         main = _FakeMain()
