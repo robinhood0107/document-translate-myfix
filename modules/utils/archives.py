@@ -1,4 +1,3 @@
-import io
 import math
 import os
 import re
@@ -7,7 +6,14 @@ import tarfile
 import tempfile
 import threading
 import zipfile
-from PIL import Image
+
+from .pdf_pages import (
+    PdfPagePlan,
+    close_pdf_cache,
+    materialize_page,
+    materialize_transaction,
+    scan_pdf,
+)
 
 SUPPORTED_SAVE_AS_EXTS = {'.pdf', '.cbz', '.cb7', '.zip'}
 _IMAGE_EXTENSIONS = (
@@ -21,36 +27,11 @@ _IMAGE_EXTENSIONS = (
     '.jpf',
     '.jpx',
     '.j2c',
+    '.tif',
+    '.tiff',
 )
-_PDF_CACHE_LOCK = threading.RLock()
-_PDF_CACHE: dict[str, dict] = {}
 _COMIC_CACHE_LOCK = threading.RLock()
 _COMIC_CACHE: dict[str, dict] = {}
-
-
-def close_pdf_cache(file_path: str | None = None) -> None:
-    """Close cached pdfplumber objects to free memory.
-
-    If *file_path* is given, only that entry is evicted; otherwise the entire
-    cache is cleared.
-    """
-    with _PDF_CACHE_LOCK:
-        if file_path is not None:
-            abs_path = os.path.abspath(file_path)
-            cached = _PDF_CACHE.pop(abs_path, None)
-            if cached and cached.get("pdf") is not None:
-                try:
-                    cached["pdf"].close()
-                except Exception:
-                    pass
-        else:
-            for cached in _PDF_CACHE.values():
-                if cached.get("pdf") is not None:
-                    try:
-                        cached["pdf"].close()
-                    except Exception:
-                        pass
-            _PDF_CACHE.clear()
 
 
 def close_comic_cache(file_path: str | None = None) -> None:
@@ -95,36 +76,6 @@ def _safe_ext(path: str, default: str = ".png") -> str:
     if ext in _IMAGE_EXTENSIONS:
         return ext
     return default
-
-
-def _get_cached_pdf(file_path: str):
-    import pdfplumber
-
-    abs_path = os.path.abspath(file_path)
-    stat = os.stat(abs_path)
-    size = int(stat.st_size)
-    mtime_ns = int(stat.st_mtime_ns)
-
-    with _PDF_CACHE_LOCK:
-        cached = _PDF_CACHE.get(abs_path)
-        if cached and cached.get("size") == size and cached.get("mtime_ns") == mtime_ns:
-            return cached["pdf"], cached["lock"]
-
-        if cached and cached.get("pdf") is not None:
-            try:
-                cached["pdf"].close()
-            except Exception:
-                pass
-
-        pdf = pdfplumber.open(abs_path)
-        page_lock = threading.RLock()
-        _PDF_CACHE[abs_path] = {
-            "pdf": pdf,
-            "lock": page_lock,
-            "size": size,
-            "mtime_ns": mtime_ns,
-        }
-        return pdf, page_lock
 
 
 def _is_cbz_native_archive(file_lower: str) -> bool:
@@ -299,14 +250,13 @@ def list_archive_image_entries(file_path: str) -> list[dict]:
                     })
 
     elif file_lower.endswith('.pdf'):
-        pdf, page_lock = _get_cached_pdf(file_path)
-        with page_lock:
-            total_pages = len(pdf.pages)
-        for page_idx in range(total_pages):
+        _source_identity, plans = scan_pdf(file_path)
+        for plan in plans:
             entries.append({
                 "kind": "pdf_page",
-                "page_index": page_idx,
-                "ext": ".png",
+                "page_index": plan.page_index,
+                "ext": plan.extension,
+                "pdf_plan": plan.to_dict(),
             })
 
     else:
@@ -324,7 +274,8 @@ def list_archive_image_entries(file_path: str) -> list[dict]:
 def materialize_archive_entry(file_path: str, entry: dict, output_path: str) -> bool:
     kind = str(entry.get("kind", ""))
     if kind == "pdf_page":
-        return _materialize_pdf_page(file_path, int(entry.get("page_index", 0)), output_path)
+        materialize_page(file_path, _pdf_plan_from_entry(file_path, entry), output_path)
+        return True
     if kind != "archive_entry":
         return False
 
@@ -385,15 +336,12 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
     completed = 0
 
     if file_lower.endswith('.pdf'):
-        pdf, page_lock = _get_cached_pdf(file_path)
-        with page_lock:
-            for entry, output_path in items:
-                page_index = int(entry.get("page_index", -1))
-                if page_index < 0 or page_index >= len(pdf.pages):
-                    continue
-                if _materialize_pdf_page_from_page(pdf.pages[page_index], output_path):
-                    completed += 1
-        return completed
+        pdf_items = [
+            (_pdf_plan_from_entry(file_path, entry), output_path)
+            for entry, output_path in items
+        ]
+        materialize_transaction(file_path, pdf_items)
+        return len(pdf_items)
 
     if file_lower.endswith(('.zip', '.epub', '.cbz')):
         with zipfile.ZipFile(file_path, 'r') as archive:
@@ -492,45 +440,21 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
     return completed
 
 
-def _materialize_pdf_page(file_path: str, page_index: int, output_path: str) -> bool:
-    out_dir = os.path.dirname(output_path)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+def _pdf_plan_from_entry(file_path: str, entry: dict) -> PdfPagePlan:
+    value = entry.get("pdf_plan")
+    if isinstance(value, dict):
+        return PdfPagePlan.from_dict(value)
+    page_index = int(entry.get("page_index", -1))
+    _identity, plans = scan_pdf(file_path)
+    if page_index < 0 or page_index >= len(plans):
+        from .pdf_pages import PdfImportError
 
-    pdf, page_lock = _get_cached_pdf(file_path)
-    with page_lock:
-        if page_index < 0 or page_index >= len(pdf.pages):
-            return False
-        return _materialize_pdf_page_from_page(pdf.pages[page_index], output_path)
-
-
-def _materialize_pdf_page_from_page(page, output_path: str) -> bool:
-    out_dir = os.path.dirname(output_path)
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-
-    if page.images:
-        try:
-            img = page.images[0]
-            if "stream" in img:
-                image_bytes = img["stream"].get_data()
-                try:
-                    with Image.open(io.BytesIO(image_bytes)):
-                        pass
-                    with open(output_path, "wb") as image_file:
-                        image_file.write(image_bytes)
-                    return True
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    try:
-        page_img = page.to_image()
-        page_img.save(output_path)
-        return True
-    except Exception:
-        return False
+        raise PdfImportError(
+            "PDF_PAGE_MATERIALIZATION_FAILED",
+            page_index=page_index,
+            detail_code="page_index_invalid",
+        )
+    return plans[page_index]
 
 def extract_archive(file_path: str, extract_to: str):
     image_paths = []
