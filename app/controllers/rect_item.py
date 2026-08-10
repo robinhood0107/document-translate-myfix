@@ -11,6 +11,7 @@ from app.projects.stage_checkpoints import (
 )
 
 from modules.detection.utils.geometry import do_rectangles_overlap
+from modules.utils.block_geometry import invalidate_render_geometry
 from modules.utils.textblock import TextBlock, ensure_text_block_id
 
 if TYPE_CHECKING:
@@ -108,6 +109,7 @@ class RectItemController:
                                int(new_rect_coords[1]),
                                int(new_rect_coords[2]), 
                                int(new_rect_coords[3])]
+                invalidate_render_geometry(blk)
                 blk.angle = new_angle if new_angle else 0
                 blk.tr_origin_point = (new_tr_origin.x(), new_tr_origin.y()) if new_tr_origin else ()
                 break
