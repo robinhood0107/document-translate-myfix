@@ -10,6 +10,7 @@ from modules.utils.inpaint_envelope import (
     mask_for_xyxy,
     merge_close_components_within_envelope,
 )
+from modules.utils.mask_roi import resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
 
 
@@ -178,7 +179,7 @@ def build_block_rescue_mask(
     block: TextBlock,
     legacy_block_mask: np.ndarray,
 ) -> dict[str, Any]:
-    bbox = _clip_xyxy(getattr(block, "xyxy", None), image_rgb.shape)
+    bbox = resolve_inpaint_text_xyxy(block, image_rgb.shape)
     bubble = _clip_xyxy(getattr(block, "bubble_xyxy", None), image_rgb.shape)
     text_class = str(getattr(block, "text_class", "") or "")
 

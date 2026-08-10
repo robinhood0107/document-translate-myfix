@@ -499,6 +499,37 @@ def _maybe_return_edit_mask(
     return result
 
 
+def _apply_protected_corner_guard(
+    original_image: np.ndarray | None,
+    result_image: np.ndarray,
+    edit_mask: np.ndarray | None,
+    protected_corner_mask: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    if original_image is None:
+        return result_image, edit_mask
+    protected = normalize_edit_mask(protected_corner_mask, original_image.shape)
+    if not np.any(protected):
+        return result_image, edit_mask
+    if edit_mask is None:
+        if np.asarray(result_image).shape != np.asarray(original_image).shape:
+            return result_image, edit_mask
+        guarded = np.asarray(result_image).copy()
+        guarded[protected > 0] = np.asarray(original_image)[protected > 0]
+        return guarded, None
+    normalized_edit = normalize_edit_mask(edit_mask, original_image.shape)
+    normalized_edit = np.where(
+        (normalized_edit > 0) & (protected <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    guarded = composite_with_edit_mask(
+        original_image,
+        result_image,
+        normalized_edit,
+    )
+    return guarded, normalized_edit
+
+
 def source_lama_blockwise_inpaint(
     image: np.ndarray,
     mask: np.ndarray,
@@ -509,6 +540,7 @@ def source_lama_blockwise_inpaint(
     check_need_inpaint: bool = True,
     return_edit_mask: bool = False,
     return_diagnostics: bool = False,
+    protected_corner_mask: np.ndarray | None = None,
 ) -> (
     np.ndarray
     | tuple[np.ndarray, np.ndarray | None]
@@ -520,6 +552,12 @@ def source_lama_blockwise_inpaint(
         converted = imk.convert_scale_abs(result)
         cleaned = composite_with_edit_mask(image, converted, mask)
         edit_mask = normalize_edit_mask(mask, image.shape) if image is not None and mask is not None else mask
+        cleaned, edit_mask = _apply_protected_corner_guard(
+            image,
+            cleaned,
+            edit_mask,
+            protected_corner_mask,
+        )
         return _maybe_return_edit_mask(
             cleaned,
             edit_mask,
@@ -539,9 +577,15 @@ def source_lama_blockwise_inpaint(
             config,
             check_need_inpaint=check_need_inpaint,
         )
-        return _maybe_return_edit_mask(
+        cleaned, guarded_mask = _apply_protected_corner_guard(
+            image,
             cleaned,
             source_mask,
+            protected_corner_mask,
+        )
+        return _maybe_return_edit_mask(
+            cleaned,
+            guarded_mask,
             return_edit_mask,
             diagnostics=diagnostics,
             return_diagnostics=return_diagnostics,
@@ -577,6 +621,12 @@ def source_lama_blockwise_inpaint(
         result_image = composite_with_edit_mask(result_image, fallback_result, fallback_mask)
     combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0) | (fallback_mask > 0), 255, 0).astype(np.uint8)
     result = composite_with_edit_mask(image, result_image, combined_mask)
+    result, combined_mask = _apply_protected_corner_guard(
+        image,
+        result,
+        combined_mask,
+        protected_corner_mask,
+    )
     return _maybe_return_edit_mask(
         result,
         combined_mask,

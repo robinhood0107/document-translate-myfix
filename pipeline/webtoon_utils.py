@@ -2,6 +2,11 @@ import logging
 from typing import Optional
 import logging
 
+from modules.utils.block_geometry import (
+    map_block_bbox_fields,
+    restore_block_bbox_fields,
+    snapshot_block_bbox_fields,
+)
 from modules.utils.textblock import TextBlock
 
 logger = logging.getLogger(__name__)
@@ -100,42 +105,22 @@ def convert_block_to_visible_coordinates(blk: TextBlock, mapping: dict, page_idx
     blk._visible_crop_top = float(mapping['page_crop_top'])
     blk._visible_combined_y_start = float(mapping['combined_y_start'])
     
-    # Convert coordinates to page-local first
-    x1_local = blk.xyxy[0] - page_x_offset
-    y1_local = blk.xyxy[1] - page_y
-    x2_local = blk.xyxy[2] - page_x_offset
-    y2_local = blk.xyxy[3] - page_y
-    
-    # Convert from page-local to combined image coordinates
-    # The mapping tells us how this page's crop maps to the combined image
     crop_top = mapping['page_crop_top']
     combined_y_start = mapping['combined_y_start']
-    
-    # Subtract the crop offset and add the combined image offset
-    y1_combined = (y1_local - crop_top) + combined_y_start
-    y2_combined = (y2_local - crop_top) + combined_y_start
-    
-    # Update block coordinates
-    blk.xyxy[0] = int(max(0, x1_local))
-    blk.xyxy[1] = int(max(0, y1_combined))
-    blk.xyxy[2] = int(x2_local)
-    blk.xyxy[3] = int(y2_combined)
-    
-    # Also convert bubble coordinates if present
-    if blk.bubble_xyxy is not None:
-        bubble_x1_local = blk.bubble_xyxy[0] - page_x_offset
-        bubble_y1_local = blk.bubble_xyxy[1] - page_y
-        bubble_x2_local = blk.bubble_xyxy[2] - page_x_offset
-        bubble_y2_local = blk.bubble_xyxy[3] - page_y
-        
-        # Apply same conversion to bubble coordinates
-        bubble_y1_combined = (bubble_y1_local - crop_top) + combined_y_start
-        bubble_y2_combined = (bubble_y2_local - crop_top) + combined_y_start
-        
-        blk.bubble_xyxy[0] = int(max(0, bubble_x1_local))
-        blk.bubble_xyxy[1] = int(max(0, bubble_y1_combined))
-        blk.bubble_xyxy[2] = int(bubble_x2_local)
-        blk.bubble_xyxy[3] = int(bubble_y2_combined)
+
+    def to_visible(box: list[float]) -> list[int]:
+        x1_local = box[0] - page_x_offset
+        y1_local = box[1] - page_y
+        x2_local = box[2] - page_x_offset
+        y2_local = box[3] - page_y
+        return [
+            int(max(0, x1_local)),
+            int(max(0, (y1_local - crop_top) + combined_y_start)),
+            int(x2_local),
+            int((y2_local - crop_top) + combined_y_start),
+        ]
+
+    map_block_bbox_fields(blk, to_visible)
 
 
 def filter_and_convert_visible_blocks(main_page, pipeline, mappings: list[dict], single_block: bool = False) -> list[TextBlock]:
@@ -177,6 +162,7 @@ def filter_and_convert_visible_blocks(main_page, pipeline, mappings: list[dict],
             for mapping in page_mappings[blk_page_idx]:
                 if is_block_in_visible_portion(blk, mapping, blk_page_idx, webtoon_manager):
                     # Store original coordinates and mapping info for later restoration
+                    blk._visible_geometry_snapshot = snapshot_block_bbox_fields(blk)
                     blk._original_xyxy = blk.xyxy.copy()
                     blk._original_bubble_xyxy = blk.bubble_xyxy.copy() if blk.bubble_xyxy is not None else None
                     blk._mapping = mapping
@@ -239,20 +225,28 @@ def restore_original_block_coordinates(processed_blocks: list[TextBlock]):
                 int(round((y2 - combined_y_start) + crop_top + page_y)),
             ]
         
-        # Restore original coordinates
-        blk.xyxy[:] = blk._original_xyxy
-        if blk._original_bubble_xyxy is not None:
-            blk.bubble_xyxy[:] = blk._original_bubble_xyxy
+        geometry_snapshot = getattr(blk, "_visible_geometry_snapshot", None)
+        if isinstance(geometry_snapshot, dict):
+            restore_block_bbox_fields(blk, geometry_snapshot)
+        else:
+            blk.xyxy[:] = blk._original_xyxy
+            if blk._original_bubble_xyxy is not None:
+                blk.bubble_xyxy[:] = blk._original_bubble_xyxy
         
         # Clean up temporary attributes
-        delattr(blk, '_original_xyxy')
-        delattr(blk, '_original_bubble_xyxy')
-        delattr(blk, '_mapping')
-        delattr(blk, '_page_index')
-        delattr(blk, '_visible_page_y')
-        delattr(blk, '_visible_page_x_offset')
-        delattr(blk, '_visible_crop_top')
-        delattr(blk, '_visible_combined_y_start')
+        for attribute in (
+            '_visible_geometry_snapshot',
+            '_original_xyxy',
+            '_original_bubble_xyxy',
+            '_mapping',
+            '_page_index',
+            '_visible_page_y',
+            '_visible_page_x_offset',
+            '_visible_crop_top',
+            '_visible_combined_y_start',
+        ):
+            if hasattr(blk, attribute):
+                delattr(blk, attribute)
 
 
 def is_text_item_in_visible_portion(text_item, mapping: dict, page_idx: int, webtoon_manager) -> bool:
@@ -366,4 +360,3 @@ def convert_bboxes_to_webtoon_coordinates(bboxes: list, mapping: dict, page_idx:
         converted_bboxes.append([x1_scene, y1_scene, x2_scene, y2_scene])
     
     return converted_bboxes
-
