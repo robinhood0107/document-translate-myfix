@@ -52,6 +52,7 @@ from modules.utils.inpaint_debug import (
     has_debug_exports,
 )
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
@@ -1874,6 +1875,9 @@ class BatchProcessor:
                         mask,
                         inpaint_blocks,
                         config=config,
+                        protected_corner_mask=mask_details.get(
+                            "protected_corner_mask"
+                        ),
                     )
                     inpaint_input_img = imk.convert_scale_abs(
                         inpaint_input_img
@@ -1900,6 +1904,9 @@ class BatchProcessor:
                         self.inpainting.inpainter_cache,
                         config,
                         page_label=f"{index + 1}/{total_images}",
+                        protected_corner_mask=mask_details.get(
+                            "protected_corner_mask"
+                        ),
                     )
                     self._report_residue_cleanup(
                         index=index,
@@ -1916,6 +1923,22 @@ class BatchProcessor:
                         mask,
                         mask_details,
                         cleanup_stats,
+                    )
+                    protected_corner_mask = normalize_edit_mask(
+                        mask_details.get("protected_corner_mask"),
+                        image.shape,
+                    )
+                    if np.any(protected_corner_mask):
+                        mask = np.where(
+                            (normalize_edit_mask(mask, image.shape) > 0)
+                            & (protected_corner_mask <= 0),
+                            255,
+                            0,
+                        ).astype(np.uint8)
+                    inpaint_input_img = composite_with_edit_mask(
+                        image,
+                        inpaint_input_img,
+                        mask,
                     )
                 else:
                     raw_mask = np.zeros(

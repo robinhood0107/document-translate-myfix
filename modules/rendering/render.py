@@ -14,6 +14,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from .hyphen_textwrap import wrap as hyphen_wrap
+from modules.utils.block_geometry import (
+    copy_block_xyxy,
+    render_geometry_is_coherent,
+    resolve_render_recompute_anchor_xyxy,
+)
 from modules.utils.textblock import TextBlock
 from modules.utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
@@ -1146,10 +1151,29 @@ def get_best_render_area(
 ):
     """Select safe text render areas without losing the original OCR anchor."""
     font_profile = get_auto_max_font_profile(auto_max_font_profile)
+    image_shape = tuple(getattr(img, "shape", ()) or ())
     candidates: list[tuple[int, tuple[int, int, int, int]]] = []
     for block_index, blk in enumerate(blk_list):
-        _reset_render_area_metadata(blk)
-        text_draw_bounds = _detected_bubble_render_bounds(blk, img, font_profile)
+        if isinstance(getattr(blk, "xyxy", None), tuple):
+            blk.xyxy = list(blk.xyxy)
+        preserve_original = (
+            len(image_shape) >= 2
+            and render_geometry_is_coherent(blk, image_shape)
+        )
+        original_anchor = (
+            resolve_render_recompute_anchor_xyxy(blk, image_shape)
+            if preserve_original
+            else copy_block_xyxy(getattr(blk, "xyxy", None))
+        )
+        _reset_render_area_metadata(blk, original_anchor)
+        if preserve_original and original_anchor is not None:
+            _assign_block_xyxy(blk, original_anchor)
+        text_draw_bounds = _detected_bubble_render_bounds(
+            blk,
+            img,
+            font_profile,
+            text_xyxy=original_anchor,
+        )
         if text_draw_bounds is None:
             continue
         candidates.append((block_index, text_draw_bounds))
@@ -1166,7 +1190,7 @@ def get_best_render_area(
             continue
         blk = blk_list[block_index]
         bdx1, bdy1, bdx2, bdy2 = text_draw_bounds
-        blk.xyxy[:] = [bdx1, bdy1, bdx2, bdy2]
+        _assign_block_xyxy(blk, (bdx1, bdy1, bdx2, bdy2))
         blk._render_area_source = "detected_bubble"
         blk._render_area_xyxy = [int(bdx1), int(bdy1), int(bdx2), int(bdy2)]
 
@@ -1349,8 +1373,10 @@ def get_dynamic_bubble_font_cap(
     return int(min(font_profile.font_cap, dynamic_cap))
 
 
-def _reset_render_area_metadata(blk: TextBlock) -> None:
-    original = _current_anchor_xyxy(blk)
+def _reset_render_area_metadata(
+    blk: TextBlock,
+    original: tuple[int | float, int | float, int | float, int | float] | None,
+) -> None:
     bubble = _normalize_xyxy(getattr(blk, "bubble_xyxy", None))
     blk._render_original_xyxy = list(original) if original is not None else None
     blk._render_bubble_xyxy = list(bubble) if bubble is not None else None
@@ -1358,14 +1384,27 @@ def _reset_render_area_metadata(blk: TextBlock) -> None:
     blk._render_area_xyxy = list(original) if original is not None else None
 
 
+def _assign_block_xyxy(
+    blk: TextBlock,
+    value: tuple[int, int, int, int],
+) -> None:
+    try:
+        blk.xyxy[:] = value
+    except (AttributeError, TypeError):
+        blk.xyxy = list(value)
+
+
 def _detected_bubble_render_bounds(
     blk: TextBlock,
     img,
     font_profile: AutoMaxFontProfile | None = None,
+    *,
+    text_xyxy: tuple[int, int, int, int] | None = None,
 ) -> tuple[int, int, int, int] | None:
     if getattr(blk, "text_class", "") != "text_bubble":
         return None
-    text_xyxy = _current_anchor_xyxy(blk)
+    if text_xyxy is None:
+        text_xyxy = _current_anchor_xyxy(blk)
     bubble_xyxy = _normalize_xyxy(getattr(blk, "bubble_xyxy", None))
     if text_xyxy is None or bubble_xyxy is None:
         return None

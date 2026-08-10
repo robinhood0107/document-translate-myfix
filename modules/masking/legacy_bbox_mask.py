@@ -15,6 +15,7 @@ from modules.utils.inpaint_envelope import (
     merge_close_components_within_envelope,
 )
 from modules.utils.mask_inpaint_mode import DEFAULT_MASK_INPAINT_MODE
+from modules.utils.mask_roi import resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
 
 
@@ -68,7 +69,8 @@ def _build_legacy_base_block_mask(
     roi_override: tuple[int, int, int, int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None]:
     h, w, _ = img.shape
-    if getattr(blk, "xyxy", None) is None:
+    text_anchor = resolve_inpaint_text_xyxy(blk, img.shape)
+    if text_anchor is None:
         return np.zeros((h, w), dtype=np.uint8), None
 
     roi = roi_override
@@ -77,7 +79,7 @@ def _build_legacy_base_block_mask(
     text_class = getattr(blk, "text_class", "") or ""
     text_free_envelope = build_text_free_erase_envelope(blk, img.shape)
     bboxes = get_inpaint_bboxes(
-        blk.xyxy,
+        text_anchor,
         img,
         bubble_bbox=roi,
     )
