@@ -10,6 +10,10 @@ from PySide6.QtCore import QCoreApplication
 
 from app.path_materialization import ensure_path_materialized
 from modules.utils.export_paths import build_export_timestamp
+from modules.utils.block_geometry import (
+    invalidate_render_geometry,
+    map_block_bbox_fields,
+)
 from modules.utils.pipeline_config import get_inpainter_runtime
 from modules.utils.textblock import sort_blk_list
 from ..virtual_page import VirtualPage
@@ -283,6 +287,7 @@ class FlowMixin:
                 owner_block.bubble_xyxy = list(bottom_bubble)
             else:
                 owner_block.bubble_xyxy = None
+            invalidate_render_geometry(owner_block)
 
             split_matches.append(
                 SimpleNamespace(
@@ -329,9 +334,7 @@ class FlowMixin:
         physical_blocks = []
         for block in blocks:
             out = block.deep_copy()
-            out.xyxy = owner_vpage.virtual_to_physical_coords(list(out.xyxy))
-            if out.bubble_xyxy is not None:
-                out.bubble_xyxy = owner_vpage.virtual_to_physical_coords(list(out.bubble_xyxy))
+            map_block_bbox_fields(out, owner_vpage.virtual_to_physical_coords)
             physical_blocks.append(out)
         return physical_blocks
 
