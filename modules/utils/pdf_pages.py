@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import math
 import os
@@ -65,6 +66,33 @@ _DETAIL_CODES = {
     "disk_space_insufficient",
     "publish_failed",
 }
+
+_DISK_SPACE_ERRNOS = {errno.ENOSPC}
+if hasattr(errno, "EDQUOT"):
+    _DISK_SPACE_ERRNOS.add(errno.EDQUOT)
+_DISK_SPACE_WINERRORS = {39, 112}
+
+
+def _is_disk_space_error(error: BaseException) -> bool:
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, OSError) and (
+            current.errno in _DISK_SPACE_ERRNOS
+            or getattr(current, "winerror", None) in _DISK_SPACE_WINERRORS
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _disk_space_import_error() -> "PdfImportError":
+    return PdfImportError(
+        "PDF_DISK_SPACE_INSUFFICIENT",
+        retryable=True,
+        detail_code="disk_space_insufficient",
+    )
 
 
 class PdfImportError(Exception):
@@ -1287,16 +1315,6 @@ def materialize_page(file_path: str, plan: PdfPagePlan, output_path: str) -> Non
             pass
 
 
-def _estimated_transaction_bytes(items: list[tuple[PdfPagePlan, str]]) -> int:
-    estimate = 0
-    for plan, _output_path in items:
-        if plan.strategy == "native" and plan.encoded_size is not None:
-            estimate += max(1, plan.encoded_size)
-        else:
-            estimate += max(1, plan.width * plan.height * (4 if plan.source_mode == "CMYK" else 3))
-    return estimate + max(1024**3, math.ceil(estimate * 0.10))
-
-
 def materialize_transaction(
     file_path: str,
     items: list[tuple[PdfPagePlan, str]],
@@ -1307,22 +1325,15 @@ def materialize_transaction(
     abs_path = os.path.abspath(file_path)
     _check_cancel(should_cancel)
     parent = os.path.dirname(os.path.abspath(items[0][1]))
-    os.makedirs(parent, exist_ok=True)
-    required = _estimated_transaction_bytes(items)
     try:
-        free = shutil.disk_usage(parent).free
+        os.makedirs(parent, exist_ok=True)
+        staging_dir = tempfile.mkdtemp(prefix=".pdf_staging_", dir=parent)
     except OSError as exc:
+        if _is_disk_space_error(exc):
+            raise _disk_space_import_error() from exc
         raise PdfImportError(
-            "PDF_DISK_SPACE_INSUFFICIENT", retryable=True,
-            detail_code="disk_space_insufficient"
+            "PDF_PAGE_MATERIALIZATION_FAILED", detail_code="publish_failed"
         ) from exc
-    if free < required:
-        raise PdfImportError(
-            "PDF_DISK_SPACE_INSUFFICIENT", retryable=True,
-            detail_code="disk_space_insufficient"
-        )
-
-    staging_dir = tempfile.mkdtemp(prefix=".pdf_staging_", dir=parent)
     staged: list[tuple[PdfPagePlan, str, str]] = []
     published: list[str] = []
     try:
@@ -1361,12 +1372,14 @@ def materialize_transaction(
                 os.makedirs(os.path.dirname(destination), exist_ok=True)
                 os.replace(stage_path, destination)
                 published.append(destination)
-    except (PdfImportError, OperationCancelledError):
+    except (PdfImportError, OperationCancelledError) as exc:
         for destination in published:
             try:
                 os.remove(destination)
             except OSError:
                 pass
+        if _is_disk_space_error(exc):
+            raise _disk_space_import_error() from exc
         raise
     except Exception as exc:
         for destination in published:
@@ -1374,6 +1387,8 @@ def materialize_transaction(
                 os.remove(destination)
             except OSError:
                 pass
+        if _is_disk_space_error(exc):
+            raise _disk_space_import_error() from exc
         raise PdfImportError(
             "PDF_PAGE_MATERIALIZATION_FAILED", detail_code="publish_failed"
         ) from exc
