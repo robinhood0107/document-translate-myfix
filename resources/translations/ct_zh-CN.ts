@@ -218,6 +218,46 @@ Choose either a project file or image/document/archive files.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>This PDF is password-protected. Password entry is not supported yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The PDF changed after it was imported. Remove it and import it again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The PDF page structure could not be read safely.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A PDF page could not be prepared without violating the import quality checks.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There is not enough free disk space to prepare all selected PDF pages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The PDF exceeds the supported import resource limits.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The PDF could not be imported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> Page {page}.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PDF page preparation failed before processing started.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PDF Import Error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>자동번역 준비 또는 실행에 실패했습니다.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2065,6 +2105,21 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     <message>
         <source>Translate</source>
         <translation>翻译</translation>
+    </message>
+</context>
+<context>
+    <name>PdfImport</name>
+    <message>
+        <source>PDF import limited {count} page(s) to protect memory. Pages: {pages}. Requested/applied sizes: {sizes}.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PDF import memory limit applied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages: {pages}. Requested/applied sizes: {sizes}.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

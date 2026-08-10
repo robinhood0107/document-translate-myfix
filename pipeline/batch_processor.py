@@ -1187,6 +1187,32 @@ class BatchProcessor:
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
+        pdf_preflight = getattr(
+            self.main_page.file_handler, "preflight_for_processing", None
+        )
+        pdf_count = (
+            pdf_preflight(image_list, should_cancel=self._is_cancelled)
+            if callable(pdf_preflight)
+            else 0
+        )
+        if pdf_count:
+            logger.info("Validated %d PDF-backed pages before batch processing.", pdf_count)
+            warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
+            if warnings:
+                pages = ", ".join(str(item["page_number"]) for item in warnings)
+                sizes = "; ".join(
+                    "{page_number}: {requested_width}×{requested_height} → "
+                    "{applied_width}×{applied_height}".format(**item)
+                    for item in warnings
+                )
+                self.main_page.batch_report_ctrl.register_preflight_warning(
+                    QCoreApplication.translate(
+                        "PdfImport", "PDF import memory limit applied"
+                    ),
+                    QCoreApplication.translate(
+                        "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
+                    ).replace("{pages}", pages).replace("{sizes}", sizes),
+                )
         try:
             if self.main_page.file_handler.should_pre_materialize(image_list):
                 count = self.main_page.file_handler.pre_materialize(image_list)

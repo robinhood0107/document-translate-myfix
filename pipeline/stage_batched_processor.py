@@ -4927,6 +4927,40 @@ class StageBatchedProcessor(BatchProcessor):
             workflow_mode="stage_batched",
         )
         self._reset_prewarm_lifecycle()
+        pdf_preflight = getattr(
+            self.main_page.file_handler, "preflight_for_processing", None
+        )
+        pdf_count = (
+            pdf_preflight(
+                image_list,
+                should_cancel=lambda: bool(
+                    getattr(self.main_page, "is_current_task_cancelled", lambda: False)()
+                ),
+            )
+            if callable(pdf_preflight)
+            else 0
+        )
+        if pdf_count:
+            logger.info(
+                "Validated %d PDF-backed pages before stage-batched processing.",
+                pdf_count,
+            )
+            warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
+            if warnings:
+                pages = ", ".join(str(item["page_number"]) for item in warnings)
+                sizes = "; ".join(
+                    "{page_number}: {requested_width}×{requested_height} → "
+                    "{applied_width}×{applied_height}".format(**item)
+                    for item in warnings
+                )
+                self.main_page.batch_report_ctrl.register_preflight_warning(
+                    QCoreApplication.translate(
+                        "PdfImport", "PDF import memory limit applied"
+                    ),
+                    QCoreApplication.translate(
+                        "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
+                    ).replace("{pages}", pages).replace("{sizes}", sizes),
+                )
         try:
             with self._measure_performance(
                 stage="pipeline",
