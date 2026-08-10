@@ -807,6 +807,7 @@ class ImageStateController:
                     self.display_image_from_loaded(im, new_index, False)
                 self.main.mark_all_render_dirty()
                 self.main.mark_project_dirty()
+                self._show_pdf_import_warnings()
 
             def on_insert_error(error_tuple):
                 Messages.close_busy(busy_dialog, force=True)
@@ -851,6 +852,35 @@ class ImageStateController:
             self.main.batch_report_ctrl.refresh_action_buttons()
         except Exception:
             pass
+        self._show_pdf_import_warnings()
+
+    def _show_pdf_import_warnings(self) -> None:
+        warnings = self.main.file_handler.consume_pdf_import_warnings()
+        if not warnings:
+            return
+        page_numbers = ", ".join(str(item["page_number"]) for item in warnings)
+        size_details = "; ".join(
+            "{page_number}: {requested_width}×{requested_height} → "
+            "{applied_width}×{applied_height}".format(**item)
+            for item in warnings
+        )
+        message = QtCore.QCoreApplication.translate(
+            "PdfImport",
+            "PDF import limited {count} page(s) to protect memory. "
+            "Pages: {pages}. Requested/applied sizes: {sizes}.",
+        )
+        message = (
+            message.replace("{count}", str(len(warnings)))
+            .replace("{pages}", page_numbers)
+            .replace("{sizes}", size_details)
+        )
+        Messages.show_warning(
+            self.main,
+            message,
+            duration=None,
+            closable=True,
+            source="pdf_import",
+        )
 
     def update_image_cards(self):
         self.main.page_list.set_page_items(self._build_page_list_items())

@@ -6,6 +6,7 @@ import hashlib
 import re
 import sys
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -174,7 +175,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 pinned = runtime_verifier.load_pinned_requirements(
                     [ROOT / requirements_name]
                 )
-                self.assertEqual(len(pinned), 35)
+                self.assertEqual(len(pinned), 36)
                 self.assertEqual(pinned["torch"][1], expected_cuda)
                 self.assertEqual(pinned["pillow"][1], "12.3.0")
                 self.assertEqual(pinned["setuptools"][1], "80.9.0")
@@ -182,6 +183,17 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 self.assertEqual(pinned["py7zr"][1], "1.1.3")
                 self.assertEqual(pinned["pyside6"][1], "6.11.0")
                 self.assertEqual(pinned["send2trash"][1], "2.1.0")
+                self.assertEqual(pinned["pikepdf"][1], "10.5.1")
+                self.assertEqual(pinned["pypdfium2"][1], "5.7.0")
+                self.assertNotIn("pdfplumber", pinned)
+
+    def test_pyproject_matches_pdf_runtime_pins(self) -> None:
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        dependencies = set(project["project"]["dependencies"])
+
+        self.assertIn("pikepdf==10.5.1", dependencies)
+        self.assertIn("pypdfium2==5.7.0", dependencies)
+        self.assertFalse(any(item.startswith("pdfplumber") for item in dependencies))
 
     def test_runtime_requirement_parser_rejects_floating_versions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
