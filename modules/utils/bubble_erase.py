@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from modules.utils.bubble_silhouette import extract_bubble_interior_cap_crop
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
@@ -63,22 +64,19 @@ def _bubble_border_protect_mask(shape: tuple[int, int], width: int = 3) -> np.nd
 def _bubble_interior_cap_mask(crop: np.ndarray, seed_mask: np.ndarray) -> np.ndarray:
     if crop.size == 0 or seed_mask.size == 0:
         return np.zeros(seed_mask.shape, dtype=np.uint8)
-    try:
-        from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
-
-        balloon_mask, _non_text_mask = extract_ballon_mask(crop, seed_mask)
-    except Exception:
+    cap = extract_bubble_interior_cap_crop(
+        crop,
+        seed_mask,
+        erode_px=1,
+        min_area_ratio=0.20,
+        max_area_ratio=1.0,
+        min_seed_coverage=0.0,
+        preserve_seed_after_erode=False,
+        erode_below_area_ratio=0.995,
+        erode_shape=cv2.MORPH_RECT,
+    )
+    if cap is None:
         return np.full(seed_mask.shape, 255, dtype=np.uint8)
-    if balloon_mask is None or balloon_mask.size == 0:
-        return np.full(seed_mask.shape, 255, dtype=np.uint8)
-    if balloon_mask.shape[:2] != seed_mask.shape[:2]:
-        balloon_mask = cv2.resize(balloon_mask, (seed_mask.shape[1], seed_mask.shape[0]), interpolation=cv2.INTER_NEAREST)
-    cap = np.where(balloon_mask > 0, 255, 0).astype(np.uint8)
-    area_ratio = float(np.count_nonzero(cap)) / float(max(1, cap.size))
-    if area_ratio < 0.20:
-        return np.full(seed_mask.shape, 255, dtype=np.uint8)
-    if area_ratio < 0.995:
-        cap = cv2.erode(cap, np.ones((3, 3), np.uint8), iterations=1)
     return np.where(cap > 0, 255, 0).astype(np.uint8)
 
 
