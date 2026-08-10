@@ -24,6 +24,7 @@ The fork is maintained around a practical desktop workflow:
 - Inpainting add, exclude, and restore tools with saved mask and patch state.
 - TXT/MD source export and translation import with OCR and translation correction dictionaries.
 - CBZ/CBR comic archive import with lazy page materialization.
+- PDF import preserves one work image per page, copies safe embedded images without re-encoding, and renders complex pages at high resolution before OCR.
 - Bottom-left automatic pipeline status panel with overlay locking and latest-result preview.
 
 ## Supporting Features
