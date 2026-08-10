@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import fnmatch
 import json
+import math
 import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import sys
+from time import perf_counter
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -40,6 +43,22 @@ from modules.utils.inpainting_runtime import (
     is_lama_family_inpainter,
     normalize_inpainter_key,
 )
+from scripts.inpaint_eval_contract import (
+    EvalManifest,
+    EvalPageSpec,
+    InpaintEvalManifestError,
+    build_quality_metrics,
+    derive_blind_review_seed,
+    load_binary_mask,
+    load_eval_source_array,
+    load_eval_manifests,
+    load_rgb_reference_array,
+    pixel_sha256,
+    sha256_file,
+    verify_eval_page_spec,
+    write_blind_review_jsonl,
+    write_comparison_and_blind_panels,
+)
 from scripts.validation_artifact_harness import select_managed_output_directory
 
 DEBUG_EXPORT_SETTINGS = {
@@ -49,6 +68,122 @@ DEBUG_EXPORT_SETTINGS = {
     "export_cleanup_mask_delta": True,
     "export_debug_metadata": True,
 }
+
+SAFE_PROCESSING_CAUSE_CODES = frozenset(
+    {
+        "evaluation_image_channels_invalid",
+        "evaluation_image_shape_mismatch",
+        "evaluation_mask_shape_mismatch",
+        "evaluation_pre_composite_shape_mismatch",
+        "evaluation_reference_hash_mismatch",
+        "evaluation_reference_image_invalid",
+        "evaluation_reference_shape_mismatch",
+        "evaluation_reference_unreadable",
+        "inpaint_input_image_missing",
+        "inpaint_output_directory_not_empty",
+        "manifest_already_finalized",
+        "manifest_corpus_id_invalid",
+        "manifest_count_mismatch",
+        "manifest_dimension_mismatch",
+        "manifest_dimensions_invalid",
+        "manifest_duplicate_corpus_id",
+        "manifest_duplicate_page_id",
+        "manifest_duplicate_page_id_global",
+        "manifest_duplicate_source_hash",
+        "manifest_expected_count_invalid",
+        "manifest_expected_edit_basis_invalid",
+        "manifest_expected_edit_decisions_seal_invalid",
+        "manifest_expected_edit_invalid",
+        "manifest_file_missing",
+        "manifest_file_unreadable",
+        "manifest_finalization_basis_invalid",
+        "manifest_finalization_decision_invalid",
+        "manifest_finalization_decisions_invalid",
+        "manifest_finalization_decisions_schema_invalid",
+        "manifest_finalization_decisions_unreadable",
+        "manifest_finalization_duplicate_page",
+        "manifest_finalization_expected_edit_invalid",
+        "manifest_finalization_incomplete",
+        "manifest_finalization_no_optional_pages",
+        "manifest_finalization_optional_remaining",
+        "manifest_finalization_output_directory_invalid",
+        "manifest_finalization_output_exists",
+        "manifest_finalization_output_unwritable",
+        "manifest_finalization_overwrite_parent",
+        "manifest_finalization_parent_changed",
+        "manifest_finalization_page_id_invalid",
+        "manifest_finalization_page_set_mismatch",
+        "manifest_finalization_parent_mismatch",
+        "manifest_hash_invalid",
+        "manifest_hash_mismatch",
+        "manifest_holdout_not_source_review_finalized",
+        "manifest_image_invalid",
+        "manifest_page_id_invalid",
+        "manifest_page_invalid",
+        "manifest_page_unknown_key",
+        "manifest_pages_invalid",
+        "manifest_parent_seal_invalid",
+        "manifest_path_missing",
+        "manifest_path_unresolvable",
+        "manifest_reference_invalid",
+        "manifest_reference_unknown_key",
+        "manifest_root_invalid",
+        "manifest_schema_unsupported",
+        "manifest_seal_invalid",
+        "manifest_seal_mismatch",
+        "manifest_size_mismatch",
+        "manifest_source_lock_invalid",
+        "manifest_source_lock_mismatch",
+        "manifest_source_missing",
+        "manifest_split_role_invalid",
+        "manifest_unknown_key",
+        "manifest_unreadable",
+    }
+)
+SAFE_RUNTIME_PHASES = frozenset({"block", "bubble_erase", "full"})
+SAFE_RUNTIME_STATUSES = frozenset(
+    {
+        "completed",
+        "completed_after_roi_retry",
+        "failed",
+        "failed_after_roi_retry",
+        "failed_during_roi_retry",
+        "failed_no_smaller_roi",
+        "running",
+    }
+)
+SAFE_RUNTIME_ERASE_MODES = frozenset(
+    {
+        "bubble_flat_fill",
+        "bubble_gradient_fill",
+        "bubble_lama_fallback",
+        "bubble_skipped",
+        "bubble_telea",
+        "text_free_lama",
+    }
+)
+SAFE_RUNTIME_PRECISIONS = frozenset(
+    {"bf16", "bfloat16", "float16", "float32", "fp16", "fp32"}
+)
+SAFE_RUNTIME_DTYPES = frozenset(
+    {"torch.bfloat16", "torch.float16", "torch.float32"}
+)
+SAFE_RUNTIME_PROVIDERS = frozenset(
+    {"CPUExecutionProvider", "CUDAExecutionProvider", "TensorrtExecutionProvider"}
+)
+SAFE_RUNTIME_CONTRACT_VERSIONS = frozenset({"cuda-learned-inpaint-v1"})
+SAFE_RUNTIME_RETRY_POLICIES = frozenset({"single-tighter-roi-v1"})
+SAFE_RUNTIME_INPAINTER_KEYS = frozenset({"lama_large_512px"})
+SOURCE_REVIEW_FINALIZATION_ROLES = frozenset(
+    {"final-holdout-primary", "final-holdout-reserve"}
+)
+_DROP_RUNTIME_VALUE = object()
+QUALITY_GATE_REQUIRED_FIELDS = (
+    "outside_changed_pixel_count_exact",
+    "protected_structure_changed_pixel_count_exact",
+    "residue_pass_truncated_block_count",
+    "residue_target_is_annotation",
+)
 
 
 @dataclass
@@ -213,6 +348,58 @@ def _build_text_anchor_mask(image_shape, blocks) -> np.ndarray:
     return anchor_mask
 
 
+def _reset_cuda_peak_metrics(device: str) -> bool:
+    if not str(device or "").lower().startswith("cuda"):
+        return False
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(torch.device(device))
+            return True
+    except (ImportError, RuntimeError, ValueError):
+        pass
+    return False
+
+
+def _read_cuda_peak_metrics(device: str) -> dict[str, float | bool]:
+    metrics: dict[str, float | bool] = {
+        "peak_vram_allocated_mb": 0.0,
+        "peak_vram_reserved_mb": 0.0,
+        "peak_vram_metrics_available": False,
+    }
+    if not str(device or "").lower().startswith("cuda"):
+        return metrics
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch_device = torch.device(device)
+            metrics["peak_vram_allocated_mb"] = float(
+                torch.cuda.max_memory_allocated(torch_device) / (1024 * 1024)
+            )
+            metrics["peak_vram_reserved_mb"] = float(
+                torch.cuda.max_memory_reserved(torch_device) / (1024 * 1024)
+            )
+            metrics["peak_vram_metrics_available"] = True
+    except (ImportError, RuntimeError, ValueError):
+        pass
+    return metrics
+
+
+def _safe_reference_mask(
+    page_spec: EvalPageSpec | None,
+    attribute: str,
+    image_shape: tuple[int, ...],
+) -> np.ndarray | None:
+    if page_spec is None:
+        return None
+    reference = getattr(page_spec, attribute, None)
+    if reference is None:
+        return None
+    return load_binary_mask(reference, image_shape)
+
+
 def _write_image(path: Path, image: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     imk.write_image(str(path), ensure_three_channel(image))
@@ -234,12 +421,43 @@ def _process_image(
     settings: _SettingsStub,
     *,
     auto_max_font_profile: str = "current",
+    page_spec: EvalPageSpec | None = None,
+    public_corpus_id: str | None = None,
+    public_page_id: str | None = None,
+    runtime_device: str | None = None,
+    peak_vram_reset_succeeded: bool = False,
 ):
-    image = imk.read_image(str(image_path))
+    resolved_corpus_id = (
+        page_spec.corpus_id
+        if page_spec is not None
+        else str(public_corpus_id or "private")
+    )
+    resolved_page_id = (
+        page_spec.page_id
+        if page_spec is not None
+        else str(public_page_id or "direct-001")
+    )
+    page_started = perf_counter()
+    stage_timings: dict[str, float] = {
+        "read_seconds": 0.0,
+        "detect_seconds": 0.0,
+        "render_and_mask_seconds": 0.0,
+        "inpaint_seconds": 0.0,
+        "cleanup_seconds": 0.0,
+    }
+    read_started = perf_counter()
+    image = (
+        load_eval_source_array(page_spec)
+        if page_spec is not None
+        else imk.read_image(str(image_path))
+    )
     if image is None:
         raise RuntimeError("failed to read image")
     image = ensure_three_channel(image)
+    stage_timings["read_seconds"] = perf_counter() - read_started
+    detect_started = perf_counter()
     blocks = detector.detect(image) or []
+    stage_timings["detect_seconds"] = perf_counter() - detect_started
     detector_key = settings.get_tool_selection("detector")
     detector_engine = detector.last_engine_name or ""
     detector_device = detector.last_device or resolve_device(settings.is_gpu_enabled(), backend="onnx")
@@ -247,20 +465,24 @@ def _process_image(
     final_mask = None
     cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
     cleaned = image.copy()
+    pre_final_composite = image.copy()
     mask_details = {}
     inpaint_diagnostics: list[dict] = []
 
     if blocks:
+        render_mask_started = perf_counter()
         get_best_render_area(
             blocks,
             image,
             auto_max_font_profile=auto_max_font_profile,
         )
         mask_details = generate_mask(image, blocks, settings=settings.get_mask_refiner_settings(), return_details=True)
+        stage_timings["render_and_mask_seconds"] = perf_counter() - render_mask_started
         mask = mask_details["final_mask"]
         if mask is not None and np.any(mask):
             raw_mask = mask_details["raw_mask"]
             config = get_config(settings)
+            inpaint_started = perf_counter()
             cleaned, inpaint_edit_mask, inpaint_diagnostics = source_lama_blockwise_inpaint(
                 image,
                 mask,
@@ -272,7 +494,9 @@ def _process_image(
                 return_diagnostics=True,
                 protected_corner_mask=mask_details.get("protected_corner_mask"),
             )
+            stage_timings["inpaint_seconds"] = perf_counter() - inpaint_started
             mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
+            cleanup_started = perf_counter()
             cleaned, final_mask, cleanup_stats = refine_bubble_residue_inpaint(
                 cleaned,
                 mask,
@@ -297,16 +521,76 @@ def _process_image(
                 255,
                 0,
             ).astype(np.uint8)
+            pre_final_composite = cleaned.copy()
             cleaned = composite_with_edit_mask(image, cleaned, final_mask)
+            stage_timings["cleanup_seconds"] = perf_counter() - cleanup_started
         else:
             final_mask = mask
 
     cleanup_delta = _build_cleanup_delta(raw_mask, final_mask)
     runtime = get_inpainter_runtime(settings)
     config = get_config(settings)
+    evaluation_final_mask = normalize_edit_mask(final_mask, image.shape)
+    explicit_residue_target = _safe_reference_mask(
+        page_spec,
+        "target_glyph_mask",
+        image.shape,
+    )
+    explicit_protected_structure = _safe_reference_mask(
+        page_spec,
+        "protected_structure_mask",
+        image.shape,
+    )
+    protected_structure_is_annotation = explicit_protected_structure is not None
+    if explicit_protected_structure is None:
+        source_text_cap = imk.dilate(
+            normalize_edit_mask(raw_mask, image.shape),
+            np.ones((5, 5), dtype=np.uint8),
+            iterations=1,
+        )
+        explicit_protected_structure = np.where(
+            (
+                (
+                    normalize_edit_mask(
+                        mask_details.get("protect_mask"),
+                        image.shape,
+                    )
+                    > 0
+                )
+                & (source_text_cap <= 0)
+            )
+            | (
+                normalize_edit_mask(
+                    mask_details.get("protected_corner_mask"),
+                    image.shape,
+                )
+                > 0
+            ),
+            255,
+            0,
+        ).astype(np.uint8)
+    quality_metrics = build_quality_metrics(
+        image,
+        cleaned,
+        evaluation_final_mask,
+        residue_target_mask=(
+            explicit_residue_target
+            if explicit_residue_target is not None
+            else raw_mask
+        ),
+        residue_target_is_annotation=explicit_residue_target is not None,
+        protected_structure_mask=explicit_protected_structure,
+        pre_composite_candidate_image=pre_final_composite,
+    )
+    quality_metrics["protected_structure_source"] = (
+        "private_annotation"
+        if protected_structure_is_annotation
+        else "derived_line_protection"
+    )
+    public_image_path = f"{resolved_corpus_id}/{resolved_page_id}"
     metadata = build_inpaint_debug_metadata(
-        image_path=str(image_path),
-        run_type="sample_debug",
+        image_path=public_image_path,
+        run_type="manifest_debug" if page_spec is not None else "sample_debug",
         detector_key=detector_key,
         detector_engine=detector_engine,
         device=detector_device,
@@ -360,10 +644,18 @@ def _process_image(
         mask_candidate_source=str(mask_details.get("mask_candidate_source", "") or ""),
         mask_decision=str(mask_details.get("mask_decision", "") or ""),
         mask_reject_reason=str(mask_details.get("mask_reject_reason", "") or ""),
-        mask_score_outside_change=float(mask_details.get("mask_score_outside_change", 0.0) or 0.0),
-        mask_score_outline_damage=float(mask_details.get("mask_score_outline_damage", 0.0) or 0.0),
-        mask_score_residue=float(mask_details.get("mask_score_residue", 0.0) or 0.0),
-        mask_score_color_delta=float(mask_details.get("mask_score_color_delta", 0.0) or 0.0),
+        mask_score_outside_change=float(
+            mask_details.get("mask_score_outside_change", 0.0) or 0.0
+        ),
+        mask_score_outline_damage=float(
+            mask_details.get("mask_score_outline_damage", 0.0) or 0.0
+        ),
+        mask_score_residue=float(
+            mask_details.get("mask_score_residue", 0.0) or 0.0
+        ),
+        mask_score_color_delta=float(
+            mask_details.get("mask_score_color_delta", 0.0) or 0.0
+        ),
         ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
         ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
     )
@@ -416,14 +708,174 @@ def _process_image(
         }
     )
     metadata["inpaint_runtime_diagnostics"] = list(inpaint_diagnostics)
-    metadata["inpaint_runtime_inference_call_count"] = len(inpaint_diagnostics)
+    inference_diagnostics = [
+        item
+        for item in inpaint_diagnostics
+        if bool(item.get("is_inference", True))
+    ]
+    metadata["inpaint_runtime_inference_call_count"] = len(inference_diagnostics)
     metadata["inpaint_runtime_cpu_fallback_count"] = sum(
-        1 for item in inpaint_diagnostics if bool(item.get("cpu_fallback_used", False))
+        1
+        for item in inference_diagnostics
+        if bool(item.get("cpu_fallback_used", False))
+    )
+    erase_mode_distribution = Counter(
+        str(getattr(block, "_erase_mode", "") or "unassigned")
+        for block in blocks
+    )
+    resolved_runtime_device = str(
+        runtime_device
+        or getattr(inpainter, "runtime_device", getattr(inpainter, "device", ""))
+        or ""
+    )
+    peak_vram = _read_cuda_peak_metrics(resolved_runtime_device)
+    peak_vram["peak_vram_reset_succeeded"] = bool(
+        peak_vram_reset_succeeded
+    )
+    pipeline_elapsed_seconds = perf_counter() - page_started
+    metadata.update(quality_metrics)
+    metadata["evaluation_scores"] = {
+        "outside_change": quality_metrics.get(
+            "pre_composite_outside_change_ratio"
+        ),
+        "outline_damage": quality_metrics.get(
+            "pre_composite_outline_damage_ratio"
+        ),
+        "residue": quality_metrics.get("residue_score"),
+        "color_delta": quality_metrics.get("color_delta_score"),
+    }
+    metadata["evaluation_score_availability"] = {
+        key: value is not None
+        for key, value in metadata["evaluation_scores"].items()
+    }
+    metadata.update(peak_vram)
+    metadata.update(
+        {
+            "corpus_id": resolved_corpus_id,
+            "page_id": resolved_page_id,
+            "expected_edit": page_spec.expected_edit if page_spec is not None else "required",
+            "source_sha256": (
+                page_spec.source.sha256
+                if page_spec is not None
+                else sha256_file(image_path)
+            ),
+            "source_pixel_sha256": pixel_sha256(image),
+            "source_size_bytes": (
+                page_spec.size_bytes
+                if page_spec is not None
+                else image_path.stat().st_size
+            ),
+            "stage_timings_seconds": stage_timings,
+            "pipeline_elapsed_seconds": pipeline_elapsed_seconds,
+            "block_runtime_seconds": [
+                {
+                    "block_index": item.get("block_index"),
+                    "phase": str(item.get("phase", "") or ""),
+                    "elapsed_seconds": float(item.get("elapsed_seconds", 0.0) or 0.0),
+                }
+                for item in inpaint_diagnostics
+                if item.get("block_index") is not None
+                and float(item.get("elapsed_seconds", 0.0) or 0.0) >= 0.0
+            ],
+            "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
+            "residue_pass_truncated_block_count": int(
+                cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
+            ),
+        }
+    )
+
+    page_base_name = resolved_page_id
+    source_path = corpus_output / "source_images" / f"{page_base_name}_source.png"
+    cleaned_path = corpus_output / "cleaned_images" / f"{page_base_name}_cleaned.png"
+    final_mask_path = corpus_output / "final_masks" / f"{page_base_name}_final_mask.png"
+    bubble_cap_path = corpus_output / "bubble_interior_caps" / f"{page_base_name}_bubble_cap.png"
+    protected_corner_path = corpus_output / "protected_corner_masks" / f"{page_base_name}_protected_corners.png"
+    write_started = perf_counter()
+    cleaned_for_write = ensure_three_channel(cleaned)
+    _write_image(source_path, image)
+    _write_image(cleaned_path, cleaned_for_write)
+    _write_image(final_mask_path, normalized_final_mask)
+    _write_image(bubble_cap_path, bubble_cap_mask)
+    _write_image(protected_corner_path, protected_corner_mask)
+    with Image.open(cleaned_path) as saved_cleaned:
+        cleaned_artifact_pixels = np.asarray(saved_cleaned.convert("RGB")).copy()
+    with Image.open(final_mask_path) as saved_final_mask:
+        final_mask_artifact_pixels = np.where(
+            np.asarray(saved_final_mask.convert("L")) > 0,
+            255,
+            0,
+        ).astype(np.uint8)
+    metadata.update(
+        {
+            "primary_artifact_write_seconds": perf_counter() - write_started,
+            "cleaned_sha256": sha256_file(cleaned_path),
+            "final_mask_sha256": sha256_file(final_mask_path),
+            "cleaned_pixel_sha256": pixel_sha256(cleaned_artifact_pixels),
+            "final_mask_pixel_sha256": pixel_sha256(
+                final_mask_artifact_pixels
+            ),
+        }
+    )
+    baseline_cleaned_sha256 = (
+        page_spec.baseline.sha256
+        if page_spec is not None and page_spec.baseline is not None
+        else None
+    )
+    baseline_final_mask_sha256 = (
+        page_spec.baseline_mask.sha256
+        if page_spec is not None and page_spec.baseline_mask is not None
+        else None
+    )
+    baseline_cleaned_pixel_sha256 = (
+        pixel_sha256(
+            load_rgb_reference_array(page_spec.baseline, cleaned_for_write.shape)
+        )
+        if page_spec is not None and page_spec.baseline is not None
+        else None
+    )
+    baseline_final_mask_pixel_sha256 = (
+        pixel_sha256(
+            load_binary_mask(page_spec.baseline_mask, normalized_final_mask.shape)
+        )
+        if page_spec is not None and page_spec.baseline_mask is not None
+        else None
+    )
+    metadata.update(
+        {
+            "baseline_cleaned_sha256": baseline_cleaned_sha256,
+            "baseline_final_mask_sha256": baseline_final_mask_sha256,
+            "baseline_cleaned_pixel_sha256": baseline_cleaned_pixel_sha256,
+            "baseline_final_mask_pixel_sha256": (
+                baseline_final_mask_pixel_sha256
+            ),
+            "cleaned_matches_baseline_sha256": (
+                metadata["cleaned_sha256"] == baseline_cleaned_sha256
+                if baseline_cleaned_sha256 is not None
+                else None
+            ),
+            "final_mask_matches_baseline_sha256": (
+                metadata["final_mask_sha256"] == baseline_final_mask_sha256
+                if baseline_final_mask_sha256 is not None
+                else None
+            ),
+            "cleaned_matches_baseline_pixel_sha256": (
+                metadata["cleaned_pixel_sha256"]
+                == baseline_cleaned_pixel_sha256
+                if baseline_cleaned_pixel_sha256 is not None
+                else None
+            ),
+            "final_mask_matches_baseline_pixel_sha256": (
+                metadata["final_mask_pixel_sha256"]
+                == baseline_final_mask_pixel_sha256
+                if baseline_final_mask_pixel_sha256 is not None
+                else None
+            ),
+        }
     )
     export_inpaint_debug_artifacts(
         export_root=str(corpus_output),
         archive_bname="",
-        page_base_name=image_path.stem,
+        page_base_name=page_base_name,
         image=image,
         blocks=blocks,
         export_settings=DEBUG_EXPORT_SETTINGS,
@@ -433,28 +885,47 @@ def _process_image(
         metadata=metadata,
     )
 
-    source_path = corpus_output / "source_images" / f"{image_path.stem}_source.png"
-    cleaned_path = corpus_output / "cleaned_images" / f"{image_path.stem}_cleaned.png"
-    final_mask_path = corpus_output / "final_masks" / f"{image_path.stem}_final_mask.png"
-    bubble_cap_path = corpus_output / "bubble_interior_caps" / f"{image_path.stem}_bubble_cap.png"
-    protected_corner_path = corpus_output / "protected_corner_masks" / f"{image_path.stem}_protected_corners.png"
-    _write_image(source_path, image)
-    _write_image(cleaned_path, cleaned)
-    _write_image(final_mask_path, normalized_final_mask)
-    _write_image(bubble_cap_path, bubble_cap_mask)
-    _write_image(protected_corner_path, protected_corner_mask)
     return {
-        "image": image_path.name,
+        "image": resolved_page_id,
+        "page_id": resolved_page_id,
+        "expected_edit": page_spec.expected_edit if page_spec is not None else "required",
         "source": source_path,
         "cleaned": cleaned_path,
         "final_mask": final_mask_path,
         "bubble_interior_cap": bubble_cap_path,
         "protected_corner_mask": protected_corner_path,
-        "detector_overlay": corpus_output / "detector_overlays" / f"{image_path.stem}_detector_overlay.png",
-        "raw_mask": corpus_output / "raw_masks" / f"{image_path.stem}_raw_mask.png",
-        "mask_overlay": corpus_output / "mask_overlays" / f"{image_path.stem}_mask_overlay.png",
-        "cleanup_delta": corpus_output / "cleanup_mask_delta" / f"{image_path.stem}_cleanup_delta.png",
-        "metadata": corpus_output / "debug_metadata" / f"{image_path.stem}_debug.json",
+        "detector_overlay": corpus_output / "detector_overlays" / f"{page_base_name}_detector_overlay.png",
+        "raw_mask": corpus_output / "raw_masks" / f"{page_base_name}_raw_mask.png",
+        "mask_overlay": corpus_output / "mask_overlays" / f"{page_base_name}_mask_overlay.png",
+        "cleanup_delta": corpus_output / "cleanup_mask_delta" / f"{page_base_name}_cleanup_delta.png",
+        "metadata": corpus_output / "debug_metadata" / f"{page_base_name}_debug.json",
+        "source_sha256": metadata["source_sha256"],
+        "source_pixel_sha256": metadata["source_pixel_sha256"],
+        "source_size_bytes": metadata["source_size_bytes"],
+        "cleaned_sha256": metadata["cleaned_sha256"],
+        "final_mask_sha256": metadata["final_mask_sha256"],
+        "cleaned_pixel_sha256": metadata["cleaned_pixel_sha256"],
+        "final_mask_pixel_sha256": metadata["final_mask_pixel_sha256"],
+        "baseline_cleaned_sha256": metadata["baseline_cleaned_sha256"],
+        "baseline_final_mask_sha256": metadata["baseline_final_mask_sha256"],
+        "baseline_cleaned_pixel_sha256": metadata[
+            "baseline_cleaned_pixel_sha256"
+        ],
+        "baseline_final_mask_pixel_sha256": metadata[
+            "baseline_final_mask_pixel_sha256"
+        ],
+        "cleaned_matches_baseline_sha256": metadata[
+            "cleaned_matches_baseline_sha256"
+        ],
+        "final_mask_matches_baseline_sha256": metadata[
+            "final_mask_matches_baseline_sha256"
+        ],
+        "cleaned_matches_baseline_pixel_sha256": metadata[
+            "cleaned_matches_baseline_pixel_sha256"
+        ],
+        "final_mask_matches_baseline_pixel_sha256": metadata[
+            "final_mask_matches_baseline_pixel_sha256"
+        ],
         "block_count": len(blocks),
         "final_mask_pixel_count": int(np.count_nonzero(final_mask)) if final_mask is not None else 0,
         "hd_strategy": str(config.hd_strategy),
@@ -462,9 +933,11 @@ def _process_image(
         "refiner_backend": str(mask_details.get("refiner_backend", "") or ""),
         "refiner_device": str(mask_details.get("refiner_device", "") or ""),
         "inpaint_runtime_diagnostics": list(inpaint_diagnostics),
-        "inpaint_runtime_inference_call_count": len(inpaint_diagnostics),
+        "inpaint_runtime_inference_call_count": len(inference_diagnostics),
         "inpaint_runtime_cpu_fallback_count": sum(
-            1 for item in inpaint_diagnostics if bool(item.get("cpu_fallback_used", False))
+            1
+            for item in inference_diagnostics
+            if bool(item.get("cpu_fallback_used", False))
         ),
         "bubble_block_count": int(metadata["bubble_block_count"]),
         "bubble_silhouette_applied_count": int(
@@ -482,6 +955,15 @@ def _process_image(
         ),
         "text_anchor_final_mask_pixel_count": int(metadata["text_anchor_final_mask_pixel_count"]),
         "text_anchor_changed_pixel_count": int(metadata["text_anchor_changed_pixel_count"]),
+        **quality_metrics,
+        **peak_vram,
+        "stage_timings_seconds": dict(stage_timings),
+        "block_runtime_seconds": list(metadata["block_runtime_seconds"]),
+        "pipeline_elapsed_seconds": pipeline_elapsed_seconds,
+        "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
+        "residue_pass_truncated_block_count": int(
+            cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
+        ),
         **changed_stats,
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
@@ -580,6 +1062,22 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=[],
         help="Private image path to process. Repeat for multiple images.",
     )
+    parser.add_argument(
+        "--manifest",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Sealed private evaluation manifest. Repeat for multiple neutral-ID "
+            "corpora; cannot be combined with --input."
+        ),
+    )
+    parser.add_argument(
+        "--blind-review-duplicate-count",
+        type=int,
+        default=0,
+        help="Deterministically repeat this many blinded pages for reviewer consistency.",
+    )
     parser.add_argument("--inpainter", default="AOT", choices=["AOT", "lama_large_512px", "lama_mpe"])
     parser.add_argument("--use-gpu", action="store_true")
     parser.add_argument(
@@ -593,6 +1091,22 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Fail unless every selected rounded-bubble regression image passes the "
             "protected-corner gates; intended for curated private target pages."
+        ),
+    )
+    parser.add_argument(
+        "--require-quality-gates",
+        action="store_true",
+        help=(
+            "Fail on outside-mask changes, protected-structure damage, cleanup "
+            "truncation, or annotated target coverage below 98 percent."
+        ),
+    )
+    parser.add_argument(
+        "--require-baseline-parity",
+        action="store_true",
+        help=(
+            "Fail unless every manifest page has locked cleaned/final-mask "
+            "references and both artifact SHA-256 values match exactly."
         ),
     )
     parser.add_argument(
@@ -640,6 +1154,8 @@ def _required_gate_failures(
     require_cuda_lama: bool,
     require_rounded_bubble_gate: bool,
     required_image_count: int | None = None,
+    require_quality_gates: bool = False,
+    require_baseline_parity: bool = False,
 ) -> list[str]:
     failures: list[str] = []
     image_count = int(summary.get("image_count", 0) or 0)
@@ -652,6 +1168,29 @@ def _required_gate_failures(
         failures.append(
             f"image_count_mismatch:{image_count}!={int(required_image_count)}"
         )
+    if str(summary.get("input_mode", "")) == "manifest":
+        for corpus_name, contract in dict(
+            summary.get("manifest_corpora") or {}
+        ).items():
+            expected = int(dict(contract or {}).get("expected_count", 0) or 0)
+            completed = len(records_by_corpus.get(str(corpus_name), []))
+            if completed != expected:
+                failures.append(
+                    f"{corpus_name}:manifest_success_count_mismatch:{completed}!={expected}"
+                )
+        for corpus_name, records in records_by_corpus.items():
+            for record in records:
+                page_name = f"{corpus_name}/{record.get('page_id', 'page')}"
+                expected_edit = str(record.get("expected_edit", "required") or "required")
+                if expected_edit == "required":
+                    if int(record.get("block_count", 0) or 0) <= 0:
+                        failures.append(f"{page_name}:expected_edit_missing_detection")
+                    if int(record.get("final_mask_pixel_count", 0) or 0) <= 0:
+                        failures.append(f"{page_name}:expected_edit_empty_mask")
+                elif expected_edit == "none" and int(
+                    record.get("final_mask_pixel_count", 0) or 0
+                ) > 0:
+                    failures.append(f"{page_name}:unexpected_edit_mask")
     if require_cuda_lama:
         runtime = dict(summary.get("inpainter_runtime") or {})
         if not str(summary.get("inpainter", "")).startswith("lama"):
@@ -670,12 +1209,129 @@ def _required_gate_failures(
             failures.append("cpu_fallback_detected")
         if int(summary.get("non_cuda_refiner_count", 0) or 0) > 0:
             failures.append("non_cuda_refiner_detected")
-        if int(summary.get("zero_block_count", 0) or 0) > 0:
+        if int(summary.get("peak_vram_unavailable_count", 1) or 0) > 0:
+            failures.append("cuda_peak_vram_metrics_unavailable")
+        if int(summary.get("peak_vram_reset_failure_count", 1) or 0) > 0:
+            failures.append("cuda_peak_vram_reset_failed")
+        if int(
+            summary.get("cuda_memory_diagnostics_unavailable_count", 1) or 0
+        ) > 0:
+            failures.append("cuda_inference_memory_diagnostics_unavailable")
+        if int(
+            summary.get(
+                "required_zero_block_count",
+                summary.get("zero_block_count", 0),
+            )
+            or 0
+        ) > 0:
             failures.append("empty_detection_detected")
-        if int(summary.get("empty_final_mask_count", 0) or 0) > 0:
+        if int(
+            summary.get(
+                "required_empty_final_mask_count",
+                summary.get("empty_final_mask_count", 0),
+            )
+            or 0
+        ) > 0:
             failures.append("empty_final_mask_detected")
-        if int(summary.get("runtime_inference_call_count", 0) or 0) <= 0:
+        if (
+            int(summary.get("expected_edit_active_count", 1) or 0) > 0
+            and int(summary.get("runtime_inference_call_count", 0) or 0) <= 0
+        ):
             failures.append("no_inpaint_inference")
+
+    if require_quality_gates:
+        if str(summary.get("input_mode", "")) == "manifest":
+            for corpus_name, raw_contract in dict(
+                summary.get("manifest_corpora") or {}
+            ).items():
+                contract = dict(raw_contract or {})
+                if str(contract.get("split_role", "")) not in (
+                    SOURCE_REVIEW_FINALIZATION_ROLES
+                ):
+                    continue
+                parent_seal = str(
+                    contract.get("parent_manifest_sha256", "") or ""
+                )
+                decisions_seal = str(
+                    contract.get("expected_edit_decisions_sha256", "") or ""
+                )
+                valid_hex = frozenset("0123456789abcdef")
+                source_review_finalized = (
+                    len(parent_seal) == 64
+                    and set(parent_seal) <= valid_hex
+                    and contract.get("expected_edit_basis")
+                    == "source-only-review"
+                    and len(decisions_seal) == 64
+                    and set(decisions_seal) <= valid_hex
+                )
+                if not source_review_finalized:
+                    failures.append(
+                        f"{corpus_name}:holdout_not_source_review_finalized"
+                    )
+        for corpus_name, records in records_by_corpus.items():
+            for record in records:
+                page_name = f"{corpus_name}/{record.get('page_id', 'page')}"
+                for field in QUALITY_GATE_REQUIRED_FIELDS:
+                    if field not in record:
+                        failures.append(
+                            f"{page_name}:quality_metric_missing:{field}"
+                        )
+                if str(record.get("expected_edit", "") or "") == "optional":
+                    failures.append(f"{page_name}:expected_edit_optional_not_final")
+                if int(
+                    record.get("outside_changed_pixel_count_exact", 0)
+                    or 0
+                ) != 0:
+                    failures.append(f"{page_name}:changed_outside_final_mask")
+                if int(
+                    record.get(
+                        "protected_structure_changed_pixel_count_exact",
+                        0,
+                    )
+                    or 0
+                ) != 0:
+                    failures.append(f"{page_name}:protected_structure_changed")
+                if int(
+                    record.get("residue_pass_truncated_block_count", 0) or 0
+                ) != 0:
+                    failures.append(f"{page_name}:cleanup_truncated")
+                if bool(record.get("residue_target_is_annotation", False)):
+                    coverage = record.get("residue_target_coverage")
+                    if coverage is None or float(coverage) < 0.98:
+                        failures.append(f"{page_name}:target_coverage_below_98pct")
+
+    if require_baseline_parity:
+        for corpus_name, records in records_by_corpus.items():
+            for record in records:
+                page_name = f"{corpus_name}/{record.get('page_id', 'page')}"
+                if record.get("cleaned_matches_baseline_sha256") is None:
+                    failures.append(f"{page_name}:baseline_cleaned_unavailable")
+                elif not bool(record.get("cleaned_matches_baseline_sha256")):
+                    failures.append(f"{page_name}:baseline_cleaned_sha_mismatch")
+                if record.get("cleaned_matches_baseline_pixel_sha256") is None:
+                    failures.append(
+                        f"{page_name}:baseline_cleaned_pixel_unavailable"
+                    )
+                elif not bool(
+                    record.get("cleaned_matches_baseline_pixel_sha256")
+                ):
+                    failures.append(
+                        f"{page_name}:baseline_cleaned_pixel_mismatch"
+                    )
+                if record.get("final_mask_matches_baseline_sha256") is None:
+                    failures.append(f"{page_name}:baseline_final_mask_unavailable")
+                elif not bool(record.get("final_mask_matches_baseline_sha256")):
+                    failures.append(f"{page_name}:baseline_final_mask_sha_mismatch")
+                if record.get("final_mask_matches_baseline_pixel_sha256") is None:
+                    failures.append(
+                        f"{page_name}:baseline_final_mask_pixel_unavailable"
+                    )
+                elif not bool(
+                    record.get("final_mask_matches_baseline_pixel_sha256")
+                ):
+                    failures.append(
+                        f"{page_name}:baseline_final_mask_pixel_mismatch"
+                    )
 
     if require_rounded_bubble_gate:
         for corpus_name, records in records_by_corpus.items():
@@ -702,6 +1358,301 @@ def _required_gate_failures(
     return failures
 
 
+def _write_page_metrics_jsonl(
+    root_output: Path,
+    records_by_corpus: dict[str, list[dict]],
+) -> Path:
+    metrics_dir = root_output / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    output = metrics_dir / "pages.jsonl"
+    retained_fields = (
+        "page_id",
+        "expected_edit",
+        "source_sha256",
+        "source_pixel_sha256",
+        "source_size_bytes",
+        "cleaned_sha256",
+        "final_mask_sha256",
+        "cleaned_pixel_sha256",
+        "final_mask_pixel_sha256",
+        "baseline_cleaned_sha256",
+        "baseline_final_mask_sha256",
+        "baseline_cleaned_pixel_sha256",
+        "baseline_final_mask_pixel_sha256",
+        "cleaned_matches_baseline_sha256",
+        "final_mask_matches_baseline_sha256",
+        "cleaned_matches_baseline_pixel_sha256",
+        "final_mask_matches_baseline_pixel_sha256",
+        "block_count",
+        "final_mask_pixel_count",
+        "inpaint_runtime_inference_call_count",
+        "inpaint_runtime_cpu_fallback_count",
+        "bubble_silhouette_fallback_count",
+        "protected_corner_final_mask_pixel_count",
+        "protected_corner_changed_pixel_count",
+        "changed_outside_final_mask_pixel_count_exact",
+        "outside_pixel_count",
+        "outside_changed_pixel_count_exact",
+        "outside_change_ratio",
+        "pre_composite_outside_changed_pixel_count_exact",
+        "pre_composite_outside_change_ratio",
+        "residue_target_pixel_count",
+        "residue_target_covered_pixel_count",
+        "residue_target_coverage",
+        "residue_target_is_annotation",
+        "residue_target_source",
+        "residue_source_contrast_pixel_count",
+        "residue_pixel_count",
+        "residue_ratio",
+        "residue_score",
+        "protected_structure_pixel_count",
+        "protected_structure_changed_pixel_count_exact",
+        "protected_structure_source",
+        "outline_damage_ratio",
+        "pre_composite_protected_structure_changed_pixel_count_exact",
+        "pre_composite_outline_damage_ratio",
+        "color_delta_mean",
+        "color_delta_p95",
+        "color_delta_score",
+        "cleanup_component_count",
+        "cleanup_block_count",
+        "residue_pass_truncated_block_count",
+        "erase_mode_distribution",
+        "stage_timings_seconds",
+        "block_runtime_seconds",
+        "pipeline_elapsed_seconds",
+        "peak_vram_allocated_mb",
+        "peak_vram_reserved_mb",
+        "peak_vram_metrics_available",
+        "peak_vram_reset_succeeded",
+        "inpaint_runtime_diagnostics",
+    )
+    rows: list[dict] = []
+    for corpus_id, records in sorted(records_by_corpus.items()):
+        for record in sorted(records, key=lambda item: str(item.get("page_id", ""))):
+            row = {"corpus_id": corpus_id}
+            for field in retained_fields:
+                if field not in record:
+                    continue
+                if field == "inpaint_runtime_diagnostics":
+                    row[field] = _sanitize_runtime_diagnostics(record[field])
+                else:
+                    row[field] = record[field]
+            rows.append(row)
+    output.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in rows
+        ),
+        encoding="utf-8",
+    )
+    return output
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    return float(np.percentile(values, percentile)) if values else 0.0
+
+
+def _sanitized_traceback_summary(exc: BaseException) -> list[dict[str, object]]:
+    return [
+        {
+            "file": Path(frame.filename).name,
+            "line": int(frame.lineno),
+            "function": str(frame.name),
+        }
+        for frame in traceback.extract_tb(exc.__traceback__)[-8:]
+    ]
+
+
+def _sanitize_runtime_device(value: object) -> object:
+    if not isinstance(value, str):
+        return _DROP_RUNTIME_VALUE
+    candidate = value.strip().lower()
+    if candidate in {"cpu", "cuda"}:
+        return candidate
+    prefix, separator, index = candidate.partition(":")
+    if prefix == "cuda" and separator and index.isdigit() and len(index) <= 2:
+        return candidate
+    return _DROP_RUNTIME_VALUE
+
+
+def _sanitize_runtime_number(
+    value: object,
+    *,
+    integer: bool,
+    maximum: float,
+    nullable: bool = False,
+) -> object:
+    if value is None and nullable:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _DROP_RUNTIME_VALUE
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric < 0.0 or numeric > maximum:
+        return _DROP_RUNTIME_VALUE
+    if integer:
+        if not numeric.is_integer():
+            return _DROP_RUNTIME_VALUE
+        return int(numeric)
+    return numeric
+
+
+def _sanitize_runtime_bbox(value: object, *, nullable: bool) -> object:
+    if value is None and nullable:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return _DROP_RUNTIME_VALUE
+    normalized: list[int] = []
+    for coordinate in value:
+        sanitized = _sanitize_runtime_number(
+            coordinate,
+            integer=True,
+            maximum=2_147_483_647,
+        )
+        if sanitized is _DROP_RUNTIME_VALUE:
+            return _DROP_RUNTIME_VALUE
+        normalized.append(int(sanitized))
+    return normalized
+
+
+def _sanitize_runtime_value(field: str, value: object) -> object:
+    enum_values = {
+        "phase": SAFE_RUNTIME_PHASES,
+        "status": SAFE_RUNTIME_STATUSES,
+        "erase_mode": SAFE_RUNTIME_ERASE_MODES,
+        "actual_precision": SAFE_RUNTIME_PRECISIONS,
+        "model_parameter_dtype": SAFE_RUNTIME_DTYPES,
+        "contract_version": SAFE_RUNTIME_CONTRACT_VERSIONS,
+        "retry_policy": SAFE_RUNTIME_RETRY_POLICIES,
+        "inpainter_key": SAFE_RUNTIME_INPAINTER_KEYS,
+    }
+    if field in enum_values:
+        return value if isinstance(value, str) and value in enum_values[field] else _DROP_RUNTIME_VALUE
+    if field in {"actual_device", "model_parameter_device"}:
+        return _sanitize_runtime_device(value)
+    if field in {
+        "cpu_fallback_used",
+        "cuda_memory_diagnostics_available",
+        "cuda_memory_diagnostics_unavailable",
+        "device_verified_from_model",
+        "fp32_promotion_eligible",
+        "is_inference",
+    }:
+        return value if isinstance(value, bool) else _DROP_RUNTIME_VALUE
+    if field == "block_index":
+        return _sanitize_runtime_number(
+            value,
+            integer=True,
+            maximum=10_000_000,
+            nullable=True,
+        )
+    if field in {"mask_pixel_count"}:
+        return _sanitize_runtime_number(
+            value,
+            integer=True,
+            maximum=2**63 - 1,
+        )
+    if field == "oom_retry_count":
+        sanitized = _sanitize_runtime_number(
+            value,
+            integer=True,
+            maximum=1,
+        )
+        return sanitized
+    if field == "elapsed_seconds":
+        return _sanitize_runtime_number(
+            value,
+            integer=False,
+            maximum=86_400.0,
+        )
+    if field in {
+        "cuda_memory_allocated_mb",
+        "cuda_memory_reserved_mb",
+        "page_peak_vram_allocated_mb",
+        "page_peak_vram_reserved_mb",
+    }:
+        return _sanitize_runtime_number(
+            value,
+            integer=False,
+            maximum=1_048_576.0,
+        )
+    if field == "mask_bbox":
+        return _sanitize_runtime_bbox(value, nullable=True)
+    if field == "oom_retry_roi":
+        return _sanitize_runtime_bbox(value, nullable=True)
+    if field == "session_providers":
+        if not isinstance(value, (list, tuple)) or len(value) > 8:
+            return _DROP_RUNTIME_VALUE
+        providers = list(value)
+        if not all(
+            isinstance(provider, str) and provider in SAFE_RUNTIME_PROVIDERS
+            for provider in providers
+        ):
+            return _DROP_RUNTIME_VALUE
+        return providers
+    return _DROP_RUNTIME_VALUE
+
+
+def _sanitize_runtime_diagnostics(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    sanitized: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        safe_item: dict[str, object] = {}
+        for field, raw_value in item.items():
+            safe_value = _sanitize_runtime_value(str(field), raw_value)
+            if safe_value is not _DROP_RUNTIME_VALUE:
+                safe_item[str(field)] = safe_value
+        if safe_item:
+            sanitized.append(safe_item)
+    return sanitized
+
+
+def _processing_failure_record(
+    *,
+    corpus_id: str,
+    page_id: str,
+    exc: BaseException,
+) -> dict[str, object]:
+    cause_code: str | None = None
+    if isinstance(exc, InpaintEvalManifestError):
+        candidate_code = exc.code
+    else:
+        candidate_code = str(exc)
+    if candidate_code in SAFE_PROCESSING_CAUSE_CODES:
+        cause_code = candidate_code
+    return {
+        "corpus_id": corpus_id,
+        "page_id": page_id,
+        "error_code": "processing_failed",
+        "cause_code": cause_code,
+        "exception_type": type(exc).__name__,
+        "traceback_summary": _sanitized_traceback_summary(exc),
+    }
+
+
+def _holdout_manifest_preflight_error(
+    manifests: tuple[EvalManifest, ...],
+) -> InpaintEvalManifestError | None:
+    for manifest in manifests:
+        if manifest.split_role not in SOURCE_REVIEW_FINALIZATION_ROLES:
+            continue
+        finalized = (
+            manifest.parent_manifest_sha256 is not None
+            and manifest.expected_edit_basis == "source-only-review"
+            and manifest.expected_edit_decisions_sha256 is not None
+            and all(page.expected_edit != "optional" for page in manifest.pages)
+        )
+        if not finalized:
+            return InpaintEvalManifestError(
+                "manifest_holdout_not_source_review_finalized",
+                corpus_id=manifest.corpus_id,
+            )
+    return None
+
+
 def main() -> int:
     args = _build_argument_parser().parse_args()
 
@@ -710,8 +1661,137 @@ def main() -> int:
         category="40-inpaint-mask-render",
         explicit_output_directory=args.output_dir,
     )
-    root_output.mkdir(parents=True, exist_ok=True)
     try:
+        root_output.mkdir(parents=True, exist_ok=True)
+        if next(root_output.iterdir(), None) is not None:
+            output_error = InpaintEvalManifestError(
+                "inpaint_output_directory_not_empty"
+            )
+            if artifact_run is not None:
+                artifact_run.fail(output_error)
+            print(output_error.code, file=sys.stderr)
+            return 1
+        manifest_mode = bool(args.manifest)
+        manifest_error: InpaintEvalManifestError | None = None
+        manifests = ()
+        if args.input and args.manifest:
+            manifest_error = InpaintEvalManifestError(
+                "manifest_and_direct_input_conflict"
+            )
+        elif args.blind_review_duplicate_count < 0:
+            manifest_error = InpaintEvalManifestError(
+                "blind_duplicate_count_invalid"
+            )
+        elif manifest_mode:
+            try:
+                manifests = load_eval_manifests(args.manifest)
+                manifest_error = _holdout_manifest_preflight_error(manifests)
+            except InpaintEvalManifestError as exc:
+                manifest_error = exc
+        if manifest_error is not None:
+            failure_summary = {
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "input_mode": "manifest" if manifest_mode else "direct",
+                "image_count": 0,
+                "success_count": 0,
+                "failure_count": 1,
+                "failures": [manifest_error.as_record()],
+                "traceback_summary": manifest_error.as_record(),
+                "required_gate_failure_count": 1,
+                "required_gate_failures": [manifest_error.code],
+            }
+            metrics_dir = root_output / "metrics"
+            metrics_dir.mkdir(parents=True, exist_ok=True)
+            (metrics_dir / "summary.json").write_text(
+                json.dumps(failure_summary, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            if artifact_run is not None:
+                artifact_run.fail(manifest_error)
+            print(root_output)
+            return 1
+
+        if manifest_mode:
+            corpus_inputs: dict[
+                str,
+                list[tuple[Path, EvalPageSpec | None, str]],
+            ] = {
+                manifest.corpus_id: [
+                    (page.source.path, page, page.page_id)
+                    for page in manifest.pages
+                ]
+                for manifest in manifests
+            }
+        elif args.input:
+            corpus_inputs = {
+                "private": [
+                    (path.expanduser(), None, f"direct-{index:03d}")
+                    for index, path in enumerate(args.input, start=1)
+                ]
+            }
+        else:
+            selected_corpora = (
+                ("japan", "China")
+                if args.corpus == "all"
+                else (("japan",) if args.corpus == "japan" else ("China",))
+            )
+            corpus_inputs = {
+                corpus_name: [
+                    (
+                        path,
+                        None,
+                        f"sample-{corpus_name.lower()}-{index:03d}",
+                    )
+                    for index, path in enumerate(
+                        _iter_sample_images(
+                            ROOT / "Sample" / corpus_name,
+                            args.glob,
+                        ),
+                        start=1,
+                    )
+                ]
+                for corpus_name in selected_corpora
+            }
+        selected_count = sum(len(items) for items in corpus_inputs.values())
+        blind_eligible_count = (
+            sum(
+                1
+                for manifest in manifests
+                for page in manifest.pages
+                if page.baseline is not None
+            )
+            if manifest_mode
+            else 0
+        )
+        if args.blind_review_duplicate_count > blind_eligible_count:
+            duplicate_error = InpaintEvalManifestError(
+                "blind_duplicate_count_out_of_range"
+            )
+            metrics_dir = root_output / "metrics"
+            metrics_dir.mkdir(parents=True, exist_ok=True)
+            (metrics_dir / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": datetime.now().isoformat(timespec="seconds"),
+                        "input_mode": "manifest" if manifest_mode else "direct",
+                        "image_count": selected_count,
+                        "success_count": 0,
+                        "failure_count": 1,
+                        "failures": [duplicate_error.as_record()],
+                        "traceback_summary": duplicate_error.as_record(),
+                        "required_gate_failure_count": 1,
+                        "required_gate_failures": [duplicate_error.code],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            if artifact_run is not None:
+                artifact_run.fail(duplicate_error)
+            print(root_output)
+            return 1
+
         settings = _SettingsStub(
             inpainter=args.inpainter,
             use_gpu=args.use_gpu,
@@ -749,33 +1829,27 @@ def main() -> int:
                     requested_precision=str(runtime.get("precision", "bf16") or "bf16"),
                 )
             )
-
         records_by_corpus: dict[str, list[dict]] = {}
         failures: list[dict] = []
+        panel_records: list[dict] = []
         total_images = 0
-
-        if args.input:
-            corpus_inputs = {"private": [path.expanduser() for path in args.input]}
-        else:
-            selected_corpora = (
-                ("japan", "China")
-                if args.corpus == "all"
-                else (("japan",) if args.corpus == "japan" else ("China",))
-            )
-            corpus_inputs = {
-                corpus_name: _iter_sample_images(ROOT / "Sample" / corpus_name, args.glob)
-                for corpus_name in selected_corpora
-            }
-
-        for corpus_name, image_paths in corpus_inputs.items():
+        for corpus_name, input_specs in corpus_inputs.items():
             corpus_output = root_output / corpus_name.lower()
             corpus_output.mkdir(parents=True, exist_ok=True)
             records: list[dict] = []
-            for image_path in image_paths:
+            for image_path, page_spec, public_page_id in input_specs:
                 total_images += 1
                 try:
+                    if page_spec is not None:
+                        verify_eval_page_spec(page_spec)
                     if not image_path.is_file():
-                        raise FileNotFoundError(str(image_path))
+                        raise FileNotFoundError("inpaint_input_image_missing")
+                    page_runtime_device = str(
+                        runtime_report.get("actual_device", "") or ""
+                    )
+                    peak_vram_reset_succeeded = _reset_cuda_peak_metrics(
+                        page_runtime_device
+                    )
                     record = _process_image(
                         image_path,
                         corpus_output,
@@ -783,28 +1857,95 @@ def main() -> int:
                         inpainter,
                         settings,
                         auto_max_font_profile=args.auto_max_font_profile,
+                        page_spec=page_spec,
+                        public_corpus_id=corpus_name.lower(),
+                        public_page_id=public_page_id,
+                        runtime_device=page_runtime_device,
+                        peak_vram_reset_succeeded=(
+                            peak_vram_reset_succeeded
+                        ),
                     )
+                    record["corpus_id"] = corpus_name.lower()
+                    panel_record = write_comparison_and_blind_panels(
+                        root_output=root_output,
+                        corpus_id=corpus_name.lower(),
+                        page_id=str(record["page_id"]),
+                        source_path=Path(record["source"]),
+                        baseline_path=(
+                            page_spec.baseline.path
+                            if page_spec is not None and page_spec.baseline is not None
+                            else None
+                        ),
+                        baseline_sha256=(
+                            page_spec.baseline.sha256
+                            if page_spec is not None and page_spec.baseline is not None
+                            else None
+                        ),
+                        candidate_path=Path(record["cleaned"]),
+                        final_mask_path=Path(record["final_mask"]),
+                    )
+                    record["comparison_panel"] = panel_record["comparison_panel"]
+                    if panel_record["blind_eligible"]:
+                        panel_records.append(panel_record)
                     records.append(record)
                 except Exception as exc:
                     failures.append(
-                        {
-                            "corpus": corpus_name,
-                            "image": image_path.name,
-                            "error": str(exc),
-                            "traceback": traceback.format_exc(),
-                        }
+                        _processing_failure_record(
+                            corpus_id=corpus_name.lower(),
+                            page_id=public_page_id,
+                            exc=exc,
+                        )
                     )
             records_by_corpus[corpus_name.lower()] = records
 
+        all_records = [
+            record
+            for records in records_by_corpus.values()
+            for record in records
+        ]
+        erase_mode_distribution: Counter[str] = Counter()
+        block_timings: list[float] = []
+        for record in all_records:
+            erase_mode_distribution.update(record.get("erase_mode_distribution", {}))
+            block_timings.extend(
+                float(item.get("elapsed_seconds", 0.0) or 0.0)
+                for item in record.get("block_runtime_seconds", [])
+                if float(item.get("elapsed_seconds", 0.0) or 0.0) > 0.0
+            )
         summary = {
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "input_mode": "manifest" if manifest_mode else ("direct" if args.input else "sample"),
             "detector_key": settings.get_tool_selection("detector"),
             "inpainter": args.inpainter,
             "hd_strategy": str(get_config(settings).hd_strategy),
             "auto_max_font_profile": args.auto_max_font_profile,
             "use_gpu": bool(args.use_gpu),
-            "corpus": args.corpus,
-            "glob": args.glob,
+            "corpus": "manifest" if manifest_mode else args.corpus,
+            "glob": (
+                None
+                if manifest_mode or args.input
+                else ("*" if args.glob == "*" else "<redacted>")
+            ),
+            "manifest_corpora": (
+                {
+                    manifest.corpus_id: {
+                        "expected_count": manifest.expected_count,
+                        "manifest_sha256": manifest.manifest_sha256,
+                        "split_role": manifest.split_role,
+                        "source_lock_git_sha": manifest.source_lock_git_sha,
+                        "parent_manifest_sha256": (
+                            manifest.parent_manifest_sha256
+                        ),
+                        "expected_edit_basis": manifest.expected_edit_basis,
+                        "expected_edit_decisions_sha256": (
+                            manifest.expected_edit_decisions_sha256
+                        ),
+                    }
+                    for manifest in manifests
+                }
+                if manifest_mode
+                else {}
+            ),
             "image_count": total_images,
             "total_images": total_images,
             "success_count": sum(len(records) for records in records_by_corpus.values()),
@@ -840,6 +1981,35 @@ def main() -> int:
                 for record in records
                 if record["final_mask_pixel_count"] <= 0
             ),
+            "expected_edit_required_count": sum(
+                1 for record in all_records if record["expected_edit"] == "required"
+            ),
+            "expected_edit_none_count": sum(
+                1 for record in all_records if record["expected_edit"] == "none"
+            ),
+            "expected_edit_optional_count": sum(
+                1 for record in all_records if record["expected_edit"] == "optional"
+            ),
+            "expected_edit_active_count": sum(
+                1 for record in all_records if record["expected_edit"] != "none"
+            ),
+            "required_zero_block_count": sum(
+                1
+                for record in all_records
+                if record["expected_edit"] == "required" and record["block_count"] <= 0
+            ),
+            "required_empty_final_mask_count": sum(
+                1
+                for record in all_records
+                if record["expected_edit"] == "required"
+                and record["final_mask_pixel_count"] <= 0
+            ),
+            "unexpected_none_edit_count": sum(
+                1
+                for record in all_records
+                if record["expected_edit"] == "none"
+                and record["final_mask_pixel_count"] > 0
+            ),
             "bubble_silhouette_fallback_count": sum(
                 record["bubble_silhouette_fallback_count"]
                 for records in records_by_corpus.values()
@@ -859,6 +2029,91 @@ def main() -> int:
                 record["changed_outside_final_mask_pixel_count_exact"]
                 for records in records_by_corpus.values()
                 for record in records
+            ),
+            "protected_structure_changed_pixel_count_exact": sum(
+                int(record["protected_structure_changed_pixel_count_exact"])
+                for record in all_records
+            ),
+            "residue_pixel_count": sum(
+                int(record["residue_pixel_count"])
+                for record in all_records
+            ),
+            "residue_source_contrast_pixel_count": sum(
+                int(record["residue_source_contrast_pixel_count"])
+                for record in all_records
+            ),
+            "residue_pass_truncated_block_count": sum(
+                int(record["residue_pass_truncated_block_count"])
+                for record in all_records
+            ),
+            "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
+            "page_processing_seconds_total": sum(
+                float(record["pipeline_elapsed_seconds"])
+                for record in all_records
+            ),
+            "page_processing_seconds_p95": _percentile(
+                [float(record["pipeline_elapsed_seconds"]) for record in all_records],
+                95,
+            ),
+            "block_processing_seconds_p95": _percentile(block_timings, 95),
+            "peak_vram_allocated_mb": max(
+                (float(record["peak_vram_allocated_mb"]) for record in all_records),
+                default=0.0,
+            ),
+            "peak_vram_reserved_mb": max(
+                (float(record["peak_vram_reserved_mb"]) for record in all_records),
+                default=0.0,
+            ),
+            "peak_vram_unavailable_count": sum(
+                1
+                for record in all_records
+                if not bool(record.get("peak_vram_metrics_available", False))
+            ),
+            "peak_vram_reset_failure_count": sum(
+                1
+                for record in all_records
+                if not bool(record.get("peak_vram_reset_succeeded", False))
+            ),
+            "cuda_memory_diagnostics_unavailable_count": sum(
+                1
+                for record in all_records
+                for item in record.get("inpaint_runtime_diagnostics", [])
+                if bool(item.get("is_inference", True))
+                and (
+                    item.get("cuda_memory_diagnostics_available") is not True
+                    or bool(
+                        item.get(
+                            "cuda_memory_diagnostics_unavailable",
+                            False,
+                        )
+                    )
+                )
+            ),
+            "oom_retry_count": sum(
+                int(item.get("oom_retry_count", 0) or 0)
+                for record in all_records
+                for item in record.get("inpaint_runtime_diagnostics", [])
+            ),
+            "baseline_cleaned_mismatch_count": sum(
+                1
+                for record in all_records
+                if record.get("cleaned_matches_baseline_sha256") is False
+            ),
+            "baseline_final_mask_mismatch_count": sum(
+                1
+                for record in all_records
+                if record.get("final_mask_matches_baseline_sha256") is False
+            ),
+            "baseline_cleaned_pixel_mismatch_count": sum(
+                1
+                for record in all_records
+                if record.get("cleaned_matches_baseline_pixel_sha256") is False
+            ),
+            "baseline_final_mask_pixel_mismatch_count": sum(
+                1
+                for record in all_records
+                if record.get("final_mask_matches_baseline_pixel_sha256")
+                is False
             ),
             "empty_text_anchor_edit_count": sum(
                 1
@@ -885,12 +2140,46 @@ def main() -> int:
             require_cuda_lama=bool(args.require_cuda_lama),
             require_rounded_bubble_gate=bool(args.require_rounded_bubble_gate),
             required_image_count=args.require_image_count,
+            require_quality_gates=bool(args.require_quality_gates),
+            require_baseline_parity=bool(args.require_baseline_parity),
         )
+        if args.blind_review_duplicate_count > len(panel_records):
+            gate_failures.append(
+                "blind_review_duplicate_shortfall:"
+                f"{len(panel_records)}<{args.blind_review_duplicate_count}"
+            )
+        review_path = None
+        key_path = None
+        if panel_records and args.blind_review_duplicate_count <= len(panel_records):
+            review_path, key_path = write_blind_review_jsonl(
+                root_output,
+                panel_records,
+                duplicate_count=args.blind_review_duplicate_count,
+                assignment_seed=derive_blind_review_seed(
+                    manifests,
+                    (
+                        str(record["candidate_sha256"])
+                        for record in panel_records
+                    ),
+                ),
+            )
         summary["required_gate_failure_count"] = len(gate_failures)
         summary["required_gate_failures"] = gate_failures
+        summary["blind_review_page_count"] = len(panel_records)
+        summary["blind_review_path"] = (
+            review_path.relative_to(root_output).as_posix()
+            if review_path is not None
+            else None
+        )
+        summary["blind_key_path"] = (
+            key_path.relative_to(root_output).as_posix()
+            if key_path is not None
+            else None
+        )
         metrics_dir = root_output / "metrics"
         metrics_dir.mkdir(parents=True, exist_ok=True)
         (metrics_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_page_metrics_jsonl(root_output, records_by_corpus)
         _write_index(root_output, records_by_corpus, summary)
         _write_contact_sheet(
             root_output,
@@ -917,15 +2206,21 @@ def main() -> int:
             filename="protected_corner_contact_sheet.png",
         )
         if artifact_run is not None:
-            artifact_run.complete(
-                metadata={
-                    "input_image_count": total_images,
-                    "success_count": summary["success_count"],
-                    "failure_count": summary["failure_count"],
-                    "inpainter": args.inpainter,
-                    "use_gpu": bool(args.use_gpu),
-                }
-            )
+            artifact_metadata = {
+                "input_image_count": total_images,
+                "success_count": summary["success_count"],
+                "failure_count": summary["failure_count"],
+                "required_gate_failure_count": len(gate_failures),
+                "inpainter": args.inpainter,
+                "use_gpu": bool(args.use_gpu),
+            }
+            if failures or gate_failures:
+                artifact_run.fail(
+                    RuntimeError("inpaint_evaluation_gate_failed"),
+                    metadata=artifact_metadata,
+                )
+            else:
+                artifact_run.complete(metadata=artifact_metadata)
         print(root_output)
         return 1 if failures or gate_failures else 0
     except BaseException as exc:

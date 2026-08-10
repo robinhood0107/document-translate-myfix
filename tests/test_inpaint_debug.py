@@ -150,6 +150,9 @@ class InpaintDebugTests(unittest.TestCase):
             },
             "cpu_fallback_count": 0,
             "non_cuda_refiner_count": 0,
+            "peak_vram_unavailable_count": 0,
+            "peak_vram_reset_failure_count": 0,
+            "cuda_memory_diagnostics_unavailable_count": 0,
             "zero_block_count": 0,
             "empty_final_mask_count": 0,
             "image_count": 1,
@@ -178,6 +181,53 @@ class InpaintDebugTests(unittest.TestCase):
             ),
             [],
         )
+        for key, expected_failure in (
+            (
+                "peak_vram_unavailable_count",
+                "cuda_peak_vram_metrics_unavailable",
+            ),
+            (
+                "peak_vram_reset_failure_count",
+                "cuda_peak_vram_reset_failed",
+            ),
+            (
+                "cuda_memory_diagnostics_unavailable_count",
+                "cuda_inference_memory_diagnostics_unavailable",
+            ),
+        ):
+            with self.subTest(missing_summary_key=key):
+                missing_availability_summary = dict(summary)
+                missing_availability_summary.pop(key)
+                self.assertIn(
+                    expected_failure,
+                    module._required_gate_failures(
+                        missing_availability_summary,
+                        {"private": [record]},
+                        require_cuda_lama=True,
+                        require_rounded_bubble_gate=False,
+                    ),
+                )
+        unavailable_summary = {
+            **summary,
+            "peak_vram_unavailable_count": 1,
+            "peak_vram_reset_failure_count": 1,
+            "cuda_memory_diagnostics_unavailable_count": 1,
+        }
+        unavailable_failures = module._required_gate_failures(
+            unavailable_summary,
+            {"private": [record]},
+            require_cuda_lama=True,
+            require_rounded_bubble_gate=False,
+        )
+        self.assertIn(
+            "cuda_peak_vram_metrics_unavailable",
+            unavailable_failures,
+        )
+        self.assertIn("cuda_peak_vram_reset_failed", unavailable_failures)
+        self.assertIn(
+            "cuda_inference_memory_diagnostics_unavailable",
+            unavailable_failures,
+        )
         record["protected_corner_changed_pixel_count"] = 1
         failures = module._required_gate_failures(
             summary,
@@ -201,6 +251,44 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertIn("no_input_images", failures)
         self.assertIn("no_inpaint_inference", failures)
         self.assertIn("image_count_mismatch:0!=1", failures)
+
+    def test_cuda_peak_metric_helpers_report_successful_cuda_api_calls(
+        self,
+    ) -> None:
+        module = self._load_export_module()
+        calls: list[tuple[str, object]] = []
+        cuda = SimpleNamespace(
+            is_available=lambda: True,
+            reset_peak_memory_stats=lambda device: calls.append(
+                ("reset", device)
+            ),
+            max_memory_allocated=lambda device: (
+                calls.append(("allocated", device)) or 128 * 1024 * 1024
+            ),
+            max_memory_reserved=lambda device: (
+                calls.append(("reserved", device)) or 256 * 1024 * 1024
+            ),
+        )
+        fake_torch = SimpleNamespace(
+            cuda=cuda,
+            device=lambda value: f"device:{value}",
+        )
+
+        with mock.patch.dict(sys.modules, {"torch": fake_torch}):
+            self.assertTrue(module._reset_cuda_peak_metrics("cuda:1"))
+            metrics = module._read_cuda_peak_metrics("cuda:1")
+
+        self.assertEqual(
+            calls,
+            [
+                ("reset", "device:cuda:1"),
+                ("allocated", "device:cuda:1"),
+                ("reserved", "device:cuda:1"),
+            ],
+        )
+        self.assertTrue(metrics["peak_vram_metrics_available"])
+        self.assertEqual(metrics["peak_vram_allocated_mb"], 128.0)
+        self.assertEqual(metrics["peak_vram_reserved_mb"], 256.0)
 
     def test_export_inpaint_debug_collects_lama_runtime_diagnostics(self) -> None:
         module = self._load_export_module()
@@ -233,11 +321,36 @@ class InpaintDebugTests(unittest.TestCase):
             "actual_device": "cuda:0",
             "cpu_fallback_used": False,
             "status": "completed",
+            "is_inference": True,
+            "block_index": 0,
+            "phase": "block",
+            "elapsed_seconds": 0.02,
+        }
+        erase_diagnostic = {
+            "status": "completed",
+            "is_inference": False,
+            "block_index": 0,
+            "phase": "bubble_erase",
+            "elapsed_seconds": 0.01,
+            "erase_mode": "bubble_flat_fill",
         }
 
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "sample.png"
             Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(image_path)
+            original_write_image = module._write_image
+
+            def mutate_primary_artifact_on_write(
+                output_path: Path,
+                array: np.ndarray,
+            ) -> None:
+                persisted = np.asarray(array).copy()
+                if output_path.parent.name == "cleaned_images":
+                    persisted[0, 0] = [17, 18, 19]
+                elif output_path.parent.name == "final_masks":
+                    persisted[0, 0] = 1
+                original_write_image(output_path, persisted)
+
             with mock.patch.object(
                 module,
                 "generate_mask",
@@ -248,7 +361,7 @@ class InpaintDebugTests(unittest.TestCase):
                 return_value=(
                     np.zeros((32, 32, 3), dtype=np.uint8),
                     mask.copy(),
-                    [diagnostic],
+                    [diagnostic, erase_diagnostic],
                 ),
             ) as run_lama, mock.patch.object(
                 module,
@@ -256,7 +369,12 @@ class InpaintDebugTests(unittest.TestCase):
                 return_value=(
                     np.zeros((32, 32, 3), dtype=np.uint8),
                     mask.copy(),
-                    {"applied": False, "component_count": 0, "block_count": 0},
+                    {
+                        "applied": False,
+                        "component_count": 0,
+                        "block_count": 0,
+                        "residue_pass_truncated_block_count": 2,
+                    },
                 ),
             ), mock.patch.object(
                 module,
@@ -268,6 +386,7 @@ class InpaintDebugTests(unittest.TestCase):
                         "applied": False,
                         "component_count": 0,
                         "block_count": 0,
+                        "residue_pass_truncated_block_count": 2,
                         "duplicate_bubble_inner_fill": {"applied": False},
                     },
                 ),
@@ -277,10 +396,23 @@ class InpaintDebugTests(unittest.TestCase):
                 return_value={},
             ), mock.patch.object(
                 module,
+                "_write_image",
+                side_effect=mutate_primary_artifact_on_write,
+            ), mock.patch.object(
+                module,
                 "export_inpaint_debug_artifacts",
             ), mock.patch.object(
                 module,
-                "_write_image",
+                "sha256_file",
+                return_value="0" * 64,
+            ), mock.patch.object(
+                module,
+                "_read_cuda_peak_metrics",
+                return_value={
+                    "peak_vram_allocated_mb": 123.0,
+                    "peak_vram_reserved_mb": 234.0,
+                    "peak_vram_metrics_available": True,
+                },
             ):
                 record = module._process_image(
                     image_path,
@@ -288,7 +420,27 @@ class InpaintDebugTests(unittest.TestCase):
                     detector,
                     SimpleNamespace(),
                     settings,
+                    runtime_device="cuda:0",
+                    peak_vram_reset_succeeded=True,
                 )
+                with Image.open(record["cleaned"]) as saved_cleaned:
+                    saved_cleaned_pixels = np.asarray(
+                        saved_cleaned.convert("RGB")
+                    ).copy()
+                with Image.open(record["final_mask"]) as saved_mask:
+                    saved_mask_pixels = np.where(
+                        np.asarray(saved_mask.convert("L")) > 0,
+                        255,
+                        0,
+                    ).astype(np.uint8)
+                saved_cleaned_pixel_sha = module.pixel_sha256(
+                    saved_cleaned_pixels
+                )
+                saved_mask_pixel_sha = module.pixel_sha256(saved_mask_pixels)
+                prewrite_cleaned_pixel_sha = module.pixel_sha256(
+                    np.zeros((32, 32, 3), dtype=np.uint8)
+                )
+                prewrite_mask_pixel_sha = module.pixel_sha256(mask)
 
         self.assertTrue(run_lama.call_args.kwargs["return_diagnostics"])
         duplicate_fill.assert_called_once()
@@ -296,6 +448,25 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(record["refiner_device"], "cuda")
         self.assertEqual(record["inpaint_runtime_inference_call_count"], 1)
         self.assertEqual(record["inpaint_runtime_cpu_fallback_count"], 0)
+        self.assertEqual(record["residue_pass_truncated_block_count"], 2)
+        self.assertEqual(record["peak_vram_allocated_mb"], 123.0)
+        self.assertEqual(record["peak_vram_reserved_mb"], 234.0)
+        self.assertTrue(record["peak_vram_metrics_available"])
+        self.assertTrue(record["peak_vram_reset_succeeded"])
+        self.assertEqual(record["cleaned_pixel_sha256"], saved_cleaned_pixel_sha)
+        self.assertEqual(record["final_mask_pixel_sha256"], saved_mask_pixel_sha)
+        self.assertNotEqual(
+            record["cleaned_pixel_sha256"],
+            prewrite_cleaned_pixel_sha,
+        )
+        self.assertNotEqual(
+            record["final_mask_pixel_sha256"],
+            prewrite_mask_pixel_sha,
+        )
+        self.assertEqual(
+            [item["phase"] for item in record["block_runtime_seconds"]],
+            ["block", "bubble_erase"],
+        )
 
     def test_build_metadata_counts_masks_and_blocks(self) -> None:
         raw_mask = np.zeros((8, 8), dtype=np.uint8)
