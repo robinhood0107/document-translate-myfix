@@ -102,6 +102,30 @@ class CleanupEquivalenceTests(unittest.TestCase):
         # 합집합이 실제로 반영됐는지도 본다.
         self.assertTrue(bool(result.mask[110, 30]))
 
+    def test_protected_corner_mask_is_restored_and_removed_from_final_mask(self) -> None:
+        image, inpainted, mask = _scene()
+        protected = np.zeros(mask.shape, dtype=np.uint8)
+        protected[20:30, 30:40] = 255
+
+        result = run_inpaint_cleanup(
+            InpaintCleanupInput(
+                image=image,
+                inpaint_input_img=inpainted,
+                mask=mask,
+                mask_details={"protected_corner_mask": protected},
+                inpaint_blocks=[],
+                config=None,
+                page_label="1/1",
+            )
+        )
+
+        self.assertEqual(int(np.count_nonzero(result.mask[protected > 0])), 0)
+        np.testing.assert_array_equal(
+            result.inpaint_input_img[protected > 0],
+            image[protected > 0],
+        )
+        self.assertGreater(int(np.count_nonzero(result.mask[30:60, 40:90])), 0)
+
     def test_several_scenes_stay_equivalent(self) -> None:
         for seed in (1, 7, 4242):
             with self.subTest(seed=seed):

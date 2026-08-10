@@ -7,8 +7,11 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
+from PIL import Image
 
 from modules.utils.debug_artifacts import DebugArtifactError
 from modules.utils.inpaint_debug import (
@@ -30,6 +33,13 @@ class _Block:
     _render_fallback_font_family: str = ""
     _render_normalization_applied: bool = False
     _render_normalization_reasons: list[str] = field(default_factory=list)
+    _render_original_xyxy: list[int] | None = None
+    _render_bubble_xyxy: list[int] | None = None
+    _render_area_xyxy: list[int] | None = None
+    _render_area_source: str = ""
+    _mask_anchor_xyxy: list[int] | None = None
+    _mask_anchor_source: str = ""
+    _mask_anchor_relation: str = ""
     inpaint_bboxes: list[list[int]] = field(default_factory=list)
     _hard_box_applied: bool = False
     _hard_box_reason_codes: list[str] = field(default_factory=list)
@@ -61,16 +71,231 @@ class _Block:
 
 
 class InpaintDebugTests(unittest.TestCase):
-    def test_export_inpaint_debug_script_imports_blockwise_lama_runner(self) -> None:
+    @staticmethod
+    def _load_export_module():
         script_path = Path(__file__).resolve().parents[1] / "scripts" / "export_inpaint_debug.py"
         spec = importlib.util.spec_from_file_location("export_inpaint_debug_for_test", script_path)
-        self.assertIsNotNone(spec)
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        return module
+
+    def test_export_inpaint_debug_script_imports_blockwise_lama_runner(self) -> None:
+        module = self._load_export_module()
 
         self.assertTrue(callable(getattr(module, "source_lama_blockwise_inpaint", None)))
+
+    def test_export_inpaint_debug_defaults_to_original_and_parses_private_inputs(self) -> None:
+        module = self._load_export_module()
+        settings = module._SettingsStub(inpainter="AOT", use_gpu=False)
+
+        self.assertEqual(settings.get_hd_strategy_settings()["strategy"], "Original")
+        self.assertFalse(
+            settings.get_hd_strategy_settings()["developer_performance_mode"]
+        )
+        self.assertEqual(str(module.get_config(settings).hd_strategy), "Original")
+        parsed = module._build_argument_parser().parse_args(
+            [
+                "--corpus",
+                "japan",
+                "--input",
+                "one.png",
+                "--input",
+                "two.png",
+                "--auto-max-font-profile",
+                "strong",
+            ]
+        )
+        self.assertEqual(parsed.corpus, "japan")
+        self.assertEqual(parsed.input, [Path("one.png"), Path("two.png")])
+        self.assertEqual(parsed.auto_max_font_profile, "strong")
+        self.assertFalse(parsed.require_cuda_lama)
+        self.assertFalse(parsed.require_rounded_bubble_gate)
+
+        resize_settings = module._SettingsStub(
+            inpainter="AOT",
+            use_gpu=False,
+            hd_strategy="Resize",
+            developer_performance_mode=True,
+            resize_limit=1440,
+        )
+        resize_config = module.get_config(resize_settings)
+        self.assertEqual(str(resize_config.hd_strategy), "Resize")
+        self.assertEqual(resize_config.hd_strategy_resize_limit, 1440)
+
+        crop_settings = module._SettingsStub(
+            inpainter="AOT",
+            use_gpu=False,
+            hd_strategy="Crop",
+            developer_performance_mode=True,
+            crop_margin=320,
+            crop_trigger_size=768,
+        )
+        crop_config = module.get_config(crop_settings)
+        self.assertEqual(str(crop_config.hd_strategy), "Crop")
+        self.assertEqual(crop_config.hd_strategy_crop_margin, 320)
+        self.assertEqual(crop_config.hd_strategy_crop_trigger_size, 768)
+
+    def test_export_required_gates_fail_closed(self) -> None:
+        module = self._load_export_module()
+        summary = {
+            "inpainter": "lama_large_512px",
+            "use_gpu": True,
+            "hd_strategy": "Original",
+            "inpainter_runtime": {
+                "actual_device": "cuda",
+                "device_verified_from_model": True,
+                "cpu_fallback_used": False,
+            },
+            "cpu_fallback_count": 0,
+            "non_cuda_refiner_count": 0,
+            "zero_block_count": 0,
+            "empty_final_mask_count": 0,
+            "image_count": 1,
+            "success_count": 1,
+            "runtime_inference_call_count": 1,
+        }
+        record = {
+            "image": "page.png",
+            "bubble_block_count": 1,
+            "bubble_silhouette_fallback_count": 0,
+            "protected_corner_mask_pixel_count": 100,
+            "protected_corner_final_mask_pixel_count": 0,
+            "protected_corner_changed_pixel_count": 0,
+            "text_anchor_final_mask_pixel_count": 10,
+            "text_anchor_changed_pixel_count": 10,
+            "changed_outside_final_mask_pixel_count_exact": 0,
+        }
+
+        self.assertEqual(
+            module._required_gate_failures(
+                summary,
+                {"private": [record]},
+                require_cuda_lama=True,
+                require_rounded_bubble_gate=True,
+                required_image_count=1,
+            ),
+            [],
+        )
+        record["protected_corner_changed_pixel_count"] = 1
+        failures = module._required_gate_failures(
+            summary,
+            {"private": [record]},
+            require_cuda_lama=True,
+            require_rounded_bubble_gate=True,
+            required_image_count=1,
+        )
+        self.assertIn("private/page.png:protected_corner_changed", failures)
+
+        summary["image_count"] = 0
+        summary["success_count"] = 0
+        summary["runtime_inference_call_count"] = 0
+        failures = module._required_gate_failures(
+            summary,
+            {"private": []},
+            require_cuda_lama=True,
+            require_rounded_bubble_gate=False,
+            required_image_count=1,
+        )
+        self.assertIn("no_input_images", failures)
+        self.assertIn("no_inpaint_inference", failures)
+        self.assertIn("image_count_mismatch:0!=1", failures)
+
+    def test_export_inpaint_debug_collects_lama_runtime_diagnostics(self) -> None:
+        module = self._load_export_module()
+        settings = module._SettingsStub(inpainter="lama_large_512px", use_gpu=True)
+        block = SimpleNamespace(
+            xyxy=np.asarray([8, 8, 24, 24], dtype=np.int32),
+            bubble_xyxy=None,
+            text_class="text_free",
+            text="demo",
+            translation="",
+            source_lang="ja",
+            inpaint_bboxes=None,
+        )
+        detector = SimpleNamespace(
+            detect=lambda _image: [block],
+            last_engine_name="detector",
+            last_device="cuda",
+        )
+        mask = np.zeros((32, 32), dtype=np.uint8)
+        mask[8:24, 8:24] = 255
+        details = {
+            "raw_mask": mask.copy(),
+            "final_mask": mask.copy(),
+            "final_mask_pre_expand": mask.copy(),
+            "final_mask_post_expand": mask.copy(),
+            "refiner_backend": "torch",
+            "refiner_device": "cuda",
+        }
+        diagnostic = {
+            "actual_device": "cuda:0",
+            "cpu_fallback_used": False,
+            "status": "completed",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "sample.png"
+            Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(image_path)
+            with mock.patch.object(
+                module,
+                "generate_mask",
+                return_value=details,
+            ), mock.patch.object(
+                module,
+                "source_lama_blockwise_inpaint",
+                return_value=(
+                    np.zeros((32, 32, 3), dtype=np.uint8),
+                    mask.copy(),
+                    [diagnostic],
+                ),
+            ) as run_lama, mock.patch.object(
+                module,
+                "refine_bubble_residue_inpaint",
+                return_value=(
+                    np.zeros((32, 32, 3), dtype=np.uint8),
+                    mask.copy(),
+                    {"applied": False, "component_count": 0, "block_count": 0},
+                ),
+            ), mock.patch.object(
+                module,
+                "apply_duplicate_bubble_inner_fill",
+                return_value=(
+                    np.zeros((32, 32, 3), dtype=np.uint8),
+                    mask.copy(),
+                    {
+                        "applied": False,
+                        "component_count": 0,
+                        "block_count": 0,
+                        "duplicate_bubble_inner_fill": {"applied": False},
+                    },
+                ),
+            ) as duplicate_fill, mock.patch.object(
+                module,
+                "build_inpaint_debug_metadata",
+                return_value={},
+            ), mock.patch.object(
+                module,
+                "export_inpaint_debug_artifacts",
+            ), mock.patch.object(
+                module,
+                "_write_image",
+            ):
+                record = module._process_image(
+                    image_path,
+                    Path(temp_dir),
+                    detector,
+                    SimpleNamespace(),
+                    settings,
+                )
+
+        self.assertTrue(run_lama.call_args.kwargs["return_diagnostics"])
+        duplicate_fill.assert_called_once()
+        self.assertEqual(record["hd_strategy"], "Original")
+        self.assertEqual(record["refiner_device"], "cuda")
+        self.assertEqual(record["inpaint_runtime_inference_call_count"], 1)
+        self.assertEqual(record["inpaint_runtime_cpu_fallback_count"], 0)
 
     def test_build_metadata_counts_masks_and_blocks(self) -> None:
         raw_mask = np.zeros((8, 8), dtype=np.uint8)
@@ -88,6 +313,13 @@ class InpaintDebugTests(unittest.TestCase):
             _render_fallback_font_family="Malgun Gothic",
             _render_normalization_applied=True,
             _render_normalization_reasons=["quote-to-ascii", "heart-dropped"],
+            _render_original_xyxy=[1, 1, 4, 5],
+            _render_bubble_xyxy=[0, 0, 7, 7],
+            _render_area_xyxy=[0, 0, 7, 7],
+            _render_area_source="detected_bubble",
+            _mask_anchor_xyxy=[1, 1, 4, 5],
+            _mask_anchor_source="render_original",
+            _mask_anchor_relation="render_area",
             inpaint_bboxes=[[1, 1, 4, 5]],
             _hard_box_applied=True,
             _hard_box_reason_codes=["edge_dense"],
@@ -165,6 +397,13 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["hard_box_applied_count"], 1)
         self.assertEqual(metadata["blocks"][0]["text_class"], "text_bubble")
         self.assertEqual(metadata["blocks"][0]["inpaint_bboxes"], [[1, 1, 4, 5]])
+        self.assertEqual(metadata["blocks"][0]["mask_anchor_xyxy"], [1, 1, 4, 5])
+        self.assertEqual(metadata["blocks"][0]["mask_anchor_source"], "render_original")
+        self.assertEqual(metadata["blocks"][0]["mask_anchor_relation"], "render_area")
+        self.assertEqual(metadata["blocks"][0]["render_original_xyxy"], [1, 1, 4, 5])
+        self.assertEqual(metadata["blocks"][0]["render_area_xyxy"], [0, 0, 7, 7])
+        self.assertEqual(metadata["blocks"][0]["render_bubble_xyxy"], [0, 0, 7, 7])
+        self.assertEqual(metadata["blocks"][0]["render_area_source"], "detected_bubble")
         self.assertTrue(metadata["blocks"][0]["hard_box_applied"])
         self.assertEqual(metadata["blocks"][0]["hard_box_reason_codes"], ["edge_dense"])
         self.assertEqual(

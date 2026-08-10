@@ -6,6 +6,7 @@ from app.projects.stage_checkpoints import (
     invalidate_project_page_checkpoints,
 )
 from modules.detection.processor import TextBlockDetector
+from modules.utils.block_geometry import map_block_bbox_fields
 from modules.utils.textblock import TextBlock, ensure_text_block_id, sort_blk_list
 from modules.rendering.render import get_best_render_area
 from pipeline.webtoon_utils import get_first_visible_block
@@ -72,6 +73,31 @@ class BlockDetectionHandler:
             self.main_page.image_viewer.select_rectangle(rect)
             self.main_page.set_tool('box')
 
+    def _convert_visible_block_to_scene(self, blk: TextBlock, mapping: dict) -> None:
+        combined_y_start = float(mapping['combined_y_start'])
+        crop_top = float(mapping['page_crop_top'])
+        page_index = int(mapping['page_index'])
+
+        def to_scene(box: list[float]) -> list[float]:
+            page_y1 = box[1] - combined_y_start + crop_top
+            page_y2 = box[3] - combined_y_start + crop_top
+            scene_pos_tl = self.main_page.image_viewer.page_to_scene_coordinates(
+                page_index,
+                QtCore.QPointF(box[0], page_y1),
+            )
+            scene_pos_br = self.main_page.image_viewer.page_to_scene_coordinates(
+                page_index,
+                QtCore.QPointF(box[2], page_y2),
+            )
+            return [
+                scene_pos_tl.x(),
+                scene_pos_tl.y(),
+                scene_pos_br.x(),
+                scene_pos_br.y(),
+            ]
+
+        map_block_bbox_fields(blk, to_scene)
+
     def detect_blocks(self, load_rects=True):
         if self.main_page.image_viewer.hasPhoto():
             if self.block_detector_cache is None:
@@ -92,42 +118,12 @@ class BlockDetectionHandler:
                 
                 # Convert coordinates from visible area to scene coordinates
                 for blk in blk_list:
-                    x1, y1, x2, y2 = blk.xyxy
+                    y1 = blk.xyxy[1]
                     
                     # Find which page mapping this text block belongs to
                     for mapping in page_mappings:
                         if mapping['combined_y_start'] <= y1 < mapping['combined_y_end']:
-                            # Convert from combined image coordinates to page coordinates
-                            page_y1 = y1 - mapping['combined_y_start'] + mapping['page_crop_top']
-                            page_y2 = y2 - mapping['combined_y_start'] + mapping['page_crop_top']
-                            
-                            # Convert from page coordinates to scene coordinates
-                            page_index = mapping['page_index']
-                            scene_pos_tl = self.main_page.image_viewer.page_to_scene_coordinates(
-                                page_index, QtCore.QPointF(x1, page_y1)
-                            )
-                            scene_pos_br = self.main_page.image_viewer.page_to_scene_coordinates(
-                                page_index, QtCore.QPointF(x2, page_y2)
-                            )
-                            
-                            # Update the block coordinates
-                            blk.xyxy = [scene_pos_tl.x(), scene_pos_tl.y(), scene_pos_br.x(), scene_pos_br.y()]
-                            
-                            # Also update bubble_xyxy if present
-                            if blk.bubble_xyxy is not None:
-                                bx1, by1, bx2, by2 = blk.bubble_xyxy
-                                bubble_page_y1 = by1 - mapping['combined_y_start'] + mapping['page_crop_top']
-                                bubble_page_y2 = by2 - mapping['combined_y_start'] + mapping['page_crop_top']
-                                bubble_scene_pos_tl = self.main_page.image_viewer.page_to_scene_coordinates(
-                                    page_index, QtCore.QPointF(bx1, bubble_page_y1)
-                                )
-                                bubble_scene_pos_br = self.main_page.image_viewer.page_to_scene_coordinates(
-                                    page_index, QtCore.QPointF(bx2, bubble_page_y2)
-                                )
-                                blk.bubble_xyxy = [
-                                    bubble_scene_pos_tl.x(), bubble_scene_pos_tl.y(),
-                                    bubble_scene_pos_br.x(), bubble_scene_pos_br.y()
-                                ]
+                            self._convert_visible_block_to_scene(blk, mapping)
                             break
                 
                 return blk_list, load_rects, page_mappings

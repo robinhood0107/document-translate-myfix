@@ -138,6 +138,35 @@ def serialize_inpaint_block(block, index: int) -> dict:
     return {
         "index": int(index),
         "xyxy": [int(float(v)) for v in getattr(block, "xyxy", (0, 0, 0, 0))[:4]],
+        "mask_anchor_xyxy": (
+            [int(float(v)) for v in getattr(block, "_mask_anchor_xyxy", ())[:4]]
+            if getattr(block, "_mask_anchor_xyxy", None) is not None
+            else None
+        ),
+        "mask_anchor_source": str(
+            getattr(block, "_mask_anchor_source", "") or ""
+        ),
+        "mask_anchor_relation": str(
+            getattr(block, "_mask_anchor_relation", "") or ""
+        ),
+        "render_original_xyxy": (
+            [int(float(v)) for v in getattr(block, "_render_original_xyxy", ())[:4]]
+            if getattr(block, "_render_original_xyxy", None) is not None
+            else None
+        ),
+        "render_area_xyxy": (
+            [int(float(v)) for v in getattr(block, "_render_area_xyxy", ())[:4]]
+            if getattr(block, "_render_area_xyxy", None) is not None
+            else None
+        ),
+        "render_bubble_xyxy": (
+            [int(float(v)) for v in getattr(block, "_render_bubble_xyxy", ())[:4]]
+            if getattr(block, "_render_bubble_xyxy", None) is not None
+            else None
+        ),
+        "render_area_source": str(
+            getattr(block, "_render_area_source", "") or ""
+        ),
         "translation_raw": str(
             getattr(block, "_render_translation_raw", getattr(block, "translation", "")) or ""
         ),
@@ -298,6 +327,8 @@ def build_inpaint_debug_metadata(
     hard_box_reason_totals: dict | None = None,
     mask_quality_policy: str = "",
     mask_policy_bubble_clamp_applied_count: int = 0,
+    mask_policy_bubble_silhouette_applied_count: int = 0,
+    mask_policy_bubble_silhouette_fallback_count: int = 0,
     mask_policy_text_free_glyph_applied_count: int = 0,
     mask_policy_removed_pixel_count: int = 0,
     mask_policy_outside_bubble_removed_pixel_count: int = 0,
@@ -366,6 +397,12 @@ def build_inpaint_debug_metadata(
         "hard_box_reason_totals": dict(hard_box_reason_totals or {}),
         "mask_quality_policy": str(mask_quality_policy or ""),
         "mask_policy_bubble_clamp_applied_count": int(mask_policy_bubble_clamp_applied_count or 0),
+        "mask_policy_bubble_silhouette_applied_count": int(
+            mask_policy_bubble_silhouette_applied_count or 0
+        ),
+        "mask_policy_bubble_silhouette_fallback_count": int(
+            mask_policy_bubble_silhouette_fallback_count or 0
+        ),
         "mask_policy_text_free_glyph_applied_count": int(mask_policy_text_free_glyph_applied_count or 0),
         "mask_policy_removed_pixel_count": int(mask_policy_removed_pixel_count or 0),
         "mask_policy_outside_bubble_removed_pixel_count": int(mask_policy_outside_bubble_removed_pixel_count or 0),

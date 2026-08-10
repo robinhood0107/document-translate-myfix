@@ -6,6 +6,10 @@ import cv2
 import numpy as np
 
 from modules.detection.utils.content import get_inpaint_bboxes
+from modules.utils.block_geometry import (
+    normalize_block_xyxy,
+    render_geometry_relation,
+)
 from modules.utils.inpaint_envelope import build_text_free_erase_envelope
 
 
@@ -21,6 +25,50 @@ def normalize_xyxy(box, image_shape: tuple[int, int] | tuple[int, int, int]) -> 
     if x2 <= x1 or y2 <= y1:
         return None
     return x1, y1, x2, y2
+
+
+def resolve_inpaint_text_xyxy(
+    block,
+    image_shape: tuple[int, int] | tuple[int, int, int],
+) -> tuple[int, int, int, int] | None:
+    """Return a safe text anchor for masking without exposing mutable lists."""
+    current = normalize_block_xyxy(getattr(block, "xyxy", None), image_shape)
+    anchor = current
+    source = "current_xyxy"
+    relation = None
+
+    if (
+        getattr(block, "text_class", "") == "text_bubble"
+        and getattr(block, "_render_area_source", "") == "detected_bubble"
+    ):
+        original = normalize_block_xyxy(
+            getattr(block, "_render_original_xyxy", None), image_shape
+        )
+        render_area = normalize_block_xyxy(
+            getattr(block, "_render_area_xyxy", None), image_shape
+        )
+        bubble = normalize_block_xyxy(
+            getattr(block, "bubble_xyxy", None), image_shape
+        )
+        render_bubble = normalize_block_xyxy(
+            getattr(block, "_render_bubble_xyxy", None), image_shape
+        )
+        relation = render_geometry_relation(block, image_shape)
+        if (
+            original is not None
+            and render_area is not None
+            and bubble is not None
+            and render_bubble is not None
+            and bubble == render_bubble
+            and relation is not None
+        ):
+            anchor = original
+            source = "render_original"
+
+    block._mask_anchor_xyxy = list(anchor) if anchor is not None else None
+    block._mask_anchor_source = source if anchor is not None else "none"
+    block._mask_anchor_relation = str(relation or "")
+    return tuple(anchor) if anchor is not None else None
 
 
 def _expand_bbox(
@@ -70,7 +118,7 @@ def resolve_block_ctd_roi(block, image_shape: tuple[int, int] | tuple[int, int, 
             return envelope
 
     return _expand_bbox(
-        getattr(block, 'xyxy', None),
+        resolve_inpaint_text_xyxy(block, image_shape),
         image_shape,
         width_ratio=0.04,
         height_ratio=0.04,
@@ -94,7 +142,7 @@ def resolve_block_cleanup_roi(block, image_shape: tuple[int, int] | tuple[int, i
         return ctd_roi
 
     return _expand_bbox(
-        getattr(block, 'xyxy', None),
+        resolve_inpaint_text_xyxy(block, image_shape),
         image_shape,
         width_ratio=0.10,
         height_ratio=0.10,
@@ -144,7 +192,8 @@ def build_text_prior_mask(
 ) -> np.ndarray:
     x1, y1, x2, y2 = roi
     prior = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
-    if getattr(block, 'xyxy', None) is None:
+    text_anchor = resolve_inpaint_text_xyxy(block, image_rgb.shape)
+    if text_anchor is None:
         return prior
 
     envelope = build_text_free_erase_envelope(block, image_rgb.shape)
@@ -155,8 +204,8 @@ def build_text_prior_mask(
             prior[by1 - y1:by2 - y1, bx1 - x1:bx2 - x1] = 255
 
     prior_boxes = getattr(block, 'inpaint_bboxes', None)
-    if prior_boxes is None:
-        prior_boxes = get_inpaint_bboxes(block.xyxy, image_rgb, bubble_bbox=roi)
+    if getattr(block, 'text_class', '') == 'text_bubble' or prior_boxes is None:
+        prior_boxes = get_inpaint_bboxes(text_anchor, image_rgb, bubble_bbox=roi)
 
     for box in prior_boxes or []:
         clipped = _clip_box_to_roi(box, roi)
@@ -168,10 +217,10 @@ def build_text_prior_mask(
     if not np.any(prior):
         fallback = _clip_box_to_roi(
             [
-                int(block.xyxy[0]) - 2,
-                int(block.xyxy[1]) - 2,
-                int(block.xyxy[2]) + 2,
-                int(block.xyxy[3]) + 2,
+                int(text_anchor[0]) - 2,
+                int(text_anchor[1]) - 2,
+                int(text_anchor[2]) + 2,
+                int(text_anchor[3]) + 2,
             ],
             roi,
         )

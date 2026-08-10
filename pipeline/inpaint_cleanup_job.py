@@ -32,6 +32,7 @@ from modules.utils.inpaint_cleanup import (
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
+    normalize_edit_mask,
 )
 
 
@@ -91,6 +92,7 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
         None,
         job.config,
         page_label=job.page_label,
+        protected_corner_mask=job.mask_details.get("protected_corner_mask"),
     )
     inpainted, mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
         inpainted,
@@ -98,6 +100,17 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
         job.mask_details,
         cleanup_stats,
     )
+    protected_corner_mask = normalize_edit_mask(
+        job.mask_details.get("protected_corner_mask"),
+        job.image.shape,
+    )
+    if np.any(protected_corner_mask):
+        mask = np.where(
+            (normalize_edit_mask(mask, job.image.shape) > 0)
+            & (protected_corner_mask <= 0),
+            255,
+            0,
+        ).astype(np.uint8)
 
     outside_before = count_changed_outside_edit_mask(job.image, inpainted, mask)
     inpainted = composite_with_edit_mask(job.image, inpainted, mask)

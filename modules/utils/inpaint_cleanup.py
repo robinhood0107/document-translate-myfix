@@ -160,8 +160,24 @@ def refine_bubble_residue_inpaint(
     inpainter,
     config,
     page_label: str = "",
+    *,
+    protected_corner_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     block_list = list(blk_list or [])
+    if mask is not None and inpainted_image is not None:
+        protected = normalize_edit_mask(
+            protected_corner_mask,
+            inpainted_image.shape,
+        )
+        if np.any(protected):
+            mask = np.where(
+                (normalize_edit_mask(mask, inpainted_image.shape) > 0)
+                & (protected <= 0),
+                255,
+                0,
+            ).astype(np.uint8)
+    else:
+        protected = np.zeros((0, 0), dtype=np.uint8)
     if (
         inpainted_image is None
         or mask is None
@@ -305,6 +321,12 @@ def refine_bubble_residue_inpaint(
         mask,
         dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX,
     )
+    if protected.shape == residue_mask.shape and np.any(protected):
+        residue_mask = np.where(
+            (residue_mask > 0) & (protected <= 0),
+            255,
+            0,
+        ).astype(np.uint8)
     residue_mask_cap_pixel_count = int(np.count_nonzero(residue_mask))
     if not np.any(residue_mask):
         return inpainted_image, mask, _empty_pass2_stats(mask.shape)
@@ -313,6 +335,12 @@ def refine_bubble_residue_inpaint(
     refined_image = imk.convert_scale_abs(refined_image)
     refined_image = composite_with_edit_mask(inpainted_image, refined_image, residue_mask)
     merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
+    if protected.shape == merged_mask.shape and np.any(protected):
+        merged_mask = np.where(
+            (merged_mask > 0) & (protected <= 0),
+            255,
+            0,
+        ).astype(np.uint8)
 
     logger.info(
         "[%s] inpaint-residue-cleanup: 인페인팅 후처리(잔여 텍스트 재정리) blocks=%s components=%d "
