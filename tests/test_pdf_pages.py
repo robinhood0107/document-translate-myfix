@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import tempfile
@@ -607,7 +608,9 @@ class PdfPagesTests(unittest.TestCase):
                     raise OSError("injected publish failure")
             real_replace(source, destination)
 
-        with mock.patch("modules.utils.pdf_pages.os.replace", side_effect=fail_second_publish):
+        with mock.patch(
+            "modules.utils.pdf_pages.os.replace", side_effect=fail_second_publish
+        ):
             with self.assertRaises(PdfImportError) as raised:
                 materialize_transaction(pdf_path, list(zip(plans, outputs)))
 
@@ -627,18 +630,121 @@ class PdfPagesTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "PDF_SOURCE_CHANGED")
         self.assertTrue(all(not os.path.exists(path) for path in outputs))
 
-    def test_transaction_checks_disk_space_before_writing(self) -> None:
-        pdf_path, _images = self._image_pdf(image_format="JPEG")
+    def test_transaction_does_not_reject_from_estimated_disk_space(self) -> None:
+        pdf_path, images = self._image_pdf(image_format="JPEG")
         _identity, plans = scan_pdf(pdf_path)
-        output = self._path("no_space.jpg")
+        output = self._path("materialized.jpg")
         with mock.patch(
             "modules.utils.pdf_pages.shutil.disk_usage",
-            return_value=SimpleNamespace(free=0),
+            side_effect=AssertionError("transaction must not estimate free disk space"),
+        ):
+            materialize_transaction(pdf_path, [(plans[0], output)])
+
+        self.assertEqual(Path(output).read_bytes(), Path(images[0]).read_bytes())
+
+    def test_disk_space_error_classifier_handles_nested_platform_codes(self) -> None:
+        quota_error = OSError(getattr(errno, "EDQUOT", errno.ENOSPC), "quota exceeded")
+        wrapped = PdfImportError(
+            "PDF_PAGE_MATERIALIZATION_FAILED", detail_code="native_validation_failed"
+        )
+        wrapped.__cause__ = quota_error
+        self.assertTrue(pdf_pages_module._is_disk_space_error(wrapped))
+
+        for winerror in (39, 112):
+            with self.subTest(winerror=winerror):
+                windows_error = OSError("disk full")
+                windows_error.winerror = winerror
+                self.assertTrue(pdf_pages_module._is_disk_space_error(windows_error))
+
+        self.assertFalse(
+            pdf_pages_module._is_disk_space_error(
+                OSError(errno.EACCES, "permission denied")
+            )
+        )
+
+    def test_transaction_actual_disk_full_preserves_source_and_destination(self) -> None:
+        pdf_path, _images = self._image_pdf(image_format="JPEG")
+        plan = scan_pdf(pdf_path)[1][0]
+        output = self._path("disk_full.jpg")
+        real_open = open
+
+        def fail_staging_write(path, mode="r", *args, **kwargs):
+            if ".pdf_staging_" in os.fspath(path) and "w" in mode:
+                raise OSError(errno.ENOSPC, "injected disk full")
+            return real_open(path, mode, *args, **kwargs)
+
+        with mock.patch("builtins.open", side_effect=fail_staging_write):
+            with self.assertRaises(PdfImportError) as raised:
+                materialize_transaction(pdf_path, [(plan, output)])
+
+        self.assertEqual(raised.exception.code, "PDF_DISK_SPACE_INSUFFICIENT")
+        self.assertEqual(raised.exception.detail_code, "disk_space_insufficient")
+        self.assertTrue(raised.exception.retryable)
+        self.assertTrue(os.path.isfile(pdf_path))
+        self.assertFalse(os.path.exists(output))
+        self.assertFalse(any(Path(self.temp_dir).glob(".pdf_staging_*")))
+
+    def test_transaction_disk_full_while_creating_staging_is_typed(self) -> None:
+        pdf_path, _images = self._image_pdf(image_format="JPEG")
+        plan = scan_pdf(pdf_path)[1][0]
+        output = self._path("staging_disk_full.jpg")
+
+        with mock.patch(
+            "modules.utils.pdf_pages.tempfile.mkdtemp",
+            side_effect=OSError(errno.ENOSPC, "injected disk full"),
         ):
             with self.assertRaises(PdfImportError) as raised:
-                materialize_transaction(pdf_path, [(plans[0], output)])
+                materialize_transaction(pdf_path, [(plan, output)])
+
         self.assertEqual(raised.exception.code, "PDF_DISK_SPACE_INSUFFICIENT")
+        self.assertEqual(raised.exception.detail_code, "disk_space_insufficient")
+        self.assertTrue(raised.exception.retryable)
+        self.assertTrue(os.path.isfile(pdf_path))
         self.assertFalse(os.path.exists(output))
+
+    def test_transaction_other_staging_error_is_sanitized(self) -> None:
+        pdf_path, _images = self._image_pdf(image_format="JPEG")
+        plan = scan_pdf(pdf_path)[1][0]
+        output = self._path("staging_denied.jpg")
+
+        with mock.patch(
+            "modules.utils.pdf_pages.tempfile.mkdtemp",
+            side_effect=OSError(errno.EACCES, "injected permission denied"),
+        ):
+            with self.assertRaises(PdfImportError) as raised:
+                materialize_transaction(pdf_path, [(plan, output)])
+
+        self.assertEqual(raised.exception.code, "PDF_PAGE_MATERIALIZATION_FAILED")
+        self.assertEqual(raised.exception.detail_code, "publish_failed")
+        self.assertFalse(raised.exception.retryable)
+        self.assertTrue(os.path.isfile(pdf_path))
+        self.assertFalse(os.path.exists(output))
+
+    def test_transaction_disk_full_during_publish_rolls_back_outputs(self) -> None:
+        pdf_path, _images = self._image_pdf(image_format="JPEG", count=2)
+        plans = scan_pdf(pdf_path)[1]
+        outputs = [self._path(f"disk_full_{index}.jpg") for index in range(2)]
+        real_replace = os.replace
+        publish_calls = 0
+
+        def fail_second_publish(source: str, destination: str) -> None:
+            nonlocal publish_calls
+            if ".pdf_staging_" in source:
+                publish_calls += 1
+                if publish_calls == 2:
+                    raise OSError(errno.ENOSPC, "injected disk full")
+            real_replace(source, destination)
+
+        with mock.patch("modules.utils.pdf_pages.os.replace", side_effect=fail_second_publish):
+            with self.assertRaises(PdfImportError) as raised:
+                materialize_transaction(pdf_path, list(zip(plans, outputs)))
+
+        self.assertEqual(raised.exception.code, "PDF_DISK_SPACE_INSUFFICIENT")
+        self.assertEqual(raised.exception.detail_code, "disk_space_insufficient")
+        self.assertTrue(raised.exception.retryable)
+        self.assertTrue(os.path.isfile(pdf_path))
+        self.assertTrue(all(not os.path.exists(path) for path in outputs))
+        self.assertFalse(any(Path(self.temp_dir).glob(".pdf_staging_*")))
 
     def test_transaction_never_reuses_abandoned_staging_content(self) -> None:
         pdf_path, images = self._image_pdf(image_format="JPEG")
