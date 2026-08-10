@@ -14,6 +14,7 @@ from app.projects.checkpoint_store import (
     checkpoint_reference_for_save,
 )
 from app.projects.stage_checkpoints import (
+    DETECTION_RENDER_AREA_SCHEMA_VERSION,
     RenderCheckpointResult,
     apply_translation_checkpoint,
     build_detection_fingerprint,
@@ -55,6 +56,12 @@ from modules.utils.textblock import TextBlock
 
 
 class ProjectStageCheckpointTests(unittest.TestCase):
+    def test_detection_identity_uses_render_geometry_schema_v2(self) -> None:
+        self.assertEqual(
+            DETECTION_RENDER_AREA_SCHEMA_VERSION,
+            "detected-bubble-render-area-v2",
+        )
+
     def test_font_identity_uses_exact_custom_file_sha(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             font_path = Path(temporary) / "custom-font.ttf"
@@ -213,6 +220,18 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             self.assertEqual(
                 detection_structure_signature(restored.blocks),
                 detection_structure_signature(blocks),
+            )
+            self.assertEqual(
+                restored.blocks[0]._render_original_xyxy,
+                blocks[0]._render_original_xyxy,
+            )
+            self.assertEqual(
+                restored.blocks[0]._render_area_xyxy,
+                blocks[0]._render_area_xyxy,
+            )
+            self.assertEqual(
+                restored.blocks[0]._render_area_source,
+                "detected_bubble",
             )
             np.testing.assert_array_equal(
                 restored.precomputed_mask_details["raw"],
@@ -613,6 +632,14 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         self.assertEqual(
             translate_identity["ocr_processing_contract_schema"],
             1,
+        )
+        self.assertEqual(
+            translate_identity["input_schema"],
+            "semantic-action-mask-deterministic-ordered-input-brush-v5",
+        )
+        self.assertEqual(
+            translate_identity["cleanup_schema"],
+            "bubble-residue-duplicate-fill-cuda-v3",
         )
         self.assertNotEqual(
             build_inpaint_fingerprint(translate_identity),

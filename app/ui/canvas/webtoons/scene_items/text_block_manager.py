@@ -7,6 +7,10 @@ Manages loading/unloading of blk_list and coordinate conversion.
 
 from typing import List, Dict
 from PySide6.QtCore import QPointF, QRectF
+from modules.utils.block_geometry import (
+    invalidate_render_geometry,
+    map_block_bbox_fields,
+)
 from modules.utils.textblock import TextBlock
 
 
@@ -74,12 +78,12 @@ class TextBlockManager:
             page_idx: Page index for coordinate conversion
             to_scene: If True, convert page-local to scene. If False, convert scene to page-local.
         """
-        # Convert main xyxy coordinates
-        self._convert_bbox_coordinates(blk.xyxy, page_idx, to_scene)
-        
-        # Convert bubble_xyxy coordinates if they exist
-        if blk.bubble_xyxy is not None:
-            self._convert_bbox_coordinates(blk.bubble_xyxy, page_idx, to_scene)
+        def convert_bbox(bbox):
+            converted = list(bbox)
+            self._convert_bbox_coordinates(converted, page_idx, to_scene)
+            return converted
+
+        map_block_bbox_fields(blk, convert_bbox)
         
         # Convert inpaint_bboxes coordinates if they exist
         if blk.inpaint_bboxes is not None and len(blk.inpaint_bboxes) > 0:
@@ -100,20 +104,17 @@ class TextBlockManager:
         """
         # Create a deep copy of the original text block
         clipped_blk = original_blk.deep_copy()
-        
-        # Update the main xyxy coordinates with the clipped version
-        clipped_blk.xyxy = list(clipped_xyxy)
-        
-        # Clip bubble_xyxy if it exists and intersects with the page
-        if original_blk.bubble_xyxy is not None:
-            # Create a temporary TextBlock with just bubble coordinates to clip
+
+        def clip_bbox_to_page(bbox):
             temp_blk = TextBlock()
-            temp_blk.xyxy = original_blk.bubble_xyxy
-            clipped_bubble = self.coordinate_converter.clip_textblock_to_page(temp_blk, page_idx)
-            if clipped_bubble and clipped_bubble[2] > clipped_bubble[0] and clipped_bubble[3] > clipped_bubble[1]:
-                clipped_blk.bubble_xyxy = list(clipped_bubble)
-            else:
-                clipped_blk.bubble_xyxy = None
+            temp_blk.xyxy = list(bbox)
+            clipped = self.coordinate_converter.clip_textblock_to_page(temp_blk, page_idx)
+            if clipped and clipped[2] > clipped[0] and clipped[3] > clipped[1]:
+                return list(clipped)
+            return None
+
+        map_block_bbox_fields(clipped_blk, clip_bbox_to_page)
+        clipped_blk.xyxy = list(clipped_xyxy)
         
         # Clip inpaint_bboxes if they exist
         if original_blk.inpaint_bboxes is not None and len(original_blk.inpaint_bboxes) > 0:
@@ -296,9 +297,11 @@ class TextBlockManager:
             
             # Create a temporary text block with scene coordinates
             temp_blk = blk.deep_copy() if hasattr(blk, 'deep_copy') else blk
-            temp_blk.xyxy = [scene_top_left.x(), scene_top_left.y(), 
-                           scene_top_left.x() + (blk.xyxy[2] - blk.xyxy[0]),
-                           scene_top_left.y() + (blk.xyxy[3] - blk.xyxy[1])]
+            self._convert_textblock_coordinates(
+                temp_blk,
+                original_page_idx,
+                to_scene=True,
+            )
             
             # Add clipped version to each intersecting page (following save_text_blocks_to_states pattern)
             for page_idx in intersecting_pages:
@@ -306,7 +309,7 @@ class TextBlockManager:
                     clipped_xyxy = self.coordinate_converter.clip_textblock_to_page(temp_blk, page_idx)
                     if clipped_xyxy and clipped_xyxy[2] > clipped_xyxy[0] and clipped_xyxy[3] > clipped_xyxy[1]:
                         # Create a clipped copy of the text block for this page
-                        clipped_blk = self._create_clipped_textblock(blk, clipped_xyxy, page_idx)
+                        clipped_blk = self._create_clipped_textblock(temp_blk, clipped_xyxy, page_idx)
                         scene_items_by_page[page_idx]['text_blocks'].append(clipped_blk)
 
     def is_duplicate_text_block(self, new_blk, existing_blks, margin=5):
@@ -536,6 +539,8 @@ class TextBlockManager:
                     local_bubble_bottom_right.x(),
                     local_bubble_bottom_right.y()
                 ]
+
+        invalidate_render_geometry(merged_blk)
         
         # Remove all blocks from their current pages
         for item in group:

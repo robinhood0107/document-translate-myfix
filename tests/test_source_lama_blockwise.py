@@ -8,6 +8,7 @@ from modules.inpainting.source_lama_blockwise import (
     SourceLaMaLarge,
     SourceLaMaKey,
     _INPAINTER_CACHE,
+    _apply_protected_corner_guard,
     _clip_half_open_bbox,
     release_source_lama_cache,
     source_lama_blockwise_inpaint,
@@ -153,6 +154,67 @@ def test_source_lama_blockwise_returns_expanded_bubble_edit_mask() -> None:
     assert np.count_nonzero(edit_mask[20:24, 24:27]) > 0
     changed = np.any(result != image, axis=2)
     assert np.count_nonzero(changed & (edit_mask <= 0)) == 0
+
+
+def test_source_lama_blockwise_restores_protected_bubble_corners() -> None:
+    image = np.full((48, 48, 3), 128, dtype=np.uint8)
+    image[20:24, 24:27] = 245
+    mask = np.zeros((48, 48), dtype=np.uint8)
+    mask[20:24, 20:24] = 255
+    protected = np.zeros((48, 48), dtype=np.uint8)
+    protected[20:24, 24:27] = 255
+    block = _text_block(
+        xyxy=[18, 18, 30, 28],
+        bubble_xyxy=[8, 8, 40, 40],
+        text_class="text_bubble",
+    )
+
+    result, edit_mask = source_lama_blockwise_inpaint(
+        image,
+        mask,
+        [block],
+        _CallableInpainter(),
+        config=None,
+        return_edit_mask=True,
+        protected_corner_mask=protected,
+    )
+
+    assert np.count_nonzero(edit_mask[protected > 0]) == 0
+    assert np.array_equal(result[protected > 0], image[protected > 0])
+    assert np.count_nonzero(edit_mask[mask > 0]) > 0
+
+
+def test_empty_protected_corner_guard_preserves_the_existing_result_and_mask() -> None:
+    original = np.zeros((8, 8, 3), dtype=np.uint8)
+    result = np.full((8, 8, 3), 77, dtype=np.uint8)
+
+    guarded, edit_mask = _apply_protected_corner_guard(
+        original,
+        result,
+        None,
+        None,
+    )
+
+    assert guarded is result
+    assert edit_mask is None
+
+
+def test_protected_corner_guard_with_unknown_edit_mask_restores_only_protection() -> None:
+    original = np.zeros((8, 8, 3), dtype=np.uint8)
+    result = np.full((8, 8, 3), 77, dtype=np.uint8)
+    protected = np.zeros((8, 8), dtype=np.uint8)
+    protected[2:4, 3:5] = 255
+
+    guarded, edit_mask = _apply_protected_corner_guard(
+        original,
+        result,
+        None,
+        protected,
+    )
+
+    assert edit_mask is None
+    assert np.array_equal(guarded[protected > 0], original[protected > 0])
+    assert np.all(guarded[protected <= 0] == 77)
 
 
 def test_source_lama_blockwise_keeps_text_free_on_lama_path(monkeypatch) -> None:

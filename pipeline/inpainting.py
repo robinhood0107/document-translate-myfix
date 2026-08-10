@@ -269,7 +269,15 @@ class InpaintingHandler:
 
         return inpaint_input_img
 
-    def inpaint_with_blocks(self, image: np.ndarray, mask: np.ndarray, blk_list, config=None):
+    def inpaint_with_blocks(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        blk_list,
+        config=None,
+        *,
+        protected_corner_mask: np.ndarray | None = None,
+    ):
         self.last_inpaint_edit_mask = None
         self.last_inpaint_diagnostics = {}
         if image is None or mask is None:
@@ -317,6 +325,7 @@ class InpaintingHandler:
                     check_need_inpaint=True,
                     return_edit_mask=True,
                     return_diagnostics=True,
+                    protected_corner_mask=protected_corner_mask,
                 )
             )
             diagnostics["model_call_diagnostics"] = model_diagnostics

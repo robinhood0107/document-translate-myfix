@@ -110,7 +110,10 @@ from modules.utils.gpu_handoff import (
     wait_for_global_vram_release,
 )
 from modules.utils.gpu_metrics import query_cuda_handoff_metrics
-from modules.utils.image_utils import generate_mask
+from modules.utils.image_utils import (
+    generate_mask,
+    release_protected_mask_for_explicit_additions,
+)
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
@@ -3234,6 +3237,7 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.mask_details["raw_mask"]
                 )
                 if brush_strokes:
+                    automatic_mask = np.ascontiguousarray(ctx.mask.copy())
                     merged_mask = (
                         self.inpainting._generate_mask_from_saved_strokes(
                             brush_strokes,
@@ -3247,9 +3251,21 @@ class StageBatchedProcessor(BatchProcessor):
                             dtype=np.uint8,
                         )
                         ctx.mask_details["final_mask"] = ctx.mask
+                        (
+                            ctx.mask_details["protected_corner_mask"],
+                            released_protected_pixels,
+                        ) = release_protected_mask_for_explicit_additions(
+                            ctx.mask_details.get("protected_corner_mask"),
+                            automatic_mask,
+                            ctx.mask,
+                            ctx.image.shape,
+                        )
                         ctx.mask_details[
                             "project_brush_strokes_applied"
                         ] = True
+                        ctx.mask_details[
+                            "protected_corner_brush_override_pixel_count"
+                        ] = int(released_protected_pixels)
 
                 ctx.project_inpaint_checkpoint_status = (
                     "miss" if checkpoint_store is not None else "disabled"
@@ -3337,6 +3353,9 @@ class StageBatchedProcessor(BatchProcessor):
                         ctx.mask,
                         inpaint_blocks,
                         config=config,
+                        protected_corner_mask=ctx.mask_details.get(
+                            "protected_corner_mask"
+                        ),
                     )
                 self._sample_performance_resources("inpainter_forward_end")
                 ctx.inpaint_diagnostics = dict(

@@ -55,16 +55,16 @@ DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
 DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
 DETECTION_MASK_SCHEMA_VERSION = "precomputed-mask-details-v1"
-DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
+DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v2"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
 OCR_POSTPROCESS_SCHEMA_VERSION = (
     "text-first-exact-canonical-quality-retry-drop-guards-v2"
 )
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
 INPAINT_INPUT_SCHEMA_VERSION = (
-    "semantic-action-mask-deterministic-ordered-input-brush-v4"
+    "semantic-action-mask-deterministic-ordered-input-brush-v5"
 )
-INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v2"
+INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v3"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
 INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
