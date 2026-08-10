@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 from PIL import Image
+from PySide6.QtCore import QCoreApplication
 
 from app.path_materialization import ensure_path_materialized
 from modules.utils.export_paths import build_export_timestamp
@@ -438,6 +439,40 @@ class FlowMixin:
                 logger.warning("No images to process")
                 return
 
+            pdf_preflight = getattr(
+                self.main_page.file_handler, "preflight_for_processing", None
+            )
+            pdf_count = (
+                pdf_preflight(
+                    image_list,
+                    should_cancel=lambda: bool(
+                        getattr(self.main_page, "is_current_task_cancelled", lambda: False)()
+                    ),
+                )
+                if callable(pdf_preflight)
+                else 0
+            )
+            if pdf_count:
+                logger.info(
+                    "Validated %d PDF-backed pages before webtoon processing.",
+                    pdf_count,
+                )
+                warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
+                if warnings:
+                    pages = ", ".join(str(item["page_number"]) for item in warnings)
+                    sizes = "; ".join(
+                        "{page_number}: {requested_width}×{requested_height} → "
+                        "{applied_width}×{applied_height}".format(**item)
+                        for item in warnings
+                    )
+                    self.main_page.batch_report_ctrl.register_preflight_warning(
+                        QCoreApplication.translate(
+                            "PdfImport", "PDF import memory limit applied"
+                        ),
+                        QCoreApplication.translate(
+                            "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
+                        ).replace("{pages}", pages).replace("{sizes}", sizes),
+                    )
             try:
                 if self.main_page.file_handler.should_pre_materialize(image_list):
                     count = self.main_page.file_handler.pre_materialize(image_list)
