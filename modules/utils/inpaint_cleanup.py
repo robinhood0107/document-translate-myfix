@@ -33,6 +33,7 @@ def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
         "residue_mask_cap_pixel_count": 0,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
         "pass2_backend": "",
+        "residue_pass_truncated_block_count": 0,
     }
 
 
@@ -196,6 +197,7 @@ def refine_bubble_residue_inpaint(
     text_free_candidate_count = 0
     text_free_kept_count = 0
     page_cap_hit = False
+    truncated_block_indices: set[int] = set()
     source_cap = _residue_source_cap(mask, dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX)
 
     for idx, blk in enumerate(block_list):
@@ -242,8 +244,9 @@ def refine_bubble_residue_inpaint(
         local_components = 0
         max_local_components = 35
 
-        for lx1, ly1, lx2, ly2 in residual_boxes:
+        for residual_index, (lx1, ly1, lx2, ly2) in enumerate(residual_boxes):
             if local_components >= max_local_components:
+                truncated_block_indices.add(idx)
                 break
             w = int(lx2 - lx1)
             h = int(ly2 - ly1)
@@ -298,6 +301,18 @@ def refine_bubble_residue_inpaint(
                 text_free_kept_count += 1
             if component_count >= 120:
                 page_cap_hit = True
+                if residual_index < len(residual_boxes) - 1:
+                    truncated_block_indices.add(idx)
+                truncated_block_indices.update(
+                    later_index
+                    for later_index, later_block in enumerate(
+                        block_list[idx + 1 :],
+                        start=idx + 1,
+                    )
+                    if getattr(later_block, "xyxy", None) is not None
+                    and str(getattr(later_block, "text_class", "") or "")
+                    == "text_bubble"
+                )
                 logger.info(
                     "[%s] inpaint-residue-cleanup: 인페인팅 후처리 컴포넌트 상한(%d) 도달, 수집된 마스크 사용",
                     page_label or "?/?",
@@ -327,9 +342,14 @@ def refine_bubble_residue_inpaint(
             255,
             0,
         ).astype(np.uint8)
+    residue_pass_truncated_block_count = len(truncated_block_indices)
     residue_mask_cap_pixel_count = int(np.count_nonzero(residue_mask))
     if not np.any(residue_mask):
-        return inpainted_image, mask, _empty_pass2_stats(mask.shape)
+        empty_stats = _empty_pass2_stats(mask.shape)
+        empty_stats["residue_pass_truncated_block_count"] = int(
+            residue_pass_truncated_block_count
+        )
+        return inpainted_image, mask, empty_stats
 
     refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask)
     refined_image = imk.convert_scale_abs(refined_image)
@@ -366,4 +386,7 @@ def refine_bubble_residue_inpaint(
         "residue_mask_cap_pixel_count": residue_mask_cap_pixel_count,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
         "pass2_backend": pass2_backend,
+        "residue_pass_truncated_block_count": int(
+            residue_pass_truncated_block_count
+        ),
     }
