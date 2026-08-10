@@ -436,6 +436,9 @@ def build_inpaint_debug_metadata(
         "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
         "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
         "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
+        "residue_pass_truncated_block_count": int(
+            cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
+        ),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "duplicate_bubble_inner_fill_applied": bool(duplicate_bubble_inner_fill.get("applied", False)),
         "duplicate_bubble_inner_fill_pixel_count": int(
