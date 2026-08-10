@@ -9,6 +9,7 @@ from app.projects.stage_checkpoints import (
     invalidate_current_project_page_checkpoints,
 )
 from pipeline.webtoon_utils import get_first_visible_block
+from modules.utils.block_geometry import invalidate_render_geometry
 from modules.utils.textblock import ensure_text_block_id
 
 
@@ -68,6 +69,7 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
             ):
             
                 blk.xyxy[:] = self.new_xyxy
+                invalidate_render_geometry(blk)
                 blk.angle = self.new_angle
                 blk.tr_origin_point = self.new_tr_origin
 
@@ -88,6 +90,7 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
             ):
                 
                 blk.xyxy[:] = self.old_xyxy
+                invalidate_render_geometry(blk)
                 blk.angle = self.old_angle
                 blk.tr_origin_point = self.old_tr_origin
 
@@ -188,6 +191,7 @@ class ResizeBlocksCommand(QUndoCommand):
         for blk, xyxy in zip(self.blocks, coords):
             if blk in self.blk_list:
                 blk.xyxy[:] = xyxy
+                invalidate_render_geometry(blk)
         self._refresh_rectangles()
         invalidate_current_project_page_checkpoints(self.main, stage="ocr")
 

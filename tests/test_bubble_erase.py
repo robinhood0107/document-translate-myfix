@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -15,7 +16,9 @@ from modules.utils.bubble_erase import (
     erase_text_bubble_regions,
     mask_pixel_count,
     set_block_erase_metadata,
+    _bubble_interior_cap_mask,
 )
+from modules.utils.bubble_silhouette import extract_bubble_interior_cap_crop
 from modules.utils.textblock import TextBlock
 
 
@@ -54,6 +57,64 @@ class BubbleEraseMetadataTests(unittest.TestCase):
         mask[1:3, 1:3] = 255
 
         self.assertEqual(mask_pixel_count(mask), 4)
+
+    def test_interior_cap_keeps_the_existing_erase_policy(self) -> None:
+        crop = np.zeros((8, 8, 3), dtype=np.uint8)
+        seed = np.zeros((8, 8), dtype=np.uint8)
+        seed[3:5, 3:5] = 255
+        detected = np.full((8, 8), 255, dtype=np.uint8)
+
+        with mock.patch(
+            "modules.utils.bubble_erase.extract_bubble_interior_cap_crop",
+            return_value=detected,
+        ) as extract:
+            result = _bubble_interior_cap_mask(crop, seed)
+
+        np.testing.assert_array_equal(result, detected)
+        self.assertEqual(extract.call_args.kwargs["min_area_ratio"], 0.20)
+        self.assertEqual(extract.call_args.kwargs["max_area_ratio"], 1.0)
+        self.assertEqual(extract.call_args.kwargs["min_seed_coverage"], 0.0)
+        self.assertFalse(extract.call_args.kwargs["preserve_seed_after_erode"])
+
+    def test_silhouette_cap_accepts_only_area_and_seed_coverage_bounds(self) -> None:
+        crop = np.zeros((10, 10, 3), dtype=np.uint8)
+        seed = np.zeros((10, 10), dtype=np.uint8)
+        seed[4:6, 4:6] = 255
+        accepted = np.zeros((10, 10), dtype=np.uint8)
+        accepted[1:9, 1:9] = 255
+        too_small = np.zeros((10, 10), dtype=np.uint8)
+        too_small[4:6, 4:6] = 255
+        misses_seed = np.zeros((10, 10), dtype=np.uint8)
+        misses_seed[0:5, 0:5] = 255
+        misses_seed[4:6, 4:6] = 0
+
+        vendor_path = (
+            "modules.source_parity_vendor.utils.textblock_mask.extract_ballon_mask"
+        )
+        with mock.patch(vendor_path, return_value=(accepted, None)):
+            result = extract_bubble_interior_cap_crop(crop, seed)
+        self.assertIsNotNone(result)
+        self.assertTrue(np.all(result[seed > 0] == 255))
+
+        for rejected in (too_small, np.full((10, 10), 255, dtype=np.uint8), misses_seed):
+            with self.subTest(nonzero=int(np.count_nonzero(rejected))):
+                with mock.patch(vendor_path, return_value=(rejected, None)):
+                    self.assertIsNone(
+                        extract_bubble_interior_cap_crop(crop, seed)
+                    )
+
+    def test_silhouette_cap_fails_closed_when_vendor_detection_raises(self) -> None:
+        crop = np.zeros((10, 10, 3), dtype=np.uint8)
+        seed = np.zeros((10, 10), dtype=np.uint8)
+        seed[4:6, 4:6] = 255
+
+        with mock.patch(
+            "modules.source_parity_vendor.utils.textblock_mask.extract_ballon_mask",
+            side_effect=RuntimeError("detector failed"),
+        ):
+            result = extract_bubble_interior_cap_crop(crop, seed)
+
+        self.assertIsNone(result)
 
 
 class BubbleResidualMaskTests(unittest.TestCase):
