@@ -105,6 +105,28 @@ class ImageStateControllerTests(unittest.TestCase):
         loaded_paths = main.run_threaded.call_args.args[-1]
         self.assertEqual(loaded_paths, [os.path.abspath("folder/page.png")])
 
+    def test_pdf_limit_warning_formats_page_number_and_dimensions(self) -> None:
+        main = mock.Mock()
+        main.file_handler.consume_pdf_import_warnings.return_value = [
+            {
+                "code": "PDF_RESOURCE_LIMIT",
+                "page_number": 3,
+                "requested_width": 100,
+                "requested_height": 200,
+                "applied_width": 50,
+                "applied_height": 100,
+            }
+        ]
+        controller = ImageStateController.__new__(ImageStateController)
+        controller.main = main
+
+        with mock.patch("app.controllers.image.Messages.show_warning") as warning:
+            controller._show_pdf_import_warnings()
+
+        message = warning.call_args.args[1]
+        self.assertIn("Pages: 3", message)
+        self.assertIn("3: 100×200 → 50×100", message)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ from app.path_materialization import ensure_path_materialized
 
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
+from modules.utils.pdf_pages import PdfImportError
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
@@ -1673,6 +1674,56 @@ class ComicTranslate(ComicTranslateUI):
             })
             self.set_pipeline_overlay_active(False)
             self.loading.setVisible(False)
+            return
+
+        if issubclass(exctype, PdfImportError):
+            messages = {
+                "PDF_PASSWORD_REQUIRED": self.tr(
+                    "This PDF is password-protected. Password entry is not supported yet."
+                ),
+                "PDF_SOURCE_CHANGED": self.tr(
+                    "The PDF changed after it was imported. Remove it and import it again."
+                ),
+                "PDF_PAGE_PLAN_FAILED": self.tr(
+                    "The PDF page structure could not be read safely."
+                ),
+                "PDF_PAGE_MATERIALIZATION_FAILED": self.tr(
+                    "A PDF page could not be prepared without violating the import quality checks."
+                ),
+                "PDF_DISK_SPACE_INSUFFICIENT": self.tr(
+                    "There is not enough free disk space to prepare all selected PDF pages."
+                ),
+                "PDF_RESOURCE_LIMIT": self.tr(
+                    "The PDF exceeds the supported import resource limits."
+                ),
+            }
+            message = messages.get(value.code, self.tr("The PDF could not be imported."))
+            if value.page_index is not None:
+                page_text = self.tr(" Page {page}.").replace(
+                    "{page}", str(value.page_index + 1)
+                )
+                message = f"{message}{page_text}"
+            if self._batch_active:
+                self._batch_failed = True
+                self._last_batch_failure_detail = message
+                self.on_runtime_progress_update({
+                    "phase": "error",
+                    "service": "batch",
+                    "status": "failed",
+                    "step_key": "error",
+                    "message": self.tr("PDF page preparation failed before processing started."),
+                    "detail": message,
+                    "page_total": len(self._last_batch_request_paths),
+                    "page_index": value.page_index or 0,
+                    "image_name": "",
+                    "panel_state": "failed",
+                    "panel_message_level": "error",
+                })
+                self.loading.setVisible(False)
+                return
+            Messages.show_error_with_copy(self, self.tr("PDF Import Error"), message, message)
+            self.loading.setVisible(False)
+            self.enable_hbutton_group()
             return
 
         if self._batch_active:
