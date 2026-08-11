@@ -3353,6 +3353,7 @@ class StageBatchedProcessor(BatchProcessor):
                         ctx.mask,
                         inpaint_blocks,
                         config=config,
+                        raw_source_mask=ctx.raw_mask,
                         protected_corner_mask=ctx.mask_details.get(
                             "protected_corner_mask"
                         ),
