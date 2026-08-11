@@ -13,11 +13,77 @@ from modules.utils.bubble_erase import (
     fill_bubble_edit_mask,
 )
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
-from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_residue_roi
+from modules.utils.mask_roi import (
+    build_text_prior_mask,
+    normalize_xyxy,
+    resolve_block_residue_roi,
+    resolve_inpaint_text_xyxy,
+)
 from modules.utils.textblock import TextBlock
 
 logger = logging.getLogger(__name__)
 RESIDUE_SOURCE_MASK_DILATE_PX = 2
+PASS2_BACKEND_MIXED = "mixed"
+
+
+def _is_structure_guarded_cleanup_block(block: TextBlock) -> bool:
+    reason = str(getattr(block, "_erase_skipped_reason", "") or "")
+    return bool(reason)
+
+
+def _build_cleanup_priority_protection(
+    source_mask: np.ndarray,
+    blocks: list[TextBlock],
+    image_shape: tuple[int, ...],
+) -> np.ndarray:
+    protection = np.zeros(image_shape[:2], dtype=np.uint8)
+    for block in blocks:
+        text_class = getattr(block, "text_class", "")
+        missing_bubble_roi = (
+            text_class == "text_bubble"
+            and normalize_xyxy(
+                getattr(block, "bubble_xyxy", None),
+                image_shape,
+            )
+            is None
+        )
+        if (
+            text_class != "text_free"
+            and not _is_structure_guarded_cleanup_block(block)
+            and not missing_bubble_roi
+        ):
+            continue
+        reason = str(getattr(block, "_erase_skipped_reason", "") or "")
+        delegated_reason = reason in {"lama_priority_owned", "missing_bubble_roi"}
+        roi = None
+        if reason and not delegated_reason:
+            roi = normalize_xyxy(
+                getattr(block, "bubble_xyxy", None),
+                image_shape,
+            )
+        if roi is None:
+            roi = resolve_inpaint_text_xyxy(block, image_shape)
+        if roi is None:
+            continue
+        x1, y1, x2, y2 = roi
+        if reason and not delegated_reason:
+            protection[y1:y2, x1:x2] = 255
+            continue
+        owned = source_mask[y1:y2, x1:x2]
+        if not np.any(owned):
+            continue
+        local_protection = cv2.dilate(
+            owned,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+            iterations=1,
+        )
+        protection[y1:y2, x1:x2] = np.where(
+            (protection[y1:y2, x1:x2] > 0)
+            | (local_protection > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+    return protection
 
 
 def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
@@ -36,7 +102,13 @@ def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
         "residue_mask_cap_pixel_count": 0,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
         "pass2_backend": "",
+        "pass2_backend_distribution": {},
+        "pass2_applied_block_count": 0,
+        "pass2_fallback_block_count": 0,
+        "pass2_applied_pixel_count": 0,
         "residue_pass_truncated_block_count": 0,
+        "residue_pass_cap_dropped_candidate_count": 0,
+        "residue_pass_structure_guard_block_count": 0,
     }
 
 
@@ -196,8 +268,9 @@ def refine_bubble_residue_inpaint(
     ):
         return inpainted_image, mask, _empty_pass2_stats(mask.shape if mask is not None else inpainted_image.shape[:2])
 
-    residue_mask = np.zeros_like(mask, dtype=np.uint8)
-    residue_roi_union = np.zeros_like(mask, dtype=np.uint8)
+    block_residue_masks: dict[int, np.ndarray] = {}
+    block_residue_rois: dict[int, tuple[int, int, int, int]] = {}
+    block_bubble_rois: dict[int, tuple[int, int, int, int] | None] = {}
     touched_blocks: list[int] = []
     component_count = 0
     pass2_candidate_count = 0
@@ -205,9 +278,28 @@ def refine_bubble_residue_inpaint(
     bubble_kept_count = 0
     text_free_candidate_count = 0
     text_free_kept_count = 0
-    page_cap_hit = False
     truncated_block_indices: set[int] = set()
-    source_cap = _residue_source_cap(mask, dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX)
+    dropped_candidate_count = 0
+    structure_guard_block_count = 0
+    priority_protected = _build_cleanup_priority_protection(
+        mask,
+        block_list,
+        inpainted_image.shape,
+    )
+    cleanup_source_mask = np.where(
+        (mask > 0) & (priority_protected <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    source_cap = _residue_source_cap(
+        cleanup_source_mask,
+        dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX,
+    )
+    cleanup_protected = np.where(
+        (protected > 0) | (priority_protected > 0),
+        255,
+        0,
+    ).astype(np.uint8)
 
     for idx, blk in enumerate(block_list):
         if getattr(blk, "xyxy", None) is None:
@@ -215,6 +307,9 @@ def refine_bubble_residue_inpaint(
 
         text_class = getattr(blk, "text_class", "") or ""
         if text_class != "text_bubble":
+            continue
+        if _is_structure_guarded_cleanup_block(blk):
+            structure_guard_block_count += 1
             continue
 
         residue_roi = normalize_xyxy(getattr(blk, "cleanup_roi_xyxy", None), inpainted_image.shape)
@@ -224,7 +319,15 @@ def refine_bubble_residue_inpaint(
             continue
 
         rx1, ry1, rx2, ry2 = residue_roi
-        residue_roi_union[ry1:ry2, rx1:rx2] = 255
+        block_residue_rois[idx] = residue_roi
+        bubble_roi = normalize_xyxy(
+            getattr(blk, "bubble_xyxy", None),
+            inpainted_image.shape,
+        )
+        if bubble_roi is None:
+            structure_guard_block_count += 1
+            continue
+        block_bubble_rois[idx] = bubble_roi
         crop = inpainted_image[ry1:ry2, rx1:rx2]
         if crop.size == 0:
             continue
@@ -238,7 +341,12 @@ def refine_bubble_residue_inpaint(
         if not np.any(prior_mask):
             continue
 
-        detected_boxes = detect_content_in_bbox(crop, min_area=4, margin=0)
+        detected_boxes = detect_content_in_bbox(
+            crop,
+            min_area=4,
+            margin=0,
+            inclusive_min_area=True,
+        )
         residual_boxes = list(detected_boxes) if detected_boxes is not None else []
         if text_class == "text_bubble":
             residual_boxes.extend(_build_bubble_faint_boxes(crop, prior_mask))
@@ -256,7 +364,12 @@ def refine_bubble_residue_inpaint(
         for residual_index, (lx1, ly1, lx2, ly2) in enumerate(residual_boxes):
             if local_components >= max_local_components:
                 truncated_block_indices.add(idx)
+                dropped_candidate_count += len(residual_boxes) - residual_index
                 break
+            lx1 = max(0, min(int(lx1), crop.shape[1]))
+            ly1 = max(0, min(int(ly1), crop.shape[0]))
+            lx2 = max(0, min(int(lx2), crop.shape[1]))
+            ly2 = max(0, min(int(ly2), crop.shape[0]))
             w = int(lx2 - lx1)
             h = int(ly2 - ly1)
             bbox_area = int(w * h)
@@ -300,57 +413,147 @@ def refine_bubble_residue_inpaint(
             allowed_crop = source_cap[gy1:gy2, gx1:gx2] > 0
             if allowed_crop.size == 0 or not np.any(allowed_crop):
                 continue
-            residue_mask_crop = residue_mask[gy1:gy2, gx1:gx2]
-            residue_mask_crop[allowed_crop] = 255
+            block_mask = block_residue_masks.setdefault(
+                idx,
+                np.zeros((ry2 - ry1, rx2 - rx1), dtype=np.uint8),
+            )
+            block_mask_crop = block_mask[
+                gy1 - ry1 : gy2 - ry1,
+                gx1 - rx1 : gx2 - rx1,
+            ]
+            block_mask_crop[allowed_crop] = 255
             local_components += 1
             component_count += 1
             if text_class == "text_bubble":
                 bubble_kept_count += 1
             else:
                 text_free_kept_count += 1
-            if component_count >= 120:
-                page_cap_hit = True
-                if residual_index < len(residual_boxes) - 1:
-                    truncated_block_indices.add(idx)
-                truncated_block_indices.update(
-                    later_index
-                    for later_index, later_block in enumerate(
-                        block_list[idx + 1 :],
-                        start=idx + 1,
-                    )
-                    if getattr(later_block, "xyxy", None) is not None
-                    and str(getattr(later_block, "text_class", "") or "")
-                    == "text_bubble"
-                )
-                logger.info(
-                    "[%s] inpaint-residue-cleanup: 인페인팅 후처리 컴포넌트 상한(%d) 도달, 수집된 마스크 사용",
-                    page_label or "?/?",
-                    component_count,
-                )
-                break
-
         if local_components > 0:
             touched_blocks.append(idx)
-        if page_cap_hit:
-            break
 
-    if component_count <= 0 or not np.any(residue_mask):
-        return inpainted_image, mask, _empty_pass2_stats(mask.shape)
+    if component_count <= 0:
+        empty_stats = _empty_pass2_stats(mask.shape)
+        empty_stats["residue_pass_structure_guard_block_count"] = int(
+            structure_guard_block_count
+        )
+        return inpainted_image, mask, empty_stats
 
-    residue_mask = imk.dilate(residue_mask, np.ones((3, 3), np.uint8), iterations=1)
-    residue_mask = np.where((residue_mask > 0) & (residue_roi_union > 0), 255, 0).astype(np.uint8)
-    residue_mask_pre_cap_pixel_count = int(np.count_nonzero(residue_mask))
-    residue_mask = _cap_residue_mask_to_source_mask(
-        residue_mask,
-        mask,
-        dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX,
-    )
-    if protected.shape == residue_mask.shape and np.any(protected):
-        residue_mask = np.where(
-            (residue_mask > 0) & (protected <= 0),
+    residue_mask_pre_cap = np.zeros_like(mask, dtype=np.uint8)
+    residue_mask = np.zeros_like(mask, dtype=np.uint8)
+    refined_image = np.asarray(inpainted_image).copy()
+    applied_residue_mask = np.zeros_like(mask, dtype=np.uint8)
+    backend_distribution: dict[str, int] = {}
+    applied_block_count = 0
+    fallback_block_count = 0
+    for idx in touched_blocks:
+        block_local_mask = block_residue_masks.get(idx)
+        residue_roi = block_residue_rois.get(idx)
+        if (
+            block_local_mask is None
+            or residue_roi is None
+            or not np.any(block_local_mask)
+        ):
+            continue
+        block_local_mask = imk.dilate(
+            block_local_mask,
+            np.ones((3, 3), np.uint8),
+            iterations=1,
+        )
+        rx1, ry1, rx2, ry2 = residue_roi
+        residue_mask_pre_cap[ry1:ry2, rx1:rx2] = np.where(
+            (residue_mask_pre_cap[ry1:ry2, rx1:rx2] > 0)
+            | (block_local_mask > 0),
             255,
             0,
         ).astype(np.uint8)
+        block_local_mask = np.where(
+            (block_local_mask > 0)
+            & (source_cap[ry1:ry2, rx1:rx2] > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        if np.any(cleanup_protected):
+            block_local_mask = np.where(
+                (block_local_mask > 0)
+                & (cleanup_protected[ry1:ry2, rx1:rx2] <= 0),
+                255,
+                0,
+            ).astype(np.uint8)
+        if not np.any(block_local_mask):
+            continue
+        bubble_roi = block_bubble_rois.get(idx)
+        fill_roi = bubble_roi or residue_roi
+        fx1, fy1, fx2, fy2 = fill_roi
+        ix1 = max(rx1, fx1)
+        iy1 = max(ry1, fy1)
+        ix2 = min(rx2, fx2)
+        iy2 = min(ry2, fy2)
+        if ix2 <= ix1 or iy2 <= iy1:
+            continue
+        fill_local_mask = np.zeros((fy2 - fy1, fx2 - fx1), dtype=np.uint8)
+        fill_local_mask[
+            iy1 - fy1 : iy2 - fy1,
+            ix1 - fx1 : ix2 - fx1,
+        ] = block_local_mask[
+            iy1 - ry1 : iy2 - ry1,
+            ix1 - rx1 : ix2 - rx1,
+        ]
+        if not np.any(fill_local_mask):
+            continue
+        fill_local_mask = np.where(
+            (fill_local_mask > 0)
+            & (applied_residue_mask[fy1:fy2, fx1:fx2] <= 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        if not np.any(fill_local_mask):
+            continue
+        residue_mask[fy1:fy2, fx1:fx2] = np.where(
+            (residue_mask[fy1:fy2, fx1:fx2] > 0)
+            | (fill_local_mask > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        fill_source = refined_image[fy1:fy2, fx1:fx2].copy()
+        local_bubble_roi = (
+            (0, 0, fx2 - fx1, fy2 - fy1)
+            if bubble_roi is not None
+            else None
+        )
+        local_background_exclude = source_cap[fy1:fy2, fx1:fx2].copy()
+        if np.any(cleanup_protected):
+            local_background_exclude = np.where(
+                (local_background_exclude > 0)
+                | (cleanup_protected[fy1:fy2, fx1:fx2] > 0),
+                255,
+                0,
+            ).astype(np.uint8)
+        block_filled, backend = fill_bubble_edit_mask(
+            fill_source,
+            fill_local_mask,
+            bubble_roi=local_bubble_roi,
+            background_exclude_mask=local_background_exclude,
+        )
+        backend_distribution[backend] = backend_distribution.get(backend, 0) + 1
+        if backend == ERASE_MODE_BUBBLE_LAMA_FALLBACK:
+            fallback_block_count += 1
+            continue
+        refined_image[fy1:fy2, fx1:fx2] = composite_with_edit_mask(
+            refined_image[fy1:fy2, fx1:fx2],
+            imk.convert_scale_abs(block_filled),
+            fill_local_mask,
+        )
+        applied_residue_mask[fy1:fy2, fx1:fx2] = np.where(
+            (applied_residue_mask[fy1:fy2, fx1:fx2] > 0)
+            | (fill_local_mask > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        applied_block_count += 1
+
+    residue_mask_pre_cap_pixel_count = int(
+        np.count_nonzero(residue_mask_pre_cap)
+    )
     residue_pass_truncated_block_count = len(truncated_block_indices)
     residue_mask_cap_pixel_count = int(np.count_nonzero(residue_mask))
     if not np.any(residue_mask):
@@ -358,10 +561,21 @@ def refine_bubble_residue_inpaint(
         empty_stats["residue_pass_truncated_block_count"] = int(
             residue_pass_truncated_block_count
         )
+        empty_stats["residue_pass_cap_dropped_candidate_count"] = int(
+            dropped_candidate_count
+        )
+        empty_stats["residue_pass_structure_guard_block_count"] = int(
+            structure_guard_block_count
+        )
         return inpainted_image, mask, empty_stats
 
-    refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask)
-    if pass2_backend == ERASE_MODE_BUBBLE_LAMA_FALLBACK:
+    pass2_backend = ""
+    if len(backend_distribution) == 1:
+        pass2_backend = next(iter(backend_distribution))
+    elif len(backend_distribution) > 1:
+        pass2_backend = PASS2_BACKEND_MIXED
+
+    if not np.any(applied_residue_mask):
         fallback_stats = _empty_pass2_stats(mask.shape)
         fallback_stats.update(
             {
@@ -383,15 +597,28 @@ def refine_bubble_residue_inpaint(
                     residue_mask_cap_pixel_count
                 ),
                 "pass2_backend": pass2_backend,
+                "pass2_backend_distribution": dict(backend_distribution),
+                "pass2_applied_block_count": int(applied_block_count),
+                "pass2_fallback_block_count": int(fallback_block_count),
+                "pass2_applied_pixel_count": 0,
                 "residue_pass_truncated_block_count": int(
                     residue_pass_truncated_block_count
+                ),
+                "residue_pass_cap_dropped_candidate_count": int(
+                    dropped_candidate_count
+                ),
+                "residue_pass_structure_guard_block_count": int(
+                    structure_guard_block_count
                 ),
             }
         )
         return inpainted_image, mask, fallback_stats
-    refined_image = imk.convert_scale_abs(refined_image)
-    refined_image = composite_with_edit_mask(inpainted_image, refined_image, residue_mask)
-    merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
+    residue_mask = applied_residue_mask
+    merged_mask = np.where(
+        (mask > 0) | (residue_mask > 0),
+        255,
+        0,
+    ).astype(np.uint8)
     if protected.shape == merged_mask.shape and np.any(protected):
         merged_mask = np.where(
             (merged_mask > 0) & (protected <= 0),
@@ -423,7 +650,19 @@ def refine_bubble_residue_inpaint(
         "residue_mask_cap_pixel_count": residue_mask_cap_pixel_count,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
         "pass2_backend": pass2_backend,
+        "pass2_backend_distribution": dict(backend_distribution),
+        "pass2_applied_block_count": int(applied_block_count),
+        "pass2_fallback_block_count": int(fallback_block_count),
+        "pass2_applied_pixel_count": int(
+            np.count_nonzero(applied_residue_mask)
+        ),
         "residue_pass_truncated_block_count": int(
             residue_pass_truncated_block_count
+        ),
+        "residue_pass_cap_dropped_candidate_count": int(
+            dropped_candidate_count
+        ),
+        "residue_pass_structure_guard_block_count": int(
+            structure_guard_block_count
         ),
     }
