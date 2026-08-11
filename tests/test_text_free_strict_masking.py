@@ -275,9 +275,21 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         def fake_inpainter(input_image, input_mask, _config):
             raise AssertionError("bubble cleanup must use the safe fill backend, not LaMa pass2")
 
-        with mock.patch(
-            "modules.utils.inpaint_cleanup.detect_content_in_bbox",
-            return_value=[(2, 2, 4, 4)],
+        seen_rois: list[tuple[int, int, int, int] | None] = []
+
+        def fill_with_roi(input_image, _edit_mask, *, bubble_roi=None, **_kwargs):
+            seen_rois.append(bubble_roi)
+            return input_image.copy(), "bubble_flat_fill"
+
+        with (
+            mock.patch(
+                "modules.utils.inpaint_cleanup.detect_content_in_bbox",
+                return_value=[(2, 2, 4, 4)],
+            ),
+            mock.patch(
+                "modules.utils.inpaint_cleanup.fill_bubble_edit_mask",
+                side_effect=fill_with_roi,
+            ),
         ):
             cleaned, merged_mask, stats = refine_bubble_residue_inpaint(
                 image,
@@ -294,6 +306,7 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         self.assertGreater(stats["pass2_bubble_candidate_count"], 0)
         self.assertEqual(stats["pass2_text_free_candidate_count"], 0)
         self.assertEqual(stats["pass2_text_free_kept_count"], 0)
+        self.assertEqual(seen_rois, [(0, 0, 10, 10)])
 
     def test_residue_cleanup_does_not_merge_failed_fill_mask(self) -> None:
         image = np.zeros((24, 24, 3), dtype=np.uint8)
@@ -311,7 +324,7 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
             ),
             mock.patch(
                 "modules.utils.inpaint_cleanup.fill_bubble_edit_mask",
-                side_effect=lambda input_image, _edit_mask: (
+                side_effect=lambda input_image, _edit_mask, **_kwargs: (
                     input_image.copy(),
                     ERASE_MODE_BUBBLE_LAMA_FALLBACK,
                 ),
