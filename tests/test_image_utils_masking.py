@@ -52,6 +52,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
                 providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
                 detect_size=1280,
                 model_sha256="model-sha",
+                model_opset=12,
             )
             details = generate_mask(
                 image,
@@ -69,6 +70,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             np.array_equal(details["positive_claim_raw_mask"], full_page_raw)
         )
         self.assertEqual(details["positive_claim_runtime"]["status"], "completed")
+        self.assertEqual(details["positive_claim_runtime"]["model_opset"], 12)
         self.assertEqual(int(np.count_nonzero(details["final_mask"])), 4)
 
     def test_positive_claim_provider_failure_does_not_change_base_mask(self) -> None:

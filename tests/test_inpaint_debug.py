@@ -68,6 +68,9 @@ class _Block:
     mask_strategy_reason: str = ""
     mask_actual_bbox: list[int] | None = None
     mask_actual_pixel_count: int = 0
+    detector_origin: str = ""
+    detector_text_bbox: list[int] | None = None
+    detector_provider: str = ""
 
 
 class InpaintDebugTests(unittest.TestCase):
@@ -547,6 +550,9 @@ class InpaintDebugTests(unittest.TestCase):
             mask_strategy_reason="processing_action_preserve",
             mask_actual_bbox=[1, 1, 4, 5],
             mask_actual_pixel_count=12,
+            detector_origin="direct_text",
+            detector_text_bbox=[1, 1, 4, 5],
+            detector_provider="RTDetrV2ONNXDetection",
         )
 
         metadata = build_inpaint_debug_metadata(
@@ -597,6 +603,12 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["hard_box_applied_count"], 1)
         self.assertEqual(metadata["blocks"][0]["text_class"], "text_bubble")
         self.assertEqual(metadata["blocks"][0]["inpaint_bboxes"], [[1, 1, 4, 5]])
+        self.assertEqual(metadata["blocks"][0]["detector_origin"], "direct_text")
+        self.assertEqual(metadata["blocks"][0]["detector_text_bbox"], [1, 1, 4, 5])
+        self.assertEqual(
+            metadata["blocks"][0]["detector_provider"],
+            "RTDetrV2ONNXDetection",
+        )
         self.assertEqual(metadata["blocks"][0]["mask_anchor_xyxy"], [1, 1, 4, 5])
         self.assertEqual(metadata["blocks"][0]["mask_anchor_source"], "render_original")
         self.assertEqual(metadata["blocks"][0]["mask_anchor_relation"], "render_area")

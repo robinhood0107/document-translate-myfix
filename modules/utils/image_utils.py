@@ -456,6 +456,7 @@ def _ctd_details(
                 "providers": list(positive_result.providers),
                 "detect_size": int(positive_result.detect_size),
                 "model_sha256": positive_result.model_sha256,
+                "model_opset": int(positive_result.model_opset),
                 "pixel_count": int(np.count_nonzero(positive_result.raw_mask)),
             }
         except Exception as exc:
