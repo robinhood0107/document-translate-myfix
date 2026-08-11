@@ -436,8 +436,26 @@ def build_inpaint_debug_metadata(
         "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
         "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
         "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
+        "pass2_backend_distribution": dict(
+            cleanup_stats.get("pass2_backend_distribution", {}) or {}
+        ),
+        "pass2_applied_block_count": int(
+            cleanup_stats.get("pass2_applied_block_count", 0) or 0
+        ),
+        "pass2_fallback_block_count": int(
+            cleanup_stats.get("pass2_fallback_block_count", 0) or 0
+        ),
+        "pass2_applied_pixel_count": int(
+            cleanup_stats.get("pass2_applied_pixel_count", 0) or 0
+        ),
         "residue_pass_truncated_block_count": int(
             cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
+        ),
+        "residue_pass_cap_dropped_candidate_count": int(
+            cleanup_stats.get("residue_pass_cap_dropped_candidate_count", 0) or 0
+        ),
+        "residue_pass_structure_guard_block_count": int(
+            cleanup_stats.get("residue_pass_structure_guard_block_count", 0) or 0
         ),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "duplicate_bubble_inner_fill_applied": bool(duplicate_bubble_inner_fill.get("applied", False)),
