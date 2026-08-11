@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
-from typing import Iterable, Mapping
+from typing import Iterable, Literal, Mapping
 
 import numpy as np
 
@@ -23,6 +23,15 @@ def mask_sha256(mask: np.ndarray) -> str:
     digest = hashlib.sha256()
     digest.update(str(normalized.shape).encode("ascii"))
     digest.update(normalized.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def tensor_sha256(tensor: np.ndarray) -> str:
+    array = np.ascontiguousarray(np.asarray(tensor))
+    digest = hashlib.sha256()
+    digest.update(str(array.shape).encode("ascii"))
+    digest.update(str(array.dtype).encode("ascii"))
+    digest.update(array.tobytes(order="C"))
     return digest.hexdigest()
 
 
@@ -93,6 +102,13 @@ class CandidateMaskResult:
             "stage_shapes": {
                 key: list(value.shape) for key, value in sorted(self.stage_tensors.items())
             },
+            "stage_dtypes": {
+                key: str(value.dtype) for key, value in sorted(self.stage_tensors.items())
+            },
+            "stage_sha256": {
+                key: tensor_sha256(value)
+                for key, value in sorted(self.stage_tensors.items())
+            },
             "runtime": dict(self.runtime),
         }
 
@@ -107,6 +123,148 @@ class Stage1Page:
     ownership_mask: str | None = None
     claim_seed_mask: str | None = None
     no_edit: bool = False
+    target_instances: tuple["TargetInstance", ...] = ()
+    bubble_route_class: str | None = None
+    bubble_interior_mask: str | None = None
+    corner_protect_mask: str | None = None
+    expected_edit: str = "required"
+
+
+@dataclass(frozen=True, slots=True)
+class TargetInstance:
+    instance_id: str
+    mask_path: str
+
+
+ROLE_NAMES = frozenset({"seed", "ownership", "silhouette", "router", "expansion", "fill"})
+ROLE_STATES = frozenset(
+    {
+        "active",
+        "family_complete",
+        "pareto",
+        "dominated",
+        "information_limited",
+        "blocked_asset",
+    }
+)
+ROUTE_DECISIONS = frozenset({"narrow", "broad", "skip"})
+BUBBLE_ROUTE_CLASSES = frozenset(
+    {"clean_flat", "clean_gradient", "texture", "line_art", "ambiguous"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RoleCandidateSpec:
+    """Immutable identity for one provider x role x output variant."""
+
+    candidate_id: str
+    provider: str
+    role: str
+    variant: str
+    code_commit: str
+    model_sha256: str
+    runtime_provider: str
+    preprocessing_contract_sha256: str
+    status: str = "active"
+
+    def __post_init__(self) -> None:
+        values = {
+            "candidate_id": self.candidate_id,
+            "provider": self.provider,
+            "role": self.role,
+            "variant": self.variant,
+            "code_commit": self.code_commit,
+            "model_sha256": self.model_sha256,
+            "runtime_provider": self.runtime_provider,
+            "preprocessing_contract_sha256": self.preprocessing_contract_sha256,
+        }
+        empty = [name for name, value in values.items() if not str(value).strip()]
+        if empty:
+            raise ValueError("role candidate contains empty fields: " + ", ".join(empty))
+        if self.role not in ROLE_NAMES:
+            raise ValueError(f"unknown candidate role: {self.role}")
+        if self.status not in ROLE_STATES:
+            raise ValueError(f"unknown candidate state: {self.status}")
+
+    def cache_payload(self, source_sha256: str) -> dict[str, str]:
+        source = str(source_sha256).strip().lower()
+        if not source:
+            raise ValueError("source SHA is required for the detector cache")
+        return {
+            "source_sha256": source,
+            "code_commit": self.code_commit,
+            "model_sha256": self.model_sha256.lower(),
+            "runtime_provider": self.runtime_provider,
+            "preprocessing_contract_sha256": self.preprocessing_contract_sha256.lower(),
+            "output_variant": self.variant,
+        }
+
+    def cache_key(self, source_sha256: str) -> str:
+        payload = self.cache_payload(source_sha256)
+        digest = hashlib.sha256()
+        for key, value in sorted(payload.items()):
+            digest.update(key.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(value.encode("utf-8"))
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+
+@dataclass(slots=True)
+class BubbleRouteDecision:
+    router_id: str
+    decision: Literal["narrow", "broad", "skip"]
+    edit_mask: np.ndarray
+    interior_mask: np.ndarray | None = None
+    reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not str(self.router_id).strip():
+            raise ValueError("router id must not be empty")
+        if self.decision not in ROUTE_DECISIONS:
+            raise ValueError(f"unknown route decision: {self.decision}")
+        self.edit_mask = binary_mask(self.edit_mask)
+        if self.interior_mask is not None:
+            self.interior_mask = binary_mask(self.interior_mask, self.edit_mask.shape)
+        self.reasons = tuple(str(value) for value in self.reasons)
+
+
+@dataclass(frozen=True, slots=True)
+class FactorizedRunRecord:
+    run_id: str
+    detector_id: str
+    ownership_id: str
+    silhouette_id: str
+    router_id: str
+    expansion_id: str
+    fill_id: str
+    oracle_only: bool
+    status: str
+    metrics: Mapping[str, object]
+    closure_reason: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("factorized run id must not be empty")
+        if self.status not in ROLE_STATES:
+            raise ValueError(f"unknown factorized run state: {self.status}")
+        if self.oracle_only and self.status == "pareto":
+            raise ValueError("oracle-only results cannot be product finalists")
+
+    def as_record(self) -> dict[str, object]:
+        return {
+            "run_id": self.run_id,
+            "detector_id": self.detector_id,
+            "ownership_id": self.ownership_id,
+            "silhouette_id": self.silhouette_id,
+            "router_id": self.router_id,
+            "expansion_id": self.expansion_id,
+            "fill_id": self.fill_id,
+            "oracle_only": self.oracle_only,
+            "status": self.status,
+            "metrics": dict(self.metrics),
+            "closure_reason": self.closure_reason,
+        }
 
 
 def union_masks(masks: Iterable[np.ndarray], shape: tuple[int, int]) -> np.ndarray:

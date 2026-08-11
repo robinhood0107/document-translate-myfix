@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -23,6 +24,7 @@ from benchmarking.inpaint_detector_bakeoff.ballons_ctd import (  # noqa: E402
     BallonsCTDFullPageReference,
     BallonsCTDOriginalReference,
 )
+from benchmarking.inpaint_detector_bakeoff.contracts import RoleCandidateSpec  # noqa: E402
 from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_stage1_manifest,
     run_stage1,
@@ -54,6 +56,27 @@ def _write_json(path: Path, payload: Any) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def _text_sha256(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _current_commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
 
 
 def _existing_edit_paths(manifest_path: Path) -> dict[str, str]:
@@ -140,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default="")
     parser.add_argument("--ballons-root", default="")
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        help="Private detector-output cache. The cache is provenance-keyed and fail-closed.",
+    )
+    parser.add_argument("--code-commit", default="")
     parser.add_argument("--provider", default="CUDAExecutionProvider")
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument("--confidence", type=float, default=0.3)
@@ -161,11 +190,63 @@ def main(argv: list[str] | None = None) -> int:
     try:
         pages = load_stage1_manifest(manifest_path)
         infer, model_path = _candidate(args)
+        preprocessing_contract = {
+            "candidate": args.candidate,
+            "detect_size": int(args.detect_size),
+            "max_batches": int(args.max_batches),
+            "confidence": float(args.confidence),
+            "ctbd_dilate": int(args.ctbd_dilate),
+            "device": args.device,
+        }
+        candidate_spec = RoleCandidateSpec(
+            candidate_id=args.candidate,
+            provider=args.candidate,
+            role="seed",
+            variant="native-bundle-v2",
+            code_commit=args.code_commit or _current_commit(),
+            model_sha256=_sha256(model_path),
+            runtime_provider=(
+                args.provider if args.candidate == "ballons-ctbd" else args.device
+            ),
+            preprocessing_contract_sha256=_text_sha256(preprocessing_contract),
+        )
+        cache_root = args.cache_dir.resolve() if args.cache_dir else output_root / "detector_cache"
+        native_root = output_root / "native_masks"
+
+        def write_native_masks(page, result) -> None:
+            for variant_name, mask in (
+                ("raw", result.raw_mask),
+                ("refined", result.refined_mask),
+                ("dilated", result.dilated_mask),
+            ):
+                path = native_root / variant_name / f"{page.page_id}.png"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if not cv2.imwrite(str(path), mask):
+                    raise OSError(f"failed to write native detector mask: {path}")
+            _write_json(
+                native_root / "metadata" / f"{page.page_id}.json",
+                {
+                    **result.parity_record(),
+                    "boxes": [
+                        {
+                            "xyxy": list(box.xyxy),
+                            "label": box.label,
+                            "score": float(box.score),
+                            "provider": box.provider,
+                        }
+                        for box in result.boxes
+                    ],
+                },
+            )
+
         rows, summary, edits = run_stage1(
             pages,
             infer,
             variant=args.variant,
             existing_edit_paths=_existing_edit_paths(manifest_path),
+            candidate_spec=candidate_spec,
+            cache_root=cache_root,
+            result_sink=write_native_masks,
         )
         edit_root = output_root / "positive_edit_masks"
         edit_root.mkdir(parents=True, exist_ok=True)
@@ -183,6 +264,18 @@ def main(argv: list[str] | None = None) -> int:
                 "sha256": _sha256(model_path),
                 "provider": args.provider if args.candidate == "ballons-ctbd" else args.device,
             },
+            "role_candidate": {
+                "candidate_id": candidate_spec.candidate_id,
+                "provider": candidate_spec.provider,
+                "role": candidate_spec.role,
+                "variant": candidate_spec.variant,
+                "code_commit": candidate_spec.code_commit,
+                "model_sha256": candidate_spec.model_sha256,
+                "runtime_provider": candidate_spec.runtime_provider,
+                "preprocessing_contract_sha256": candidate_spec.preprocessing_contract_sha256,
+                "status": candidate_spec.status,
+            },
+            "detector_cache_root": str(cache_root),
             "summary": summary,
             "pages": rows,
         }

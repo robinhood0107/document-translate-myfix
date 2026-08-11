@@ -1,5 +1,21 @@
-"""Evidence-first detector bake-off contracts and reference adapters."""
+"""Evidence-first detector, router, expansion, and fill bake-off contracts."""
 
-from .contracts import CandidateMaskResult, DetectorBox, Stage1Page
+from .contracts import (
+    BubbleRouteDecision,
+    CandidateMaskResult,
+    DetectorBox,
+    FactorizedRunRecord,
+    RoleCandidateSpec,
+    Stage1Page,
+    TargetInstance,
+)
 
-__all__ = ["CandidateMaskResult", "DetectorBox", "Stage1Page"]
+__all__ = [
+    "BubbleRouteDecision",
+    "CandidateMaskResult",
+    "DetectorBox",
+    "FactorizedRunRecord",
+    "RoleCandidateSpec",
+    "Stage1Page",
+    "TargetInstance",
+]

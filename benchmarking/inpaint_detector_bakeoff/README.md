@@ -1,4 +1,4 @@
-# Inpaint detector bake-off
+# Inpaint role-factorized bake-off
 
 This lab compares detector evidence without producing translated or inpainted
 candidate pages. Raw images, masks, checkpoints, manifests, and review sheets
@@ -56,6 +56,37 @@ Use the scripts in `scripts/` with the managed private-artifact harness. A
 candidate is not a finalist merely because target coverage is high: raw claim
 structure overlap, no-edit false edits, component coverage, ownership leakage,
 runtime, and model provenance are all retained in the Stage 1 record.
+
+## v3 factorized contract
+
+The v3 manifest separates detector seed recall from final edit coverage. Every
+required text instance has its own source-only binary mask, and their union must
+equal `target_text_mask`. Pages also carry a source-only route class, validated
+bubble interior, exact ownership, structure, ambiguous, and optional corner
+protection. Invalid, overlapping, empty, or out-of-bounds evidence fails before
+candidate inference.
+
+Detector output is cached once under a provenance key containing the source,
+code, model, runtime/provider, preprocessing contract, and output-variant SHAs.
+A partial cache entry or any provenance/mask SHA mismatch fails closed.
+
+The role matrix evaluates a control, all single-factor substitutions, and all
+compatible pairwise interactions. It deliberately does not run the full
+Cartesian product. Oracle-mask fill results are marked `oracle_only` and cannot
+become product finalists. Safe non-oracle results are Pareto-ranked only after
+the instance, structure, ownership, no-edit, broad-route, and outside-final hard
+gates pass.
+
+Broad masks are permitted only when a detector seed exists inside authoritative
+ownership and a validated bubble interior, the selected router reports a clean
+bubble, no texture/microtexture/line/ambiguous signal exists, the candidate does
+not touch exact protection, and enough ROI-local background samples exist.
+Otherwise the detector's narrow pixel claim is used. OCR and text boxes never
+create edit pixels.
+
+Fill backends are compared independently on the same oracle or routed edit mask:
+current LaMa, Ballons LaMa, robust flat median, planar gradient, and Telea. Every
+backend result is copied onto an immutable source only at exact edit pixels.
 
 Stage 2 includes a pinned Ballons end-to-end reference. It runs Ballons' native
 CTD refined mask, block order, sequential crops, and whole-bubble flat fill
