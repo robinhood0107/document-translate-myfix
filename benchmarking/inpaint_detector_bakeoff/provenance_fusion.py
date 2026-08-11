@@ -26,6 +26,7 @@ def build_provenance_fusion(
     existing_edit: np.ndarray,
     structure_protect: np.ndarray,
     ambiguous_protect: np.ndarray,
+    subtract_existing_edit: bool = True,
 ) -> ProvenanceFusionResult:
     """Fuse block provenance without turning a detector box into pixel claim.
 
@@ -66,7 +67,7 @@ def build_provenance_fusion(
     positive_claim = np.where((claim > 0) & (ownership > 0), 255, 0).astype(np.uint8)
     positive_edit = np.where(
         (positive_claim > 0)
-        & (existing == 0)
+        & ((existing == 0) | (not subtract_existing_edit))
         & (structure == 0)
         & (ambiguous == 0),
         255,
