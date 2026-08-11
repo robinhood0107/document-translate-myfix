@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from modules.masking import ctd_positive_claim
+from modules.utils.download import ModelDownloader, ModelID
 
 
 class _FakeSession:
@@ -74,4 +75,20 @@ def test_positive_claim_provider_returns_binary_full_page_mask(monkeypatch) -> N
     assert set(np.unique(result.raw_mask)).issubset({0, 255})
     assert np.count_nonzero(result.raw_mask) > 0
     assert result.providers[0] == "CUDAExecutionProvider"
-    assert result.model_sha256 == provider.MODEL_SHA256
+    assert result.model_sha256 == ModelDownloader.registry[
+        ModelID.CTD_POSITIVE_CLAIM_ONNX
+    ].sha256[0]
+    assert result.model_opset == 12
+
+
+def test_positive_claim_model_registry_is_pinned_to_managed_release() -> None:
+    spec = ModelDownloader.registry[ModelID.CTD_POSITIVE_CLAIM_ONNX]
+
+    assert spec.url == (
+        "https://github.com/robinhood0107/document-translate-myfix/"
+        "releases/download/inpaint-ctd-1280-v1/"
+    )
+    assert spec.files == ["comictextdetector-1280.onnx"]
+    assert spec.sha256 == [
+        "c954820c56e611a0470bf9cc119c4a5ffa73c1c15bbdb028c8cd1b58cb008277"
+    ]
