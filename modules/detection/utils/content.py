@@ -127,9 +127,7 @@ def _process_stats_vectorized(
     stats: np.ndarray, 
     image_shape: tuple[int, int], 
     min_area: int, 
-    margin: int = 0,
-    *,
-    inclusive_min_area: bool = False,
+    margin: int = 0
 ) -> np.ndarray:
     """
     Helper to filter stats using NumPy vectorization, with a border margin.
@@ -152,10 +150,7 @@ def _process_stats_vectorized(
     # 1. Create a boolean mask for all conditions
     
     # Condition 1: Area is greater than min_area
-    if inclusive_min_area:
-        area_mask = stats_no_bg[:, imk.CC_STAT_AREA] >= min_area
-    else:
-        area_mask = stats_no_bg[:, imk.CC_STAT_AREA] > min_area
+    area_mask = stats_no_bg[:, imk.CC_STAT_AREA] > min_area
 
     # Condition 2: Bounding box is NOT within the margin of the border.
     x1 = stats_no_bg[:, imk.CC_STAT_LEFT]
@@ -191,9 +186,7 @@ def _process_stats_vectorized(
 def detect_content_in_bbox(
     image: np.ndarray, 
     min_area: int = 10, 
-    margin: int = 1,
-    *,
-    inclusive_min_area: bool = False,
+    margin: int = 1
 ) -> np.ndarray:
     """
     Detects content using mahotas stats and fast NumPy vectorized filtering.
@@ -222,20 +215,8 @@ def detect_content_in_bbox(
     image_shape = image.shape[:2]
 
     # Pass the new margin parameter to the helper function
-    bboxes_white = _process_stats_vectorized(
-        stats_white,
-        image_shape,
-        min_area,
-        margin,
-        inclusive_min_area=inclusive_min_area,
-    )
-    bboxes_black = _process_stats_vectorized(
-        stats_black,
-        image_shape,
-        min_area,
-        margin,
-        inclusive_min_area=inclusive_min_area,
-    )
+    bboxes_white = _process_stats_vectorized(stats_white, image_shape, min_area, margin)
+    bboxes_black = _process_stats_vectorized(stats_black, image_shape, min_area, margin)
     
     # Combine the results
     if bboxes_white.shape[0] > 0 and bboxes_black.shape[0] > 0:
