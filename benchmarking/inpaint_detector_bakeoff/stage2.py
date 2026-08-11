@@ -1,10 +1,306 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from itertools import combinations
+from typing import Callable, Iterable, Mapping, Sequence
+
 import cv2
 import numpy as np
 
-from .contracts import binary_mask
+from .contracts import FactorizedRunRecord, binary_mask
 from .stage1 import PageMasks
+
+
+FillCallable = Callable[[np.ndarray, np.ndarray], np.ndarray]
+
+
+def _local_fill_domain(
+    shape: tuple[int, int],
+    edit: np.ndarray,
+    interior: np.ndarray | None,
+) -> np.ndarray:
+    if interior is not None and np.any(interior):
+        return binary_mask(interior, shape)
+    points = cv2.findNonZero((edit > 0).astype(np.uint8))
+    if points is None:
+        return np.zeros(shape, dtype=np.uint8)
+    x, y, width, height = cv2.boundingRect(points)
+    pad = max(12, int(round(max(width, height) * 0.5)))
+    x1 = max(0, x - pad)
+    y1 = max(0, y - pad)
+    x2 = min(shape[1], x + width + pad)
+    y2 = min(shape[0], y + height + pad)
+    domain = np.zeros(shape, dtype=np.uint8)
+    domain[y1:y2, x1:x2] = 255
+    return domain
+
+
+def _fill_samples(
+    source: np.ndarray,
+    edit: np.ndarray,
+    domain: np.ndarray,
+    exclude: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    allowed = (domain > 0) & (edit == 0) & (exclude == 0)
+    ys, xs = np.where(allowed)
+    return ys, xs, np.asarray(source)[ys, xs, :3]
+
+
+def fill_factorized_mask(
+    source: np.ndarray,
+    edit_mask: np.ndarray,
+    *,
+    backend: str,
+    interior_mask: np.ndarray | None = None,
+    background_exclude_mask: np.ndarray | None = None,
+    lama_fill: FillCallable | None = None,
+    minimum_samples: int = 32,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Evaluate one fill backend while preserving immutable exact-mask composite."""
+
+    original = np.ascontiguousarray(np.asarray(source)[:, :, :3])
+    shape = original.shape[:2]
+    edit = binary_mask(edit_mask, shape)
+    if not np.any(edit):
+        return original.copy(), {
+            "backend": backend,
+            "applied": False,
+            "reason": "empty_edit_mask",
+            "edit_pixel_count": 0,
+            "sample_pixel_count": 0,
+        }
+    interior = binary_mask(interior_mask, shape) if interior_mask is not None else None
+    exclude = (
+        binary_mask(background_exclude_mask, shape)
+        if background_exclude_mask is not None
+        else np.zeros(shape, dtype=np.uint8)
+    )
+    domain = _local_fill_domain(shape, edit, interior)
+    ys, xs, samples = _fill_samples(original, edit, domain, exclude)
+    sample_count = int(samples.shape[0])
+    normalized = str(backend).strip().lower()
+    generated = original.copy()
+    diagnostics: dict[str, object] = {
+        "backend": normalized,
+        "applied": False,
+        "reason": "",
+        "edit_pixel_count": int(np.count_nonzero(edit)),
+        "sample_pixel_count": sample_count,
+    }
+
+    if normalized in {"current_lama", "ballons_lama"}:
+        if lama_fill is None:
+            raise ValueError(f"{normalized} requires a LaMa fill callback")
+        generated = np.asarray(lama_fill(original.copy(), edit.copy()))[:, :, :3]
+        if generated.shape != original.shape:
+            raise ValueError("LaMa fill callback returned an invalid image shape")
+    elif sample_count < int(minimum_samples):
+        diagnostics["reason"] = "insufficient_roi_background_samples"
+        return original.copy(), diagnostics
+    elif normalized == "robust_flat_median":
+        color = np.median(samples.astype(np.float32), axis=0)
+        generated[edit > 0] = np.clip(np.rint(color), 0, 255).astype(np.uint8)
+    elif normalized == "planar_gradient":
+        if sample_count < max(64, int(minimum_samples)):
+            diagnostics["reason"] = "insufficient_gradient_samples"
+            return original.copy(), diagnostics
+        if int(np.ptp(xs)) < 4 or int(np.ptp(ys)) < 4:
+            diagnostics["reason"] = "insufficient_gradient_spread"
+            return original.copy(), diagnostics
+        if sample_count > 4096:
+            indices = np.linspace(0, sample_count - 1, 4096, dtype=np.int64)
+            fit_xs = xs[indices]
+            fit_ys = ys[indices]
+            fit_samples = samples[indices]
+        else:
+            fit_xs, fit_ys, fit_samples = xs, ys, samples
+        design = np.column_stack(
+            (
+                np.ones(fit_xs.shape[0], dtype=np.float64),
+                fit_xs.astype(np.float64),
+                fit_ys.astype(np.float64),
+            )
+        )
+        target_y, target_x = np.where(edit > 0)
+        target_design = np.column_stack(
+            (
+                np.ones(target_x.shape[0], dtype=np.float64),
+                target_x.astype(np.float64),
+                target_y.astype(np.float64),
+            )
+        )
+        for channel in range(3):
+            coefficients, *_rest = np.linalg.lstsq(
+                design,
+                fit_samples[:, channel].astype(np.float64),
+                rcond=None,
+            )
+            values = target_design @ coefficients
+            generated[target_y, target_x, channel] = np.clip(
+                np.rint(values), 0, 255
+            ).astype(np.uint8)
+    elif normalized == "telea":
+        neutralized = original.copy()
+        neutral_color = np.median(samples.astype(np.float32), axis=0)
+        neutralized[(domain > 0) & (exclude > 0)] = np.clip(
+            np.rint(neutral_color), 0, 255
+        ).astype(np.uint8)
+        generated = cv2.inpaint(neutralized, edit, 3.0, cv2.INPAINT_TELEA)
+    else:
+        raise KeyError(f"unknown fill backend: {backend}")
+
+    candidate = original.copy()
+    candidate[edit > 0] = generated[edit > 0]
+    diagnostics["applied"] = True
+    return np.ascontiguousarray(candidate), diagnostics
+
+
+def reconstruction_error(
+    candidate: np.ndarray,
+    known_background: np.ndarray,
+    edit_mask: np.ndarray,
+) -> float | None:
+    left = np.asarray(candidate)[:, :, :3].astype(np.float32)
+    right = np.asarray(known_background)[:, :, :3].astype(np.float32)
+    if left.shape != right.shape:
+        raise ValueError("known-background image shape mismatch")
+    edit = binary_mask(edit_mask, left.shape[:2]) > 0
+    if not np.any(edit):
+        return None
+    delta = left[edit] - right[edit]
+    return float(np.mean(delta * delta))
+
+
+def build_factorized_matrix(
+    axes: Mapping[str, Sequence[str]],
+    controls: Mapping[str, str],
+) -> list[dict[str, str]]:
+    """Return control, all single-factor, and compatible pairwise combinations."""
+
+    ordered_axes = tuple(controls)
+    if set(axes) != set(ordered_axes):
+        raise ValueError("matrix axes and controls must have the same role names")
+    for role in ordered_axes:
+        if controls[role] not in axes[role]:
+            raise ValueError(f"control is missing from matrix axis: {role}")
+    records: list[dict[str, str]] = [dict(controls)]
+    seen = {tuple((role, controls[role]) for role in ordered_axes)}
+
+    def add(values: dict[str, str]) -> None:
+        key = tuple((role, values[role]) for role in ordered_axes)
+        if key not in seen:
+            seen.add(key)
+            records.append(values)
+
+    alternatives = {
+        role: [value for value in axes[role] if value != controls[role]]
+        for role in ordered_axes
+    }
+    for role in ordered_axes:
+        for value in alternatives[role]:
+            candidate = dict(controls)
+            candidate[role] = value
+            add(candidate)
+    for left_role, right_role in combinations(ordered_axes, 2):
+        for left_value in alternatives[left_role]:
+            for right_value in alternatives[right_role]:
+                candidate = dict(controls)
+                candidate[left_role] = left_value
+                candidate[right_role] = right_value
+                add(candidate)
+    return records
+
+
+def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
+    zero_metrics = (
+        "protected_structure_overlap",
+        "protected_structure_changed",
+        "ambiguous_structure_overlap",
+        "ambiguous_structure_changed",
+        "outside_final_changed",
+        "broad_route_false_positive",
+        "no_edit_false_edit",
+        "required_skip_count",
+        "missed_target_instance_count",
+        "page_residue_worsened_count",
+    )
+    if any(int(metrics.get(name, 0) or 0) != 0 for name in zero_metrics):
+        return False
+    coverage = metrics.get("aggregate_target_coverage")
+    minimum = metrics.get("minimum_target_instance_coverage")
+    seed_recall = metrics.get("target_instance_seed_recall")
+    aggregate_residue = metrics.get("aggregate_residue_score")
+    baseline_residue = metrics.get("baseline_aggregate_residue_score")
+    residue_gate_applicable = bool(metrics.get("residue_gate_applicable", True))
+    residue_improved = not residue_gate_applicable or (
+        aggregate_residue is not None
+        and baseline_residue is not None
+        and float(aggregate_residue) < float(baseline_residue)
+    )
+    return (
+        (coverage is None or float(coverage) >= 0.98)
+        and (minimum is None or float(minimum) >= 0.98)
+        and (seed_recall is None or float(seed_recall) >= 1.0)
+        and residue_improved
+    )
+
+
+def select_pareto_records(
+    records: Iterable[FactorizedRunRecord],
+) -> list[FactorizedRunRecord]:
+    """Mark safe non-oracle records Pareto/dominated on residue, reconstruction, time."""
+
+    rows = list(records)
+    eligible = [
+        row for row in rows if not row.oracle_only and _hard_gate_passes(row.metrics)
+    ]
+
+    def axes(row: FactorizedRunRecord) -> tuple[float, float, float, float]:
+        metrics = row.metrics
+        def metric(name: str, default: float) -> float:
+            value = metrics.get(name)
+            return default if value is None else float(value)
+
+        return (
+            -metric("aggregate_target_coverage", 0.0),
+            metric("aggregate_residue_score", float("inf")),
+            metric("reconstruction_mse", float("inf")),
+            metric("runtime_seconds", float("inf")),
+        )
+
+    pareto_ids: set[str] = set()
+    for candidate in eligible:
+        current = axes(candidate)
+        dominated = False
+        for other in eligible:
+            if other.run_id == candidate.run_id:
+                continue
+            comparison = axes(other)
+            if all(left <= right for left, right in zip(comparison, current)) and any(
+                left < right for left, right in zip(comparison, current)
+            ):
+                dominated = True
+                break
+        if not dominated:
+            pareto_ids.add(candidate.run_id)
+
+    output: list[FactorizedRunRecord] = []
+    for row in rows:
+        if row.oracle_only:
+            output.append(replace(row, status="family_complete"))
+        elif row.run_id in pareto_ids:
+            output.append(replace(row, status="pareto"))
+        elif row in eligible:
+            output.append(replace(row, status="dominated"))
+        else:
+            output.append(
+                replace(
+                    row,
+                    status="dominated",
+                    closure_reason=row.closure_reason or "hard_gate_failed",
+                )
+            )
+    return output
 
 
 def composite_positive_result(
