@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import pytest
+
+import benchmarking.inpaint_detector_bakeoff.ballons_e2e as ballons_e2e
+from benchmarking.inpaint_detector_bakeoff.ballons_e2e import (
+    BallonsEndToEndReference,
+)
 
 from benchmarking.inpaint_detector_bakeoff.ballons_ctbd import (
     CTBDSettings,
@@ -27,6 +33,11 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     positive_edit_from_claim,
     score_page,
 )
+from benchmarking.inpaint_detector_bakeoff.stage2 import (
+    changed_mask,
+    residue_score,
+    score_stage2_page,
+)
 from benchmarking.inpaint_detector_bakeoff.sickzil import (
     class_map_to_mask,
     modulo_padded,
@@ -40,6 +51,33 @@ def _tensor_sha256(*arrays: np.ndarray) -> str:
     for array in arrays:
         digest.update(np.ascontiguousarray(array).tobytes())
     return digest.hexdigest()
+
+
+def test_ballons_e2e_routing_retains_native_whole_bubble_flat_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = BallonsEndToEndReference.__new__(BallonsEndToEndReference)
+    reference.inpainter = SimpleNamespace()
+    image = np.full((16, 16, 3), 150, dtype=np.uint8)
+    image[6, 6] = 220
+    mask = np.zeros((16, 16), dtype=np.uint8)
+    mask[7:9, 7:9] = 255
+
+    def fake_extract(_image: np.ndarray, local_mask: np.ndarray):
+        balloon = np.full(local_mask.shape, 255, dtype=np.uint8)
+        non_text = np.zeros(local_mask.shape, dtype=np.uint8)
+        non_text[0, 0] = 255
+        return balloon, non_text
+
+    monkeypatch.setattr(ballons_e2e, "extract_ballon_mask", fake_extract)
+    result = reference._inpaint_with_ballons_routing(
+        image,
+        mask,
+        (SimpleNamespace(xyxy=[5, 5, 11, 11]),),
+    )
+
+    assert np.array_equal(result[7:9, 7:9], np.full((2, 2, 3), 150, np.uint8))
+    assert result[6, 6].tolist() == [150, 150, 150]
 
 
 def test_ballons_ctbd_preprocess_golden_is_bgr_to_rgb_resize() -> None:
@@ -235,6 +273,58 @@ def test_manifest_v2_masks_must_be_pairwise_disjoint() -> None:
 
     with pytest.raises(ValueError, match="evaluation masks overlap"):
         assert_disjoint_masks({"target": left, "protected": right})
+
+
+def test_stage2_scores_actual_structure_damage_and_mask_outside_change() -> None:
+    shape = (24, 32)
+    source = np.full((*shape, 3), 180, dtype=np.uint8)
+    candidate = source.copy()
+    candidate[4:8, 5:9] = 120
+    candidate[15:18, 22:26] = 60
+    detector = np.zeros(shape, dtype=np.uint8)
+    detector[4:8, 5:9] = 255
+    target = detector.copy()
+    protected = np.zeros(shape, dtype=np.uint8)
+    protected[15:18, 22:26] = 255
+    zeros = np.zeros(shape, dtype=np.uint8)
+    masks = PageMasks(
+        target,
+        protected,
+        zeros,
+        np.full(shape, 255, np.uint8),
+        np.full(shape, 255, np.uint8),
+        zeros,
+    )
+
+    record, changed = score_stage2_page(
+        source,
+        candidate,
+        detector,
+        masks,
+    )
+
+    assert np.count_nonzero(changed_mask(source, candidate)) == 28
+    assert np.count_nonzero(changed) == 28
+    assert record["target_detector_coverage"] == 1.0
+    assert record["minimum_target_component_coverage"] == 1.0
+    assert record["protected_changed_pixel_count"] == 12
+    assert record["changed_outside_detector_mask_pixel_count"] == 12
+
+
+def test_stage2_residue_score_decreases_when_target_contrast_is_removed() -> None:
+    source = np.full((48, 64, 3), 230, dtype=np.uint8)
+    cv2.putText(source, "A", (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 20, 20), 2)
+    target = np.zeros(source.shape[:2], dtype=np.uint8)
+    target[12:38, 16:40] = 255
+    removed = source.copy()
+    removed[target > 0] = 230
+
+    baseline, _baseline_sum, count = residue_score(source, source, target)
+    candidate, _candidate_sum, candidate_count = residue_score(source, removed, target)
+
+    assert count == candidate_count
+    assert baseline == pytest.approx(1.0)
+    assert candidate is not None and candidate < baseline
 
 
 def test_ownership_reconstruction_uses_bubble_or_text_free_envelope_without_claiming_page() -> None:

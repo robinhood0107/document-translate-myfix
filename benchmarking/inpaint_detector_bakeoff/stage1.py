@@ -151,7 +151,13 @@ def _component_coverages(target: np.ndarray, claim: np.ndarray) -> list[float]:
         area = int(stats[index, cv2.CC_STAT_AREA])
         if area <= 0:
             continue
-        covered = int(np.count_nonzero((labels == index) & (claim > 0)))
+        x = int(stats[index, cv2.CC_STAT_LEFT])
+        y = int(stats[index, cv2.CC_STAT_TOP])
+        width = int(stats[index, cv2.CC_STAT_WIDTH])
+        height = int(stats[index, cv2.CC_STAT_HEIGHT])
+        component = labels[y : y + height, x : x + width] == index
+        local_claim = claim[y : y + height, x : x + width] > 0
+        covered = int(np.count_nonzero(component & local_claim))
         coverages.append(float(covered) / float(area))
     return coverages
 
