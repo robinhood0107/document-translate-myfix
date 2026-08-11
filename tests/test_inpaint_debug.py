@@ -444,8 +444,18 @@ class InpaintDebugTests(unittest.TestCase):
                 derived_proxy_changed_exists = record[
                     "derived_structure_proxy_changed_mask"
                 ].is_file()
+                ambiguous_mask_exists = record[
+                    "ambiguous_structure_mask"
+                ].is_file()
+                ambiguous_changed_exists = record[
+                    "ambiguous_structure_changed_mask"
+                ].is_file()
 
         self.assertIs(run_lama.call_args.kwargs["check_need_inpaint"], True)
+        np.testing.assert_array_equal(
+            run_lama.call_args.kwargs["raw_source_mask"],
+            details["raw_mask"],
+        )
         duplicate_fill.assert_called_once()
         self.assertEqual(record["hd_strategy"], "Original")
         self.assertEqual(record["refiner_device"], "cuda")
@@ -468,6 +478,8 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertTrue(routing_changed_exists)
         self.assertTrue(derived_proxy_exists)
         self.assertTrue(derived_proxy_changed_exists)
+        self.assertTrue(ambiguous_mask_exists)
+        self.assertTrue(ambiguous_changed_exists)
         self.assertEqual(record["routing_structure_protect_pixel_count"], 0)
         self.assertEqual(record["routing_source_owned_pixel_count"], 0)
         self.assertEqual(record["routing_structure_changed_pixel_count_exact"], 0)

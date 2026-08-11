@@ -31,6 +31,18 @@ class MaskPatch:
     def pixel_count(self) -> int:
         return int(np.count_nonzero(self.mask))
 
+    @property
+    def roi(self) -> tuple[int, int, int, int]:
+        """Compatibility alias for the evidence-first contract name."""
+
+        return self.xyxy
+
+    @property
+    def local_mask(self) -> np.ndarray:
+        """Compatibility alias for the sparse ROI-local mask payload."""
+
+        return self.mask
+
 
 @dataclass(slots=True)
 class BlockInpaintEvidence:
@@ -38,9 +50,27 @@ class BlockInpaintEvidence:
     block_index: int | None
     erase_mode: str = ""
     skipped_reason: str = ""
+    source_raw_owned: MaskPatch | None = None
     source_owned: MaskPatch | None = None
     structure_protect: MaskPatch | None = None
     ownership_protect: MaskPatch | None = None
+    positive_claim: MaskPatch | None = None
+    positive_edit: MaskPatch | None = None
+    claim_providers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.block_id = str(self.block_id or "")
+        if self.block_index is not None:
+            self.block_index = int(self.block_index)
+        self.erase_mode = str(self.erase_mode or "")
+        self.skipped_reason = str(self.skipped_reason or "")
+        self.claim_providers = tuple(
+            dict.fromkeys(
+                str(provider).strip()
+                for provider in self.claim_providers
+                if str(provider).strip()
+            )
+        )
 
 
 @dataclass(slots=True)

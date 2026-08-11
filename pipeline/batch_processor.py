@@ -1901,6 +1901,7 @@ class BatchProcessor:
                         mask,
                         inpaint_blocks,
                         config=config,
+                        raw_source_mask=raw_mask,
                         protected_corner_mask=mask_details.get(
                             "protected_corner_mask"
                         ),
@@ -1920,7 +1921,17 @@ class BatchProcessor:
                             0,
                         ).astype(np.uint8)
                     cleanup_stats = {
-                        "autonomous_residue_cleanup": "disabled"
+                        "autonomous_residue_cleanup": "disabled",
+                        "routing_evidence_block_count": len(
+                            tuple(
+                                getattr(
+                                    self.inpainting,
+                                    "last_inpaint_evidence",
+                                    (),
+                                )
+                                or ()
+                            )
+                        ),
                     }
                     self._report_residue_cleanup(
                         index=index,
@@ -1954,6 +1965,7 @@ class BatchProcessor:
                         inpaint_input_img,
                         mask,
                     )
+                    self.inpainting.last_inpaint_evidence = ()
                 else:
                     raw_mask = np.zeros(
                         image.shape[:2],

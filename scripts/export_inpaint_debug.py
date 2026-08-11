@@ -124,6 +124,7 @@ SAFE_PROCESSING_CAUSE_CODES = frozenset(
         "manifest_image_invalid",
         "manifest_page_id_invalid",
         "manifest_page_invalid",
+        "manifest_page_schema_key_invalid",
         "manifest_page_unknown_key",
         "manifest_pages_invalid",
         "manifest_parent_seal_invalid",
@@ -139,6 +140,7 @@ SAFE_PROCESSING_CAUSE_CODES = frozenset(
         "manifest_source_lock_invalid",
         "manifest_source_lock_mismatch",
         "manifest_source_missing",
+        "manifest_annotation_masks_overlap",
         "manifest_split_role_invalid",
         "manifest_unknown_key",
         "manifest_unreadable",
@@ -581,6 +583,7 @@ def _process_image(
                 blocks,
                 inpainter,
                 config,
+                raw_source_mask=raw_mask,
                 check_need_inpaint=True,
                 protected_corner_mask=mask_details.get("protected_corner_mask"),
             )
@@ -623,12 +626,17 @@ def _process_image(
     evaluation_final_mask = normalize_edit_mask(final_mask, image.shape)
     explicit_residue_target = _safe_reference_mask(
         page_spec,
-        "target_glyph_mask",
+        "target_text_mask",
         image.shape,
     )
     annotated_protected_structure = _safe_reference_mask(
         page_spec,
         "protected_structure_mask",
+        image.shape,
+    )
+    annotated_ambiguous_structure = _safe_reference_mask(
+        page_spec,
+        "ambiguous_structure_mask",
         image.shape,
     )
     protected_structure_is_annotation = annotated_protected_structure is not None
@@ -668,6 +676,33 @@ def _process_image(
         "source_owned",
         image.shape,
     )
+    routing_source_raw_owned = combine_evidence_patches(
+        routing_evidence,
+        "source_raw_owned",
+        image.shape,
+    )
+    routing_ownership_protect = combine_evidence_patches(
+        routing_evidence,
+        "ownership_protect",
+        image.shape,
+    )
+    routing_positive_claim = combine_evidence_patches(
+        routing_evidence,
+        "positive_claim",
+        image.shape,
+    )
+    routing_positive_edit = combine_evidence_patches(
+        routing_evidence,
+        "positive_edit",
+        image.shape,
+    )
+    routing_claim_providers = sorted(
+        {
+            provider
+            for item in routing_evidence
+            for provider in item.claim_providers
+        }
+    )
     evaluation_protected_structure = (
         annotated_protected_structure
         if annotated_protected_structure is not None
@@ -700,6 +735,19 @@ def _process_image(
             "protected_structure_annotation_available": bool(
                 protected_structure_is_annotation
             ),
+            "ambiguous_structure_annotation_available": bool(
+                annotated_ambiguous_structure is not None
+            ),
+            "ambiguous_structure_changed_pixel_count_exact": (
+                int(
+                    np.count_nonzero(
+                        (annotated_ambiguous_structure > 0)
+                        & changed_exact_for_structure
+                    )
+                )
+                if annotated_ambiguous_structure is not None
+                else None
+            ),
             "protected_structure_annotation_changed_pixel_count_exact": (
                 int(
                     np.count_nonzero(
@@ -725,6 +773,19 @@ def _process_image(
             "routing_source_owned_pixel_count": int(
                 np.count_nonzero(routing_source_owned)
             ),
+            "routing_source_raw_owned_pixel_count": int(
+                np.count_nonzero(routing_source_raw_owned)
+            ),
+            "routing_ownership_protect_pixel_count": int(
+                np.count_nonzero(routing_ownership_protect)
+            ),
+            "routing_positive_claim_pixel_count": int(
+                np.count_nonzero(routing_positive_claim)
+            ),
+            "routing_positive_edit_pixel_count": int(
+                np.count_nonzero(routing_positive_edit)
+            ),
+            "routing_claim_providers": routing_claim_providers,
             "routing_structure_changed_pixel_count_exact": int(
                 np.count_nonzero(
                     (routing_structure_protect > 0)
@@ -946,12 +1007,19 @@ def _process_image(
     protected_corner_path = corpus_output / "protected_corner_masks" / f"{page_base_name}_protected_corners.png"
     routing_structure_path = corpus_output / "routing_structure_masks" / f"{page_base_name}_routing_structure.png"
     routing_source_owned_path = corpus_output / "routing_source_owned_masks" / f"{page_base_name}_routing_source_owned.png"
+    routing_source_raw_owned_path = corpus_output / "routing_source_raw_owned_masks" / f"{page_base_name}_routing_source_raw_owned.png"
+    routing_ownership_protect_path = corpus_output / "routing_ownership_protect_masks" / f"{page_base_name}_routing_ownership_protect.png"
+    routing_positive_claim_path = corpus_output / "routing_positive_claim_masks" / f"{page_base_name}_routing_positive_claim.png"
+    routing_positive_edit_path = corpus_output / "routing_positive_edit_masks" / f"{page_base_name}_routing_positive_edit.png"
     changed_routing_structure_path = corpus_output / "routing_structure_changes" / f"{page_base_name}_routing_structure_changed.png"
     structure_contact_sheet_path = corpus_output / "routing_structure_contact_sheets" / f"{page_base_name}_routing_structure_changes.png"
     structure_source_contact_sheet_path = corpus_output / "routing_structure_source_contact_sheets" / f"{page_base_name}_routing_structure_source.png"
     derived_structure_path = corpus_output / "derived_structure_proxy_masks" / f"{page_base_name}_derived_structure_proxy.png"
     changed_derived_structure_path = corpus_output / "derived_structure_proxy_changes" / f"{page_base_name}_derived_structure_proxy_changed.png"
     derived_structure_contact_sheet_path = corpus_output / "derived_structure_proxy_contact_sheets" / f"{page_base_name}_derived_structure_proxy_changes.png"
+    ambiguous_structure_path = corpus_output / "ambiguous_structure_masks" / f"{page_base_name}_ambiguous_structure.png"
+    changed_ambiguous_structure_path = corpus_output / "ambiguous_structure_changes" / f"{page_base_name}_ambiguous_structure_changed.png"
+    ambiguous_structure_contact_sheet_path = corpus_output / "ambiguous_structure_contact_sheets" / f"{page_base_name}_ambiguous_structure_changes.png"
     write_started = perf_counter()
     cleaned_for_write = ensure_three_channel(cleaned)
     _write_image(source_path, image)
@@ -969,11 +1037,29 @@ def _process_image(
         255,
         0,
     ).astype(np.uint8)
+    normalized_ambiguous_structure = normalize_edit_mask(
+        annotated_ambiguous_structure,
+        image.shape,
+    )
+    changed_ambiguous_structure = np.where(
+        (normalized_ambiguous_structure > 0) & changed_exact_for_structure,
+        255,
+        0,
+    ).astype(np.uint8)
     _write_image(routing_structure_path, routing_structure_protect)
     _write_image(routing_source_owned_path, routing_source_owned)
+    _write_image(routing_source_raw_owned_path, routing_source_raw_owned)
+    _write_image(routing_ownership_protect_path, routing_ownership_protect)
+    _write_image(routing_positive_claim_path, routing_positive_claim)
+    _write_image(routing_positive_edit_path, routing_positive_edit)
     _write_image(changed_routing_structure_path, changed_routing_structure)
     _write_image(derived_structure_path, derived_protected_structure)
     _write_image(changed_derived_structure_path, changed_derived_structure)
+    _write_image(ambiguous_structure_path, normalized_ambiguous_structure)
+    _write_image(
+        changed_ambiguous_structure_path,
+        changed_ambiguous_structure,
+    )
     written_structure_contact_sheet = _write_structure_change_contact_sheet(
         image,
         cleaned_for_write,
@@ -992,6 +1078,12 @@ def _process_image(
         cleaned_for_write,
         changed_derived_structure,
         derived_structure_contact_sheet_path,
+    )
+    written_ambiguous_structure_contact_sheet = _write_structure_change_contact_sheet(
+        image,
+        cleaned_for_write,
+        changed_ambiguous_structure,
+        ambiguous_structure_contact_sheet_path,
     )
     with Image.open(cleaned_path) as saved_cleaned:
         cleaned_artifact_pixels = np.asarray(saved_cleaned.convert("RGB")).copy()
@@ -1092,12 +1184,19 @@ def _process_image(
         "protected_corner_mask": protected_corner_path,
         "routing_structure_mask": routing_structure_path,
         "routing_source_owned_mask": routing_source_owned_path,
+        "routing_source_raw_owned_mask": routing_source_raw_owned_path,
+        "routing_ownership_protect_mask": routing_ownership_protect_path,
+        "routing_positive_claim_mask": routing_positive_claim_path,
+        "routing_positive_edit_mask": routing_positive_edit_path,
         "routing_structure_changed_mask": changed_routing_structure_path,
         "routing_structure_contact_sheet": written_structure_contact_sheet,
         "routing_structure_source_contact_sheet": written_structure_source_contact_sheet,
         "derived_structure_proxy_mask": derived_structure_path,
         "derived_structure_proxy_changed_mask": changed_derived_structure_path,
         "derived_structure_proxy_contact_sheet": written_derived_structure_contact_sheet,
+        "ambiguous_structure_mask": ambiguous_structure_path,
+        "ambiguous_structure_changed_mask": changed_ambiguous_structure_path,
+        "ambiguous_structure_contact_sheet": written_ambiguous_structure_contact_sheet,
         "detector_overlay": corpus_output / "detector_overlays" / f"{page_base_name}_detector_overlay.png",
         "raw_mask": corpus_output / "raw_masks" / f"{page_base_name}_raw_mask.png",
         "mask_overlay": corpus_output / "mask_overlays" / f"{page_base_name}_mask_overlay.png",
@@ -1476,6 +1575,12 @@ def _required_gate_failures(
                         f"{corpus_name}:holdout_not_source_review_finalized"
                     )
         for corpus_name, records in records_by_corpus.items():
+            manifest_schema_version = int(
+                dict(summary.get("manifest_corpora") or {})
+                .get(corpus_name, {})
+                .get("schema_version", 1)
+                or 1
+            )
             for record in records:
                 page_name = f"{corpus_name}/{record.get('page_id', 'page')}"
                 for field in QUALITY_GATE_REQUIRED_FIELDS:
@@ -1504,6 +1609,12 @@ def _required_gate_failures(
                     or 0
                 ) != 0:
                     failures.append(f"{page_name}:protected_structure_changed")
+                if manifest_schema_version >= 2 and not bool(
+                    record.get("ambiguous_structure_annotation_available", False)
+                ):
+                    failures.append(
+                        f"{page_name}:ambiguous_structure_annotation_missing"
+                    )
                 if int(
                     record.get("residue_pass_truncated_block_count", 0) or 0
                 ) != 0:
@@ -2172,6 +2283,7 @@ def main() -> int:
             "manifest_corpora": (
                 {
                     manifest.corpus_id: {
+                        "schema_version": manifest.schema_version,
                         "expected_count": manifest.expected_count,
                         "manifest_sha256": manifest.manifest_sha256,
                         "split_role": manifest.split_role,

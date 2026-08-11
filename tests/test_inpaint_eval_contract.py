@@ -411,6 +411,130 @@ def test_source_only_evidence_manifest_seals_new_references_without_overwrite(
     assert sealed.pages[0].protected_structure_mask is not None
 
 
+def test_manifest_v2_requires_three_disjoint_annotation_masks(
+    tmp_path: Path,
+) -> None:
+    source = _write_image(tmp_path / "source.png")
+    target = np.zeros((12, 16), dtype=np.uint8)
+    target[1:3, 1:4] = 255
+    protected = np.zeros_like(target)
+    protected[5:7, 2:10] = 255
+    ambiguous = np.zeros_like(target)
+    ambiguous[9:11, 12:15] = 255
+    references = {
+        "target_text_mask": _write_image(tmp_path / "target.png", target),
+        "protected_structure_mask": _write_image(
+            tmp_path / "protected.png", protected
+        ),
+        "ambiguous_structure_mask": _write_image(
+            tmp_path / "ambiguous.png", ambiguous
+        ),
+    }
+    payload = _manifest_payload(source)
+    payload["schema_version"] = 2
+    payload["pages"][0].update(
+        {
+            field: {"path": str(path), "sha256": sha256_file(path)}
+            for field, path in references.items()
+        }
+    )
+
+    manifest = load_eval_manifest(
+        _write_manifest(tmp_path / "manifest-v2.json", payload)
+    )
+
+    assert manifest.schema_version == 2
+    page = manifest.pages[0]
+    assert page.target_text_mask is not None
+    assert page.target_glyph_mask is page.target_text_mask
+    assert page.protected_structure_mask is not None
+    assert page.ambiguous_structure_mask is not None
+
+    overlapping = ambiguous.copy()
+    overlapping[1, 1] = 255
+    overlap_path = _write_image(tmp_path / "ambiguous-overlap.png", overlapping)
+    payload["pages"][0]["ambiguous_structure_mask"] = {
+        "path": str(overlap_path),
+        "sha256": sha256_file(overlap_path),
+    }
+    with pytest.raises(InpaintEvalManifestError) as raised:
+        load_eval_manifest(
+            _write_manifest(tmp_path / "manifest-v2-overlap.json", payload)
+        )
+    assert raised.value.code == "manifest_annotation_masks_overlap"
+
+
+def test_source_only_evidence_review_v2_migrates_v1_target_name(
+    tmp_path: Path,
+) -> None:
+    source = _write_image(tmp_path / "source.png")
+    baseline = _write_image(tmp_path / "baseline.png")
+    baseline_mask = _write_image(
+        tmp_path / "baseline-mask.png",
+        np.zeros((12, 16), dtype=np.uint8),
+    )
+    annotation_paths = {}
+    for field, row in (
+        ("target_text_mask", 1),
+        ("protected_structure_mask", 5),
+        ("ambiguous_structure_mask", 9),
+    ):
+        mask = np.zeros((12, 16), dtype=np.uint8)
+        mask[row : row + 1, 2:6] = 255
+        annotation_paths[field] = _write_image(
+            tmp_path / f"{field}.png",
+            mask,
+        )
+    parent_path = _write_manifest(
+        tmp_path / "parent.json",
+        _manifest_payload(source),
+    )
+    parent = load_eval_manifest(parent_path)
+    review_path = tmp_path / "review-v2.json"
+    review_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "parent_manifest_sha256": parent.manifest_sha256,
+                "decision_basis": "source-only-inpaint-evidence-v2",
+                "pages": [
+                    {
+                        "page_id": "a1-001",
+                        "baseline": {
+                            "path": str(baseline),
+                            "sha256": sha256_file(baseline),
+                        },
+                        "baseline_mask": {
+                            "path": str(baseline_mask),
+                            "sha256": sha256_file(baseline_mask),
+                        },
+                        **{
+                            field: {
+                                "path": str(path),
+                                "sha256": sha256_file(path),
+                            }
+                            for field, path in annotation_paths.items()
+                        },
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    sealed = seal_source_only_evidence_manifest(
+        parent_path,
+        review_path,
+        tmp_path / "evidence-v2.json",
+    )
+
+    assert sealed.schema_version == 2
+    assert sealed.evidence_basis == "source-only-inpaint-evidence-v2"
+    assert sealed.pages[0].target_text_mask is not None
+    assert sealed.pages[0].ambiguous_structure_mask is not None
+
+
 def test_optional_manifest_finalization_never_clobbers_racing_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2226,6 +2350,49 @@ def test_quality_gate_treats_derived_structure_proxy_as_advisory_only() -> None:
 
     assert failures == [
         "corpus-a1/a1-001:protected_structure_annotation_missing"
+    ]
+
+
+def test_quality_gate_requires_ambiguous_annotation_for_manifest_v2() -> None:
+    module = _load_export_module()
+    summary = {
+        "input_mode": "manifest",
+        "image_count": 1,
+        "success_count": 1,
+        "manifest_corpora": {
+            "corpus-a1": {
+                "schema_version": 2,
+                "expected_count": 1,
+                "split_role": "tuning",
+            }
+        },
+    }
+    record = {
+        "page_id": "a1-001",
+        "expected_edit": "required",
+        "block_count": 1,
+        "final_mask_pixel_count": 10,
+        "outside_changed_pixel_count_exact": 0,
+        "protected_structure_changed_pixel_count_exact": 0,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 0,
+        "ambiguous_structure_annotation_available": False,
+        "residue_pass_truncated_block_count": 0,
+        "residue_target_is_annotation": False,
+        "erase_mode_distribution": {},
+        "erase_skipped_reason_distribution": {},
+    }
+
+    failures = module._required_gate_failures(
+        summary,
+        {"corpus-a1": [record]},
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    )
+
+    assert failures == [
+        "corpus-a1/a1-001:ambiguous_structure_annotation_missing"
     ]
 
 

@@ -69,6 +69,8 @@ def test_canonical_result_preserves_legacy_pixels_and_returns_sparse_evidence(
     image = np.full((32, 32, 3), 180, dtype=np.uint8)
     mask = np.zeros((32, 32), dtype=np.uint8)
     mask[12:16, 12:16] = 255
+    raw_mask = np.zeros_like(mask)
+    raw_mask[13:15, 13:15] = 255
     canonical_block = _text_block(
         xyxy=[8, 8, 20, 20],
         text_class="text_free",
@@ -111,6 +113,7 @@ def test_canonical_result_preserves_legacy_pixels_and_returns_sparse_evidence(
         [canonical_block],
         _CallableInpainter(),
         config=None,
+        raw_source_mask=raw_mask,
     )
     legacy_image, legacy_mask, legacy_diagnostics = source_lama_blockwise_inpaint(
         image,
@@ -128,11 +131,16 @@ def test_canonical_result_preserves_legacy_pixels_and_returns_sparse_evidence(
     assert len(canonical.evidence) == 1
     item = canonical.evidence[0]
     assert item.block_index == 0
+    assert item.source_raw_owned is not None
+    assert item.source_raw_owned.pixel_count == 4
     assert item.source_owned is not None
     assert item.source_owned.pixel_count == 16
     assert item.source_owned.mask.nbytes < mask.nbytes
     assert item.ownership_protect is not None
     assert item.ownership_protect.pixel_count == 16
+    assert item.positive_claim is None
+    assert item.positive_edit is None
+    assert item.claim_providers == ()
 
 
 def test_clip_half_open_bbox_clips_to_image_and_skips_empty() -> None:

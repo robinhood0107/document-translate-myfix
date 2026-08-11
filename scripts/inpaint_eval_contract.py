@@ -18,7 +18,8 @@ import numpy as np
 from PIL import Image, ImageDraw, PngImagePlugin
 
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
+SUPPORTED_MANIFEST_SCHEMA_VERSIONS = frozenset({1, 2})
 MANIFEST_SEAL_FIELD = "manifest_sha256"
 MANIFEST_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -27,6 +28,7 @@ EXPECTED_EDIT_VALUES = frozenset({"required", "none", "optional"})
 FINAL_EXPECTED_EDIT_VALUES = frozenset({"required", "none"})
 EXPECTED_EDIT_DECISION_BASIS = "source-only-review"
 SOURCE_ONLY_EVIDENCE_BASIS = "source-only-inpaint-evidence-v1"
+SOURCE_ONLY_EVIDENCE_BASIS_V2 = "source-only-inpaint-evidence-v2"
 SPLIT_ROLE_VALUES = frozenset(
     {
         "tuning",
@@ -78,7 +80,9 @@ PAGE_KEYS = frozenset(
         "baseline",
         "baseline_mask",
         "target_glyph_mask",
+        "target_text_mask",
         "protected_structure_mask",
+        "ambiguous_structure_mask",
     }
 )
 REFERENCE_KEYS = frozenset({"path", "sha256"})
@@ -125,12 +129,20 @@ class EvalPageSpec:
     expected_edit: str
     baseline: EvalImageReference | None = None
     baseline_mask: EvalImageReference | None = None
-    target_glyph_mask: EvalImageReference | None = None
+    target_text_mask: EvalImageReference | None = None
     protected_structure_mask: EvalImageReference | None = None
+    ambiguous_structure_mask: EvalImageReference | None = None
+
+    @property
+    def target_glyph_mask(self) -> EvalImageReference | None:
+        """Compatibility alias for schema-v1 private manifests only."""
+
+        return self.target_text_mask
 
 
 @dataclass(frozen=True)
 class EvalManifest:
+    schema_version: int
     corpus_id: str
     split_role: str
     source_lock_git_sha: str
@@ -322,7 +334,8 @@ def load_eval_manifest(path: Path) -> EvalManifest:
         raise InpaintEvalManifestError("manifest_root_invalid")
     if set(payload) - MANIFEST_KEYS:
         raise InpaintEvalManifestError("manifest_unknown_key")
-    if payload.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+    schema_version = payload.get("schema_version")
+    if schema_version not in SUPPORTED_MANIFEST_SCHEMA_VERSIONS:
         raise InpaintEvalManifestError("manifest_schema_unsupported")
     corpus_id = _validate_id(payload.get("corpus_id"), code="manifest_corpus_id_invalid")
     split_role = _validate_id(
@@ -402,7 +415,10 @@ def load_eval_manifest(path: Path) -> EvalManifest:
                 "manifest_evidence_parent_seal_invalid",
                 corpus_id=corpus_id,
             )
-        if evidence_basis != SOURCE_ONLY_EVIDENCE_BASIS:
+        if evidence_basis not in {
+            SOURCE_ONLY_EVIDENCE_BASIS,
+            SOURCE_ONLY_EVIDENCE_BASIS_V2,
+        }:
             raise InpaintEvalManifestError(
                 "manifest_evidence_basis_invalid",
                 corpus_id=corpus_id,
@@ -452,6 +468,19 @@ def load_eval_manifest(path: Path) -> EvalManifest:
         if set(raw_page) - PAGE_KEYS:
             raise InpaintEvalManifestError(
                 "manifest_page_unknown_key",
+                corpus_id=corpus_id,
+            )
+        if schema_version == 1 and (
+            "target_text_mask" in raw_page
+            or "ambiguous_structure_mask" in raw_page
+        ):
+            raise InpaintEvalManifestError(
+                "manifest_page_schema_key_invalid",
+                corpus_id=corpus_id,
+            )
+        if schema_version == 2 and "target_glyph_mask" in raw_page:
+            raise InpaintEvalManifestError(
+                "manifest_page_schema_key_invalid",
                 corpus_id=corpus_id,
             )
         try:
@@ -516,6 +545,52 @@ def load_eval_manifest(path: Path) -> EvalManifest:
                 corpus_id=corpus_id,
                 page_id=page_id,
             )
+        target_text_reference = _validate_reference(
+            raw_page.get(
+                "target_text_mask"
+                if schema_version == 2
+                else "target_glyph_mask"
+            ),
+            manifest_path=manifest_path,
+            corpus_id=corpus_id,
+            page_id=page_id,
+            expected_dimensions=dimensions,
+            expected_size_bytes=None,
+            required=schema_version == 2,
+        )
+        protected_structure_reference = _validate_reference(
+            raw_page.get("protected_structure_mask"),
+            manifest_path=manifest_path,
+            corpus_id=corpus_id,
+            page_id=page_id,
+            expected_dimensions=dimensions,
+            expected_size_bytes=None,
+            required=schema_version == 2,
+        )
+        ambiguous_structure_reference = _validate_reference(
+            raw_page.get("ambiguous_structure_mask"),
+            manifest_path=manifest_path,
+            corpus_id=corpus_id,
+            page_id=page_id,
+            expected_dimensions=dimensions,
+            expected_size_bytes=None,
+            required=schema_version == 2,
+        )
+        if schema_version == 2:
+            annotation_masks = (
+                load_binary_mask(target_text_reference, dimensions[::-1]),
+                load_binary_mask(protected_structure_reference, dimensions[::-1]),
+                load_binary_mask(ambiguous_structure_reference, dimensions[::-1]),
+            )
+            if any(
+                np.any((annotation_masks[left] > 0) & (annotation_masks[right] > 0))
+                for left, right in ((0, 1), (0, 2), (1, 2))
+            ):
+                raise InpaintEvalManifestError(
+                    "manifest_annotation_masks_overlap",
+                    corpus_id=corpus_id,
+                    page_id=page_id,
+                )
         pages.append(
             EvalPageSpec(
                 corpus_id=corpus_id,
@@ -543,24 +618,9 @@ def load_eval_manifest(path: Path) -> EvalManifest:
                     expected_size_bytes=None,
                     required=False,
                 ),
-                target_glyph_mask=_validate_reference(
-                    raw_page.get("target_glyph_mask"),
-                    manifest_path=manifest_path,
-                    corpus_id=corpus_id,
-                    page_id=page_id,
-                    expected_dimensions=dimensions,
-                    expected_size_bytes=None,
-                    required=False,
-                ),
-                protected_structure_mask=_validate_reference(
-                    raw_page.get("protected_structure_mask"),
-                    manifest_path=manifest_path,
-                    corpus_id=corpus_id,
-                    page_id=page_id,
-                    expected_dimensions=dimensions,
-                    expected_size_bytes=None,
-                    required=False,
-                ),
+                target_text_mask=target_text_reference,
+                protected_structure_mask=protected_structure_reference,
+                ambiguous_structure_mask=ambiguous_structure_reference,
             )
         )
     if all(finalization_fields_present) and any(
@@ -571,6 +631,7 @@ def load_eval_manifest(path: Path) -> EvalManifest:
             corpus_id=corpus_id,
         )
     return EvalManifest(
+        schema_version=int(schema_version),
         corpus_id=corpus_id,
         split_role=split_role,
         source_lock_git_sha=source_lock_git_sha,
@@ -831,9 +892,16 @@ def seal_source_only_evidence_manifest(
             "manifest_evidence_review_schema_invalid",
             corpus_id=parent.corpus_id,
         )
+    review_schema_version = review_payload.get("schema_version")
+    review_basis = review_payload.get("decision_basis")
     if (
-        review_payload.get("schema_version") != 1
-        or review_payload.get("decision_basis") != SOURCE_ONLY_EVIDENCE_BASIS
+        review_schema_version not in SUPPORTED_MANIFEST_SCHEMA_VERSIONS
+        or review_basis
+        != (
+            SOURCE_ONLY_EVIDENCE_BASIS_V2
+            if review_schema_version == 2
+            else SOURCE_ONLY_EVIDENCE_BASIS
+        )
         or str(review_payload.get("parent_manifest_sha256") or "").lower()
         != parent.manifest_sha256
     ):
@@ -856,7 +924,14 @@ def seal_source_only_evidence_manifest(
         "baseline_mask",
         "protected_structure_mask",
     }
-    allowed_row_keys = required_row_keys | {"target_glyph_mask"}
+    if review_schema_version == 2:
+        required_row_keys |= {
+            "target_text_mask",
+            "ambiguous_structure_mask",
+        }
+        allowed_row_keys = required_row_keys
+    else:
+        allowed_row_keys = required_row_keys | {"target_glyph_mask"}
     for row in review_rows:
         if (
             not isinstance(row, dict)
@@ -879,12 +954,16 @@ def seal_source_only_evidence_manifest(
             )
         page = parent_pages[page_id]
         references: dict[str, dict[str, str]] = {}
-        for field_name in (
-            "baseline",
-            "baseline_mask",
-            "protected_structure_mask",
-            "target_glyph_mask",
-        ):
+        annotation_fields = (
+            (
+                "target_text_mask",
+                "protected_structure_mask",
+                "ambiguous_structure_mask",
+            )
+            if review_schema_version == 2
+            else ("protected_structure_mask", "target_glyph_mask")
+        )
+        for field_name in ("baseline", "baseline_mask", *annotation_fields):
             if field_name not in row:
                 continue
             reference = _validate_reference(
@@ -894,7 +973,10 @@ def seal_source_only_evidence_manifest(
                 page_id=page_id,
                 expected_dimensions=(page.width, page.height),
                 expected_size_bytes=None,
-                required=field_name != "target_glyph_mask",
+                required=(
+                    review_schema_version == 2
+                    or field_name != "target_glyph_mask"
+                ),
             )
             if reference is not None:
                 references[field_name] = {
@@ -913,13 +995,17 @@ def seal_source_only_evidence_manifest(
         for key, value in parent_payload.items()
         if key != MANIFEST_SEAL_FIELD
     }
+    if review_schema_version == 2:
+        derived_payload["schema_version"] = 2
     for page_payload in derived_payload["pages"]:
         page_id = str(page_payload.get("page_id") or "")
+        if review_schema_version == 2:
+            page_payload.pop("target_glyph_mask", None)
         page_payload.update(reviewed[page_id])
     derived_payload.update(
         {
             "evidence_parent_manifest_sha256": parent.manifest_sha256,
-            "evidence_basis": SOURCE_ONLY_EVIDENCE_BASIS,
+            "evidence_basis": review_basis,
             "evidence_review_sha256": hashlib.sha256(review_bytes).hexdigest(),
         }
     )
@@ -1040,8 +1126,9 @@ def verify_eval_page_spec(page: EvalPageSpec) -> None:
     for reference in (
         page.baseline,
         page.baseline_mask,
-        page.target_glyph_mask,
+        page.target_text_mask,
         page.protected_structure_mask,
+        page.ambiguous_structure_mask,
     ):
         if reference is None:
             continue

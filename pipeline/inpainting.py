@@ -277,6 +277,7 @@ class InpaintingHandler:
         blk_list,
         config=None,
         *,
+        raw_source_mask: np.ndarray | None = None,
         protected_corner_mask: np.ndarray | None = None,
     ):
         self.last_inpaint_edit_mask = None
@@ -323,6 +324,7 @@ class InpaintingHandler:
                     blocks,
                     self.inpainter_cache,
                     config,
+                    raw_source_mask=raw_source_mask,
                     check_need_inpaint=True,
                     protected_corner_mask=protected_corner_mask,
                 )
