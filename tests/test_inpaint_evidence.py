@@ -41,6 +41,28 @@ def test_positive_claim_patches_union_without_losing_provider_provenance() -> No
     assert evidence[1].claim_providers == ("ctbd",)
 
 
+def test_bubble_route_evidence_keeps_sparse_interior_and_deduplicates_reasons() -> None:
+    interior = np.zeros((5, 7), dtype=np.uint8)
+    interior[1:4, 1:6] = 255
+    item = BlockInpaintEvidence(
+        block_id="b0",
+        block_index=0,
+        bubble_interior=MaskPatch((3, 4, 10, 9), interior),
+        route_decision="broad",
+        route_reasons=("validated_interior", "validated_interior", "clean"),
+    )
+
+    combined = combine_evidence_patches(
+        (item,),
+        "bubble_interior",
+        (16, 16, 3),
+    )
+
+    assert np.count_nonzero(combined) == 15
+    assert item.route_decision == "broad"
+    assert item.route_reasons == ("validated_interior", "clean")
+
+
 def test_sparse_evidence_rejects_invalid_or_out_of_bounds_roi() -> None:
     with pytest.raises(ValueError, match="inpaint_evidence_roi_invalid"):
         MaskPatch((2, 2, 2, 4), np.zeros((2, 0), dtype=np.uint8))

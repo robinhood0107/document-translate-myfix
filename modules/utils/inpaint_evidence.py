@@ -54,9 +54,12 @@ class BlockInpaintEvidence:
     source_owned: MaskPatch | None = None
     structure_protect: MaskPatch | None = None
     ownership_protect: MaskPatch | None = None
+    bubble_interior: MaskPatch | None = None
     positive_claim: MaskPatch | None = None
     positive_edit: MaskPatch | None = None
     claim_providers: tuple[str, ...] = ()
+    route_decision: str = ""
+    route_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.block_id = str(self.block_id or "")
@@ -64,11 +67,19 @@ class BlockInpaintEvidence:
             self.block_index = int(self.block_index)
         self.erase_mode = str(self.erase_mode or "")
         self.skipped_reason = str(self.skipped_reason or "")
+        self.route_decision = str(self.route_decision or "")
         self.claim_providers = tuple(
             dict.fromkeys(
                 str(provider).strip()
                 for provider in self.claim_providers
                 if str(provider).strip()
+            )
+        )
+        self.route_reasons = tuple(
+            dict.fromkeys(
+                str(reason).strip()
+                for reason in self.route_reasons
+                if str(reason).strip()
             )
         )
 
