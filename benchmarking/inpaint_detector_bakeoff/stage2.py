@@ -27,6 +27,37 @@ def composite_positive_result(
     return np.ascontiguousarray(candidate), np.ascontiguousarray(final_mask)
 
 
+def composite_replacement_result(
+    original: np.ndarray,
+    baseline: np.ndarray,
+    generated: np.ndarray,
+    replacement_edit: np.ndarray,
+    baseline_mask: np.ndarray,
+    existing_source_edit: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Replace source-owned edits while retaining non-source baseline edits."""
+
+    source = np.asarray(original)
+    prior = np.asarray(baseline)
+    replacement = np.asarray(generated)
+    if source.shape != prior.shape or source.shape != replacement.shape:
+        raise ValueError("replacement composite image shape mismatch")
+    shape = source.shape[:2]
+    edit = binary_mask(replacement_edit, shape)
+    prior_mask = binary_mask(baseline_mask, shape)
+    source_edit = binary_mask(existing_source_edit, shape)
+    safe_prior = np.where(
+        (prior_mask > 0) & (source_edit == 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    candidate = source.copy()
+    candidate[safe_prior > 0] = prior[safe_prior > 0]
+    candidate[edit > 0] = replacement[edit > 0]
+    final_mask = cv2.bitwise_or(safe_prior, edit)
+    return np.ascontiguousarray(candidate), np.ascontiguousarray(final_mask)
+
+
 def changed_mask(source: np.ndarray, candidate: np.ndarray) -> np.ndarray:
     left = np.asarray(source)
     right = np.asarray(candidate)

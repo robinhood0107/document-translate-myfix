@@ -37,11 +37,19 @@ call, and copies back only the exact positive edit mask. Its final mask is the
 union of the sealed baseline mask and positive edit, so outside-final changes
 remain measurable as a hard invariant.
 
+The replacement-mask ablation separately evaluates whether detector evidence
+can narrow existing source-owned edits. It retains non-source rewritten-PR3
+pixels, regenerates the replacement mask once from the immutable original, and
+restores rejected source-owned pixels from that original. Required additions
+remain raw detector pixels; RT-DETR boxes can validate ownership of an existing
+source component but cannot create edit pixels.
+
 Reference adapters preserve original Python behavior before any product port:
 
 - Ballons CTD raw/refined/3 px dilated masks;
 - Ballons CTBD preprocessing, boxes, and adaptive content-mask reference;
 - Ballons YSG Ultralytics boxes/OBBs and mask dilation;
+- Manga109 YOLO26 text-instance ownership from the pinned Python runtime;
 - SickZil SegNet 0.1.0 frozen-graph segmentation.
 
 Use the scripts in `scripts/` with the managed private-artifact harness. A
