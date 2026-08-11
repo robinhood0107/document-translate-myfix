@@ -228,6 +228,7 @@ def _install_fake_export_runtime(
             "residue_source_contrast_pixel_count": 0,
             "residue_pass_truncated_block_count": 0,
             "erase_mode_distribution": {"unassigned": 1},
+            "erase_skipped_reason_distribution": {},
             "block_runtime_seconds": [],
             "pipeline_elapsed_seconds": 0.01,
             "peak_vram_allocated_mb": 0.0,
@@ -1355,6 +1356,70 @@ def test_valid_manifest_main_orchestration_completes_with_neutral_outputs(
     assert str(source) not in retained_text
 
 
+def test_main_projects_required_skip_to_page_summary_and_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_export_module()
+    source = _write_image(tmp_path / "private-title-sensitive.png")
+    manifest_path = _write_manifest(
+        tmp_path / "manifest.json",
+        _manifest_payload(source, expected_edit="required"),
+    )
+    output = tmp_path / "output"
+    calls: list[dict] = []
+    events: list[tuple[str, dict]] = []
+    _install_fake_export_runtime(module, monkeypatch, output, calls, events)
+    base_process = module._process_image
+
+    def skipped_process(*args, **kwargs):
+        record = base_process(*args, **kwargs)
+        record.update(
+            {
+                "outside_changed_pixel_count_exact": 0,
+                "residue_target_is_annotation": False,
+                "erase_mode_distribution": {"bubble_skipped": 1},
+                "erase_skipped_reason_distribution": {
+                    "microtexture_source_seed_unavailable": 1,
+                },
+            }
+        )
+        return record
+
+    monkeypatch.setattr(module, "_process_image", skipped_process)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_inpaint_debug.py",
+            "--manifest",
+            str(manifest_path),
+            "--require-quality-gates",
+        ],
+    )
+
+    assert module.main() == 1
+    page = json.loads(
+        (output / "metrics" / "pages.jsonl").read_text(encoding="utf-8")
+    )
+    summary = json.loads(
+        (output / "metrics" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert page["erase_mode_distribution"] == {"bubble_skipped": 1}
+    assert page["erase_skipped_reason_distribution"] == {
+        "microtexture_source_seed_unavailable": 1,
+    }
+    assert summary["erase_mode_distribution"] == {"bubble_skipped": 1}
+    assert summary["erase_skipped_reason_distribution"] == {
+        "microtexture_source_seed_unavailable": 1,
+    }
+    assert summary["required_skipped_block_count"] == 1
+    assert summary["required_gate_failures"] == [
+        "corpus-a1/a1-001:required_bubble_erase_skipped"
+    ]
+    assert [event[0] for event in events] == ["fail"]
+
+
 def test_manifest_main_builds_standalone_seeded_blind_review_package(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1631,6 +1696,13 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
                             "unexpected_private_value": "source-title.png",
                         },
                         {
+                            "phase": "generic",
+                            "actual_device": "cuda:1",
+                            "status": "completed",
+                            "is_inference": True,
+                            "mask_pixel_count": 20,
+                        },
+                        {
                             "phase": sensitive_path,
                             "actual_device": "secret_model_name",
                             "status": "private-source-title",
@@ -1652,7 +1724,14 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
             "actual_device": "cuda:0",
             "cuda_memory_diagnostics_available": True,
             "phase": "block",
-        }
+        },
+        {
+            "actual_device": "cuda:1",
+            "is_inference": True,
+            "mask_pixel_count": 20,
+            "phase": "generic",
+            "status": "completed",
+        },
     ]
     retained = output.read_text(encoding="utf-8")
     assert sensitive_path not in retained
@@ -1787,6 +1866,8 @@ def test_quality_gate_fails_closed_for_damage_truncation_and_empty_annotation() 
         "residue_pass_truncated_block_count": 3,
         "residue_target_is_annotation": True,
         "residue_target_coverage": None,
+        "erase_mode_distribution": {},
+        "erase_skipped_reason_distribution": {},
     }
 
     failures = module._required_gate_failures(
@@ -1818,6 +1899,8 @@ def test_quality_gate_rejects_unclassified_optional_pages() -> None:
                     "protected_structure_changed_pixel_count_exact": 0,
                     "residue_pass_truncated_block_count": 0,
                     "residue_target_is_annotation": False,
+                    "erase_mode_distribution": {},
+                    "erase_skipped_reason_distribution": {},
                 }
             ]
         },
@@ -1829,6 +1912,121 @@ def test_quality_gate_rejects_unclassified_optional_pages() -> None:
     assert failures == [
         "corpus-b-primary/b-001:expected_edit_optional_not_final"
     ]
+
+
+def test_quality_gate_rejects_required_bubble_erase_skip() -> None:
+    module = _load_export_module()
+    failures = module._required_gate_failures(
+        {"input_mode": "direct", "image_count": 1, "success_count": 1},
+        {
+            "corpus-a1": [
+                {
+                    "page_id": "a1-001",
+                    "expected_edit": "required",
+                    "outside_changed_pixel_count_exact": 0,
+                    "protected_structure_changed_pixel_count_exact": 0,
+                    "residue_pass_truncated_block_count": 0,
+                    "residue_target_is_annotation": False,
+                    "erase_mode_distribution": {"bubble_skipped": 1},
+                    "erase_skipped_reason_distribution": {
+                        "microtexture_source_seed_unavailable": 1,
+                    },
+                }
+            ]
+        },
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    )
+
+    assert failures == [
+        "corpus-a1/a1-001:required_bubble_erase_skipped"
+    ]
+
+    benign_empty_seed = {
+        "page_id": "a1-001",
+        "expected_edit": "required",
+        "outside_changed_pixel_count_exact": 0,
+        "protected_structure_changed_pixel_count_exact": 0,
+        "residue_pass_truncated_block_count": 0,
+        "residue_target_is_annotation": False,
+        "erase_mode_distribution": {"bubble_skipped": 1},
+        "erase_skipped_reason_distribution": {"empty_seed": 1},
+    }
+    assert module._required_gate_failures(
+        {"input_mode": "direct", "image_count": 1, "success_count": 1},
+        {"corpus-a1": [benign_empty_seed]},
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "reason",
+    (
+        "bubble_interior_cap_source_seed_unavailable",
+        "bubble_interior_cap_source_seed_partially_suppressed",
+        "bubble_protected_source_seed_unavailable",
+        "bubble_residual_source_seed_unavailable",
+        "line_art_source_seed_unavailable",
+        "microtexture_source_seed_unavailable",
+        "microtexture_source_seed_partially_suppressed",
+        "text_prior_unavailable_source_seed_unavailable",
+    ),
+)
+def test_quality_gate_rejects_each_required_source_seed_unavailable_route(
+    reason: str,
+) -> None:
+    module = _load_export_module()
+    record = {
+        "page_id": "a1-001",
+        "expected_edit": "required",
+        "outside_changed_pixel_count_exact": 0,
+        "protected_structure_changed_pixel_count_exact": 0,
+        "residue_pass_truncated_block_count": 0,
+        "residue_target_is_annotation": False,
+        "erase_mode_distribution": {"bubble_skipped": 1},
+        "erase_skipped_reason_distribution": {reason: 1},
+    }
+
+    failures = module._required_gate_failures(
+        {"input_mode": "direct", "image_count": 1, "success_count": 1},
+        {"corpus-a1": [record]},
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    )
+
+    assert failures == [
+        "corpus-a1/a1-001:required_bubble_erase_skipped"
+    ]
+
+
+def test_quality_gate_accepts_bubble_delegated_to_lama_priority() -> None:
+    module = _load_export_module()
+    record = {
+        "page_id": "a1-001",
+        "expected_edit": "required",
+        "block_count": 2,
+        "final_mask_pixel_count": 16,
+        "outside_changed_pixel_count_exact": 0,
+        "protected_structure_changed_pixel_count_exact": 0,
+        "residue_pass_truncated_block_count": 0,
+        "residue_target_is_annotation": False,
+        "erase_mode_distribution": {"bubble_lama_fallback": 1},
+        "erase_skipped_reason_distribution": {"lama_priority_owned": 1},
+    }
+
+    failures = module._required_gate_failures(
+        {"input_mode": "direct", "image_count": 1, "success_count": 1},
+        {"corpus-a1": [record]},
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    )
+
+    assert failures == []
 
 
 def test_quality_gate_requires_source_review_finalization_for_holdout() -> None:
@@ -1856,6 +2054,8 @@ def test_quality_gate_requires_source_review_finalization_for_holdout() -> None:
         "protected_structure_changed_pixel_count_exact": 0,
         "residue_pass_truncated_block_count": 0,
         "residue_target_is_annotation": False,
+        "erase_mode_distribution": {},
+        "erase_skipped_reason_distribution": {},
     }
 
     failures = module._required_gate_failures(
@@ -1898,6 +2098,8 @@ def test_quality_gate_fails_closed_when_a_required_metric_is_missing() -> None:
                     "protected_structure_changed_pixel_count_exact": 0,
                     "residue_pass_truncated_block_count": 0,
                     "residue_target_is_annotation": False,
+                    "erase_mode_distribution": {},
+                    "erase_skipped_reason_distribution": {},
                 }
             ]
         },

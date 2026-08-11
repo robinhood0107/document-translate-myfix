@@ -8,7 +8,10 @@ import imkit as imk
 import numpy as np
 
 from modules.detection.utils.content import detect_content_in_bbox
-from modules.utils.bubble_erase import fill_bubble_edit_mask
+from modules.utils.bubble_erase import (
+    ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+    fill_bubble_edit_mask,
+)
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_residue_roi
 from modules.utils.textblock import TextBlock
@@ -60,6 +63,12 @@ def fill_duplicate_bubble_inner_regions(
         return inpainted_image, _empty_duplicate_bubble_inner_fill_stats(inpainted_image.shape[:2])
 
     filled_image, backend = fill_bubble_edit_mask(inpainted_image, edit_mask)
+    if backend == ERASE_MODE_BUBBLE_LAMA_FALLBACK:
+        stats = _empty_duplicate_bubble_inner_fill_stats(
+            inpainted_image.shape[:2]
+        )
+        stats["duplicate_bubble_inner_fill_backend"] = backend
+        return inpainted_image, stats
     filled_image = imk.convert_scale_abs(filled_image)
     filled_image = composite_with_edit_mask(inpainted_image, filled_image, edit_mask)
 
@@ -352,6 +361,34 @@ def refine_bubble_residue_inpaint(
         return inpainted_image, mask, empty_stats
 
     refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask)
+    if pass2_backend == ERASE_MODE_BUBBLE_LAMA_FALLBACK:
+        fallback_stats = _empty_pass2_stats(mask.shape)
+        fallback_stats.update(
+            {
+                "component_count": int(component_count),
+                "block_count": len(touched_blocks),
+                "pass2_candidate_count": int(pass2_candidate_count),
+                "pass2_bubble_candidate_count": int(
+                    bubble_candidate_count
+                ),
+                "pass2_bubble_kept_count": int(bubble_kept_count),
+                "pass2_text_free_candidate_count": int(
+                    text_free_candidate_count
+                ),
+                "pass2_text_free_kept_count": int(text_free_kept_count),
+                "residue_mask_pre_cap_pixel_count": int(
+                    residue_mask_pre_cap_pixel_count
+                ),
+                "residue_mask_cap_pixel_count": int(
+                    residue_mask_cap_pixel_count
+                ),
+                "pass2_backend": pass2_backend,
+                "residue_pass_truncated_block_count": int(
+                    residue_pass_truncated_block_count
+                ),
+            }
+        )
+        return inpainted_image, mask, fallback_stats
     refined_image = imk.convert_scale_abs(refined_image)
     refined_image = composite_with_edit_mask(inpainted_image, refined_image, residue_mask)
     merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
