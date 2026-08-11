@@ -18,16 +18,21 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import imkit as imk
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
 from modules.detection.processor import TextBlockDetector
 from modules.inpainting.runtime_contract import inspect_learned_inpainter_runtime
-from modules.inpainting.source_lama_blockwise import source_lama_blockwise_inpaint
+from modules.inpainting.source_lama_blockwise import (
+    source_lama_blockwise_inpaint,
+    source_lama_blockwise_inpaint_result,
+)
 from modules.rendering.render import get_best_render_area
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
+from modules.utils.inpaint_evidence import combine_evidence_patches
 from modules.utils.inpaint_cleanup import (
     apply_duplicate_bubble_inner_fill,
 )
@@ -182,6 +187,8 @@ _DROP_RUNTIME_VALUE = object()
 QUALITY_GATE_REQUIRED_FIELDS = (
     "outside_changed_pixel_count_exact",
     "protected_structure_changed_pixel_count_exact",
+    "protected_structure_annotation_available",
+    "protected_structure_annotation_changed_pixel_count_exact",
     "residue_pass_truncated_block_count",
     "residue_target_is_annotation",
     "erase_mode_distribution",
@@ -420,6 +427,75 @@ def _write_image(path: Path, image: np.ndarray) -> None:
     imk.write_image(str(path), ensure_three_channel(image))
 
 
+def _write_structure_change_contact_sheet(
+    source_image: np.ndarray,
+    candidate_image: np.ndarray,
+    changed_protected_mask: np.ndarray,
+    output_path: Path,
+    *,
+    overlay_mask_on_candidate: bool = False,
+) -> Path | None:
+    def fit_crop(crop: Image.Image, size: tuple[int, int]) -> Image.Image:
+        width, height = crop.size
+        scale = min(size[0] / max(1, width), size[1] / max(1, height))
+        resized = (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        )
+        return crop.resize(resized, Image.Resampling.NEAREST)
+
+    binary = np.where(changed_protected_mask > 0, 1, 0).astype(np.uint8)
+    component_count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        binary,
+        8,
+        cv2.CV_32S,
+    )
+    rows: list[tuple[int, int, int, int, int]] = []
+    for component_index in range(1, component_count):
+        x, y, width, height, area = [
+            int(value) for value in stats[component_index]
+        ]
+        if area > 0:
+            rows.append((area, x, y, width, height))
+    if not rows:
+        return None
+    rows.sort(reverse=True)
+    tile_width = 512
+    tile_height = 256
+    sheet = Image.new("RGB", (tile_width, tile_height * min(64, len(rows))), "white")
+    draw = ImageDraw.Draw(sheet)
+    source_rgb = Image.fromarray(ensure_three_channel(source_image).astype(np.uint8))
+    candidate_pixels = ensure_three_channel(candidate_image).astype(np.uint8).copy()
+    if overlay_mask_on_candidate:
+        overlay = changed_protected_mask > 0
+        candidate_pixels[overlay] = (
+            candidate_pixels[overlay].astype(np.uint16) + np.asarray([255, 0, 0])
+        ) // 2
+    candidate_rgb = Image.fromarray(candidate_pixels.astype(np.uint8))
+    for row_index, (area, x, y, width, height) in enumerate(rows[:64]):
+        padding = max(8, int(round(max(width, height) * 0.5)))
+        x1 = max(0, x - padding)
+        y1 = max(0, y - padding)
+        x2 = min(source_rgb.width, x + width + padding)
+        y2 = min(source_rgb.height, y + height + padding)
+        source_crop = source_rgb.crop((x1, y1, x2, y2))
+        candidate_crop = candidate_rgb.crop((x1, y1, x2, y2))
+        source_crop = fit_crop(source_crop, (248, 218))
+        candidate_crop = fit_crop(candidate_crop, (248, 218))
+        row_y = row_index * tile_height
+        sheet.paste(source_crop, (0, row_y + 30))
+        sheet.paste(candidate_crop, (256, row_y + 30))
+        draw.text((4, row_y + 6), f"source area={area} xyxy={x},{y},{x + width},{y + height}", fill="black")
+        draw.text(
+            (260, row_y + 6),
+            "source + protect" if overlay_mask_on_candidate else "candidate",
+            fill="black",
+        )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path, format="PNG")
+    return output_path
+
+
 def _iter_sample_images(corpus_dir: Path, pattern: str) -> list[Path]:
     return sorted(
         path
@@ -483,6 +559,7 @@ def _process_image(
     pre_final_composite = image.copy()
     mask_details = {}
     inpaint_diagnostics: list[dict] = []
+    routing_evidence = ()
 
     if blocks:
         render_mask_started = perf_counter()
@@ -498,17 +575,19 @@ def _process_image(
             raw_mask = mask_details["raw_mask"]
             config = get_config(settings)
             inpaint_started = perf_counter()
-            cleaned, inpaint_edit_mask, inpaint_diagnostics = source_lama_blockwise_inpaint(
+            blockwise_result = source_lama_blockwise_inpaint_result(
                 image,
                 mask,
                 blocks,
                 inpainter,
                 config,
                 check_need_inpaint=True,
-                return_edit_mask=True,
-                return_diagnostics=True,
                 protected_corner_mask=mask_details.get("protected_corner_mask"),
             )
+            cleaned = blockwise_result.image
+            inpaint_edit_mask = blockwise_result.edit_mask
+            inpaint_diagnostics = blockwise_result.diagnostics
+            routing_evidence = blockwise_result.evidence
             stage_timings["inpaint_seconds"] = perf_counter() - inpaint_started
             mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
             cleanup_started = perf_counter()
@@ -547,39 +626,53 @@ def _process_image(
         "target_glyph_mask",
         image.shape,
     )
-    explicit_protected_structure = _safe_reference_mask(
+    annotated_protected_structure = _safe_reference_mask(
         page_spec,
         "protected_structure_mask",
         image.shape,
     )
-    protected_structure_is_annotation = explicit_protected_structure is not None
-    if explicit_protected_structure is None:
-        source_text_cap = imk.dilate(
-            normalize_edit_mask(raw_mask, image.shape),
-            np.ones((5, 5), dtype=np.uint8),
-            iterations=1,
-        )
-        explicit_protected_structure = np.where(
+    protected_structure_is_annotation = annotated_protected_structure is not None
+    source_text_cap = imk.dilate(
+        normalize_edit_mask(raw_mask, image.shape),
+        np.ones((5, 5), dtype=np.uint8),
+        iterations=1,
+    )
+    derived_protected_structure = np.where(
+        (
             (
-                (
-                    normalize_edit_mask(
-                        mask_details.get("protect_mask"),
-                        image.shape,
-                    )
-                    > 0
-                )
-                & (source_text_cap <= 0)
-            )
-            | (
                 normalize_edit_mask(
-                    mask_details.get("protected_corner_mask"),
+                    mask_details.get("protect_mask"),
                     image.shape,
                 )
                 > 0
-            ),
-            255,
-            0,
-        ).astype(np.uint8)
+            )
+            & (source_text_cap <= 0)
+        )
+        | (
+            normalize_edit_mask(
+                mask_details.get("protected_corner_mask"),
+                image.shape,
+            )
+            > 0
+        ),
+        255,
+        0,
+    ).astype(np.uint8)
+    routing_structure_protect = combine_evidence_patches(
+        routing_evidence,
+        "structure_protect",
+        image.shape,
+    )
+    routing_source_owned = combine_evidence_patches(
+        routing_evidence,
+        "source_owned",
+        image.shape,
+    )
+    evaluation_protected_structure = (
+        annotated_protected_structure
+        if annotated_protected_structure is not None
+        else derived_protected_structure
+    )
     quality_metrics = build_quality_metrics(
         image,
         cleaned,
@@ -590,13 +683,55 @@ def _process_image(
             else raw_mask
         ),
         residue_target_is_annotation=explicit_residue_target is not None,
-        protected_structure_mask=explicit_protected_structure,
+        protected_structure_mask=evaluation_protected_structure,
         pre_composite_candidate_image=pre_final_composite,
     )
     quality_metrics["protected_structure_source"] = (
         "private_annotation"
         if protected_structure_is_annotation
         else "derived_line_protection"
+    )
+    changed_exact_for_structure = np.any(
+        np.asarray(cleaned)[:, :, :3] != np.asarray(image)[:, :, :3],
+        axis=2,
+    )
+    quality_metrics.update(
+        {
+            "protected_structure_annotation_available": bool(
+                protected_structure_is_annotation
+            ),
+            "protected_structure_annotation_changed_pixel_count_exact": (
+                int(
+                    np.count_nonzero(
+                        (annotated_protected_structure > 0)
+                        & changed_exact_for_structure
+                    )
+                )
+                if annotated_protected_structure is not None
+                else None
+            ),
+            "derived_protected_structure_pixel_count": int(
+                np.count_nonzero(derived_protected_structure)
+            ),
+            "derived_protected_structure_changed_pixel_count_exact": int(
+                np.count_nonzero(
+                    (derived_protected_structure > 0)
+                    & changed_exact_for_structure
+                )
+            ),
+            "routing_structure_protect_pixel_count": int(
+                np.count_nonzero(routing_structure_protect)
+            ),
+            "routing_source_owned_pixel_count": int(
+                np.count_nonzero(routing_source_owned)
+            ),
+            "routing_structure_changed_pixel_count_exact": int(
+                np.count_nonzero(
+                    (routing_structure_protect > 0)
+                    & changed_exact_for_structure
+                )
+            ),
+        }
     )
     public_image_path = f"{resolved_corpus_id}/{resolved_page_id}"
     metadata = build_inpaint_debug_metadata(
@@ -809,6 +944,14 @@ def _process_image(
     final_mask_path = corpus_output / "final_masks" / f"{page_base_name}_final_mask.png"
     bubble_cap_path = corpus_output / "bubble_interior_caps" / f"{page_base_name}_bubble_cap.png"
     protected_corner_path = corpus_output / "protected_corner_masks" / f"{page_base_name}_protected_corners.png"
+    routing_structure_path = corpus_output / "routing_structure_masks" / f"{page_base_name}_routing_structure.png"
+    routing_source_owned_path = corpus_output / "routing_source_owned_masks" / f"{page_base_name}_routing_source_owned.png"
+    changed_routing_structure_path = corpus_output / "routing_structure_changes" / f"{page_base_name}_routing_structure_changed.png"
+    structure_contact_sheet_path = corpus_output / "routing_structure_contact_sheets" / f"{page_base_name}_routing_structure_changes.png"
+    structure_source_contact_sheet_path = corpus_output / "routing_structure_source_contact_sheets" / f"{page_base_name}_routing_structure_source.png"
+    derived_structure_path = corpus_output / "derived_structure_proxy_masks" / f"{page_base_name}_derived_structure_proxy.png"
+    changed_derived_structure_path = corpus_output / "derived_structure_proxy_changes" / f"{page_base_name}_derived_structure_proxy_changed.png"
+    derived_structure_contact_sheet_path = corpus_output / "derived_structure_proxy_contact_sheets" / f"{page_base_name}_derived_structure_proxy_changes.png"
     write_started = perf_counter()
     cleaned_for_write = ensure_three_channel(cleaned)
     _write_image(source_path, image)
@@ -816,6 +959,40 @@ def _process_image(
     _write_image(final_mask_path, normalized_final_mask)
     _write_image(bubble_cap_path, bubble_cap_mask)
     _write_image(protected_corner_path, protected_corner_mask)
+    changed_routing_structure = np.where(
+        (routing_structure_protect > 0) & changed_exact_for_structure,
+        255,
+        0,
+    ).astype(np.uint8)
+    changed_derived_structure = np.where(
+        (derived_protected_structure > 0) & changed_exact_for_structure,
+        255,
+        0,
+    ).astype(np.uint8)
+    _write_image(routing_structure_path, routing_structure_protect)
+    _write_image(routing_source_owned_path, routing_source_owned)
+    _write_image(changed_routing_structure_path, changed_routing_structure)
+    _write_image(derived_structure_path, derived_protected_structure)
+    _write_image(changed_derived_structure_path, changed_derived_structure)
+    written_structure_contact_sheet = _write_structure_change_contact_sheet(
+        image,
+        cleaned_for_write,
+        changed_routing_structure,
+        structure_contact_sheet_path,
+    )
+    written_structure_source_contact_sheet = _write_structure_change_contact_sheet(
+        image,
+        image,
+        routing_structure_protect,
+        structure_source_contact_sheet_path,
+        overlay_mask_on_candidate=True,
+    )
+    written_derived_structure_contact_sheet = _write_structure_change_contact_sheet(
+        image,
+        cleaned_for_write,
+        changed_derived_structure,
+        derived_structure_contact_sheet_path,
+    )
     with Image.open(cleaned_path) as saved_cleaned:
         cleaned_artifact_pixels = np.asarray(saved_cleaned.convert("RGB")).copy()
     with Image.open(final_mask_path) as saved_final_mask:
@@ -913,6 +1090,14 @@ def _process_image(
         "final_mask": final_mask_path,
         "bubble_interior_cap": bubble_cap_path,
         "protected_corner_mask": protected_corner_path,
+        "routing_structure_mask": routing_structure_path,
+        "routing_source_owned_mask": routing_source_owned_path,
+        "routing_structure_changed_mask": changed_routing_structure_path,
+        "routing_structure_contact_sheet": written_structure_contact_sheet,
+        "routing_structure_source_contact_sheet": written_structure_source_contact_sheet,
+        "derived_structure_proxy_mask": derived_structure_path,
+        "derived_structure_proxy_changed_mask": changed_derived_structure_path,
+        "derived_structure_proxy_contact_sheet": written_derived_structure_contact_sheet,
         "detector_overlay": corpus_output / "detector_overlays" / f"{page_base_name}_detector_overlay.png",
         "raw_mask": corpus_output / "raw_masks" / f"{page_base_name}_raw_mask.png",
         "mask_overlay": corpus_output / "mask_overlays" / f"{page_base_name}_mask_overlay.png",
@@ -1305,9 +1490,15 @@ def _required_gate_failures(
                     or 0
                 ) != 0:
                     failures.append(f"{page_name}:changed_outside_final_mask")
-                if int(
+                if not bool(
+                    record.get("protected_structure_annotation_available", False)
+                ):
+                    failures.append(
+                        f"{page_name}:protected_structure_annotation_missing"
+                    )
+                elif int(
                     record.get(
-                        "protected_structure_changed_pixel_count_exact",
+                        "protected_structure_annotation_changed_pixel_count_exact",
                         0,
                     )
                     or 0
@@ -1448,6 +1639,13 @@ def _write_page_metrics_jsonl(
         "protected_structure_pixel_count",
         "protected_structure_changed_pixel_count_exact",
         "protected_structure_source",
+        "protected_structure_annotation_available",
+        "protected_structure_annotation_changed_pixel_count_exact",
+        "derived_protected_structure_pixel_count",
+        "derived_protected_structure_changed_pixel_count_exact",
+        "routing_structure_protect_pixel_count",
+        "routing_source_owned_pixel_count",
+        "routing_structure_changed_pixel_count_exact",
         "outline_damage_ratio",
         "pre_composite_protected_structure_changed_pixel_count_exact",
         "pre_composite_outline_damage_ratio",
@@ -2077,6 +2275,45 @@ def main() -> int:
             ),
             "protected_structure_changed_pixel_count_exact": sum(
                 int(record["protected_structure_changed_pixel_count_exact"])
+                for record in all_records
+            ),
+            "protected_structure_annotation_available_count": sum(
+                1
+                for record in all_records
+                if bool(record.get("protected_structure_annotation_available", False))
+            ),
+            "protected_structure_annotation_changed_pixel_count_exact": sum(
+                int(
+                    record.get(
+                        "protected_structure_annotation_changed_pixel_count_exact",
+                        0,
+                    )
+                    or 0
+                )
+                for record in all_records
+            ),
+            "derived_protected_structure_changed_pixel_count_exact": sum(
+                int(
+                    record.get(
+                        "derived_protected_structure_changed_pixel_count_exact",
+                        0,
+                    )
+                    or 0
+                )
+                for record in all_records
+            ),
+            "routing_structure_changed_pixel_count_exact": sum(
+                int(
+                    record.get(
+                        "routing_structure_changed_pixel_count_exact",
+                        0,
+                    )
+                    or 0
+                )
+                for record in all_records
+            ),
+            "routing_source_owned_pixel_count": sum(
+                int(record.get("routing_source_owned_pixel_count", 0) or 0)
                 for record in all_records
             ),
             "residue_pixel_count": sum(
