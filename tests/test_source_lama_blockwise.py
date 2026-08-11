@@ -398,14 +398,90 @@ def test_blockwise_inpaint_uses_clipped_bbox_for_partial_negative_block() -> Non
     assert np.count_nonzero(result[:, -1]) == 0
 
 
+def test_blockwise_crop_candidates_share_immutable_original_and_exact_masks() -> None:
+    inpainter = _unloaded_inpainter()
+    image = np.full((40, 40, 3), 128, dtype=np.uint8)
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[14:18, 14:18] = 255
+    mask[14:18, 22:26] = 255
+    original = image.copy()
+    seen_inputs: list[np.ndarray] = []
+
+    def _fake_inpaint(
+        image_crop,
+        _mask_crop,
+        textblock_list=None,
+        *,
+        diagnostic_context=None,
+    ):
+        assert textblock_list is None
+        seen_inputs.append(image_crop.copy())
+        fill_value = 77 if len(seen_inputs) == 1 else 99
+        image_crop[:] = fill_value
+        return image_crop
+
+    inpainter.memory_safe_inpaint = _fake_inpaint
+    result = inpainter.inpaint(
+        image,
+        mask,
+        [_Block([12, 12, 20, 20]), _Block([20, 12, 28, 20])],
+    )
+
+    assert len(seen_inputs) == 2
+    assert all(np.all(candidate_input == 128) for candidate_input in seen_inputs)
+    assert np.all(result[14:18, 14:18] == 77)
+    assert np.all(result[14:18, 22:26] == 99)
+    np.testing.assert_array_equal(result[mask <= 0], original[mask <= 0])
+
+
+def test_blockwise_crop_path_uses_resolver_and_never_pastes_xyxy_envelope() -> None:
+    source = Path(
+        "modules/inpainting/source_lama_blockwise.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'getattr(blk, "xyxy"' not in source
+    assert "inpainted[xyxy_e[1]:xyxy_e[3]" not in source
+
+
 def test_source_block_indices_fail_closed_when_explicit_mapping_is_short() -> None:
     blocks = [_Block([1, 1, 4, 4]), _Block([5, 5, 8, 8])]
 
-    _resolved, explicit_indices = _resolve_source_blocks(blocks, [7])
-    _resolved, implicit_indices = _resolve_source_blocks(blocks)
+    _resolved, explicit_indices = _resolve_source_blocks(blocks, (32, 32, 3), [7])
+    _resolved, implicit_indices = _resolve_source_blocks(blocks, (32, 32, 3))
 
     assert explicit_indices == [7, None]
     assert implicit_indices == [0, 1]
+
+
+def test_source_block_adapter_uses_authoritative_original_anchor() -> None:
+    block = _text_block(
+        xyxy=[30, 20, 170, 180],
+        bubble_xyxy=[10, 10, 190, 190],
+        text_class="text_bubble",
+    )
+    block._render_original_xyxy = [80, 80, 120, 110]
+    block._render_bubble_xyxy = [10, 10, 190, 190]
+    block._render_area_source = "detected_bubble"
+    block._render_area_xyxy = [30, 20, 170, 180]
+
+    resolved, _indices = _resolve_source_blocks([block], (200, 200, 3))
+
+    assert len(resolved) == 1
+    assert list(resolved[0].xyxy) == [80, 80, 120, 110]
+    assert block._mask_anchor_source == "render_original"
+
+
+def test_source_block_adapter_uses_bubble_context_when_text_anchor_is_missing() -> None:
+    block = _text_block(
+        xyxy=[0, 0, 0, 0],
+        bubble_xyxy=[8, 9, 40, 41],
+        text_class="text_bubble",
+    )
+
+    resolved, _indices = _resolve_source_blocks([block], (64, 64, 3))
+
+    assert len(resolved) == 1
+    assert list(resolved[0].xyxy) == [8, 9, 40, 41]
 
 
 def test_release_source_lama_cache_drops_only_cached_model_references() -> None:
@@ -2008,7 +2084,7 @@ def test_source_lama_blockwise_routes_unowned_missing_geometry_separately(
     assert inference_diagnostics[0]["mask_pixel_count"] == 16
 
 
-def test_unowned_lama_uses_owned_cleanup_as_adjacent_context(
+def test_unowned_lama_uses_same_immutable_original_as_owned_crop(
     monkeypatch,
 ) -> None:
     image = np.full((64, 64, 3), 128, dtype=np.uint8)
@@ -2050,7 +2126,7 @@ def test_unowned_lama_uses_owned_cleanup_as_adjacent_context(
     class _ContextCheckingInpainter(_CallableInpainter):
         def __call__(self, input_image, input_mask, config):
             self.calls += 1
-            assert np.all(input_image[owned > 0] == 77)
+            np.testing.assert_array_equal(input_image, image)
             output = input_image.copy()
             output[input_mask > 0] = 99
             return output
