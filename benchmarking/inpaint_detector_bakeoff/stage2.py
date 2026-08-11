@@ -7,6 +7,26 @@ from .contracts import binary_mask
 from .stage1 import PageMasks
 
 
+def composite_positive_result(
+    baseline: np.ndarray,
+    generated: np.ndarray,
+    positive_edit: np.ndarray,
+    baseline_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Composite only detector-positive pixels onto an immutable baseline."""
+
+    left = np.asarray(baseline)
+    right = np.asarray(generated)
+    if left.shape != right.shape:
+        raise ValueError("positive composite image shape mismatch")
+    edit = binary_mask(positive_edit, left.shape[:2])
+    existing = binary_mask(baseline_mask, left.shape[:2])
+    candidate = left.copy()
+    candidate[edit > 0] = right[edit > 0]
+    final_mask = np.where((existing > 0) | (edit > 0), 255, 0).astype(np.uint8)
+    return np.ascontiguousarray(candidate), np.ascontiguousarray(final_mask)
+
+
 def changed_mask(source: np.ndarray, candidate: np.ndarray) -> np.ndarray:
     left = np.asarray(source)
     right = np.asarray(candidate)
