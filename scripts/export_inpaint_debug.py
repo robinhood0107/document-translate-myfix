@@ -721,6 +721,59 @@ def _process_image(
         protected_structure_mask=evaluation_protected_structure,
         pre_composite_candidate_image=pre_final_composite,
     )
+    if page_spec is not None and page_spec.baseline is not None:
+        baseline_image = load_rgb_reference_array(
+            page_spec.baseline,
+            image.shape,
+        )
+        baseline_final_mask = load_binary_mask(
+            page_spec.baseline_mask,
+            image.shape,
+        )
+        baseline_quality_metrics = build_quality_metrics(
+            image,
+            baseline_image,
+            baseline_final_mask,
+            residue_target_mask=(
+                explicit_residue_target
+                if explicit_residue_target is not None
+                else raw_mask
+            ),
+            residue_target_is_annotation=explicit_residue_target is not None,
+        )
+        for field in (
+            "residue_pixel_count",
+            "residue_ratio",
+            "residue_score",
+            "residue_score_sum",
+            "residue_source_contrast_pixel_count",
+            "residue_target_coverage",
+            "residue_target_minimum_component_coverage",
+        ):
+            quality_metrics[f"baseline_{field}"] = baseline_quality_metrics[field]
+        candidate_score = quality_metrics.get("residue_score")
+        baseline_score = quality_metrics.get("baseline_residue_score")
+        quality_metrics["residue_score_delta_from_baseline"] = (
+            float(candidate_score) - float(baseline_score)
+            if candidate_score is not None and baseline_score is not None
+            else None
+        )
+        quality_metrics["residue_pixel_count_delta_from_baseline"] = int(
+            quality_metrics["residue_pixel_count"]
+        ) - int(quality_metrics["baseline_residue_pixel_count"])
+    else:
+        for field in (
+            "residue_pixel_count",
+            "residue_ratio",
+            "residue_score",
+            "residue_score_sum",
+            "residue_source_contrast_pixel_count",
+            "residue_target_coverage",
+            "residue_target_minimum_component_coverage",
+        ):
+            quality_metrics[f"baseline_{field}"] = None
+        quality_metrics["residue_score_delta_from_baseline"] = None
+        quality_metrics["residue_pixel_count_delta_from_baseline"] = None
     quality_metrics["protected_structure_source"] = (
         "private_annotation"
         if protected_structure_is_annotation
@@ -1620,9 +1673,53 @@ def _required_gate_failures(
                 ) != 0:
                     failures.append(f"{page_name}:cleanup_truncated")
                 if bool(record.get("residue_target_is_annotation", False)):
-                    coverage = record.get("residue_target_coverage")
-                    if coverage is None or float(coverage) < 0.98:
-                        failures.append(f"{page_name}:target_coverage_below_98pct")
+                    target_pixel_count = record.get("residue_target_pixel_count")
+                    has_target_pixels = (
+                        target_pixel_count is not None
+                        and int(target_pixel_count) > 0
+                    )
+                    if target_pixel_count is None or has_target_pixels:
+                        coverage = record.get("residue_target_coverage")
+                        if coverage is None or float(coverage) < 0.98:
+                            failures.append(
+                                f"{page_name}:target_coverage_below_98pct"
+                            )
+                        minimum_component_coverage = record.get(
+                            "residue_target_minimum_component_coverage"
+                        )
+                        if (
+                            minimum_component_coverage is None
+                            or float(minimum_component_coverage) < 0.98
+                        ):
+                            failures.append(
+                                f"{page_name}:target_component_coverage_below_98pct"
+                            )
+                    if (
+                        has_target_pixels
+                        and
+                        manifest_schema_version >= 2
+                        and str(
+                            record.get("expected_edit", "required") or "required"
+                        )
+                        == "required"
+                    ):
+                        candidate_residue_score = record.get("residue_score")
+                        baseline_residue_score = record.get(
+                            "baseline_residue_score"
+                        )
+                        if (
+                            candidate_residue_score is None
+                            or baseline_residue_score is None
+                        ):
+                            failures.append(
+                                f"{page_name}:baseline_residue_metric_missing"
+                            )
+                        elif float(candidate_residue_score) > float(
+                            baseline_residue_score
+                        ) + 1e-12:
+                            failures.append(
+                                f"{page_name}:residue_worse_than_baseline"
+                            )
                 if (
                     str(record.get("expected_edit", "required") or "required")
                     == "required"
@@ -1641,6 +1738,23 @@ def _required_gate_failures(
                     > 0
                 ):
                     failures.append(f"{page_name}:required_bubble_erase_skipped")
+        if any(
+            int(dict(contract or {}).get("schema_version", 1) or 1) >= 2
+            for contract in dict(summary.get("manifest_corpora") or {}).values()
+        ):
+            aggregate_residue_score = summary.get("aggregate_residue_score")
+            baseline_aggregate_residue_score = summary.get(
+                "baseline_aggregate_residue_score"
+            )
+            if (
+                aggregate_residue_score is None
+                or baseline_aggregate_residue_score is None
+            ):
+                failures.append("aggregate:baseline_residue_metric_missing")
+            elif float(aggregate_residue_score) >= float(
+                baseline_aggregate_residue_score
+            ) - 1e-12:
+                failures.append("aggregate:residue_not_reduced_from_baseline")
 
     if require_baseline_parity:
         for corpus_name, records in records_by_corpus.items():
@@ -1741,21 +1855,40 @@ def _write_page_metrics_jsonl(
         "residue_target_pixel_count",
         "residue_target_covered_pixel_count",
         "residue_target_coverage",
+        "residue_target_component_coverages",
+        "residue_target_minimum_component_coverage",
         "residue_target_is_annotation",
         "residue_target_source",
         "residue_source_contrast_pixel_count",
         "residue_pixel_count",
         "residue_ratio",
         "residue_score",
+        "residue_score_sum",
+        "baseline_residue_pixel_count",
+        "baseline_residue_ratio",
+        "baseline_residue_score",
+        "baseline_residue_score_sum",
+        "baseline_residue_source_contrast_pixel_count",
+        "baseline_residue_target_coverage",
+        "baseline_residue_target_minimum_component_coverage",
+        "residue_score_delta_from_baseline",
+        "residue_pixel_count_delta_from_baseline",
         "protected_structure_pixel_count",
         "protected_structure_changed_pixel_count_exact",
         "protected_structure_source",
         "protected_structure_annotation_available",
         "protected_structure_annotation_changed_pixel_count_exact",
+        "ambiguous_structure_annotation_available",
+        "ambiguous_structure_changed_pixel_count_exact",
         "derived_protected_structure_pixel_count",
         "derived_protected_structure_changed_pixel_count_exact",
         "routing_structure_protect_pixel_count",
         "routing_source_owned_pixel_count",
+        "routing_source_raw_owned_pixel_count",
+        "routing_ownership_protect_pixel_count",
+        "routing_positive_claim_pixel_count",
+        "routing_positive_edit_pixel_count",
+        "routing_claim_providers",
         "routing_structure_changed_pixel_count_exact",
         "outline_damage_ratio",
         "pre_composite_protected_structure_changed_pixel_count_exact",
@@ -2266,6 +2399,28 @@ def main() -> int:
                 for item in record.get("block_runtime_seconds", [])
                 if float(item.get("elapsed_seconds", 0.0) or 0.0) > 0.0
             )
+        aggregate_residue_score_sum = sum(
+            float(record.get("residue_score_sum", 0.0) or 0.0)
+            for record in all_records
+        )
+        aggregate_residue_source_count = sum(
+            int(record.get("residue_source_contrast_pixel_count", 0) or 0)
+            for record in all_records
+        )
+        baseline_aggregate_residue_score_sum = sum(
+            float(record.get("baseline_residue_score_sum", 0.0) or 0.0)
+            for record in all_records
+        )
+        baseline_aggregate_residue_source_count = sum(
+            int(
+                record.get(
+                    "baseline_residue_source_contrast_pixel_count",
+                    0,
+                )
+                or 0
+            )
+            for record in all_records
+        )
         summary = {
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "input_mode": "manifest" if manifest_mode else ("direct" if args.input else "sample"),
@@ -2404,6 +2559,21 @@ def main() -> int:
                 )
                 for record in all_records
             ),
+            "ambiguous_structure_annotation_available_count": sum(
+                1
+                for record in all_records
+                if bool(record.get("ambiguous_structure_annotation_available", False))
+            ),
+            "ambiguous_structure_changed_pixel_count_exact": sum(
+                int(
+                    record.get(
+                        "ambiguous_structure_changed_pixel_count_exact",
+                        0,
+                    )
+                    or 0
+                )
+                for record in all_records
+            ),
             "derived_protected_structure_changed_pixel_count_exact": sum(
                 int(
                     record.get(
@@ -2428,6 +2598,30 @@ def main() -> int:
                 int(record.get("routing_source_owned_pixel_count", 0) or 0)
                 for record in all_records
             ),
+            "routing_source_raw_owned_pixel_count": sum(
+                int(record.get("routing_source_raw_owned_pixel_count", 0) or 0)
+                for record in all_records
+            ),
+            "routing_ownership_protect_pixel_count": sum(
+                int(record.get("routing_ownership_protect_pixel_count", 0) or 0)
+                for record in all_records
+            ),
+            "routing_positive_claim_pixel_count": sum(
+                int(record.get("routing_positive_claim_pixel_count", 0) or 0)
+                for record in all_records
+            ),
+            "routing_positive_edit_pixel_count": sum(
+                int(record.get("routing_positive_edit_pixel_count", 0) or 0)
+                for record in all_records
+            ),
+            "routing_claim_providers": sorted(
+                {
+                    str(provider)
+                    for record in all_records
+                    for provider in (record.get("routing_claim_providers") or [])
+                    if str(provider)
+                }
+            ),
             "residue_pixel_count": sum(
                 int(record["residue_pixel_count"])
                 for record in all_records
@@ -2435,6 +2629,39 @@ def main() -> int:
             "residue_source_contrast_pixel_count": sum(
                 int(record["residue_source_contrast_pixel_count"])
                 for record in all_records
+            ),
+            "residue_target_minimum_component_coverage": min(
+                (
+                    float(record["residue_target_minimum_component_coverage"])
+                    for record in all_records
+                    if record.get("residue_target_minimum_component_coverage")
+                    is not None
+                ),
+                default=None,
+            ),
+            "aggregate_residue_score": (
+                aggregate_residue_score_sum / aggregate_residue_source_count
+                if aggregate_residue_source_count > 0
+                else None
+            ),
+            "baseline_aggregate_residue_score": (
+                baseline_aggregate_residue_score_sum
+                / baseline_aggregate_residue_source_count
+                if baseline_aggregate_residue_source_count > 0
+                else None
+            ),
+            "aggregate_residue_score_delta_from_baseline": (
+                (
+                    aggregate_residue_score_sum
+                    / aggregate_residue_source_count
+                )
+                - (
+                    baseline_aggregate_residue_score_sum
+                    / baseline_aggregate_residue_source_count
+                )
+                if aggregate_residue_source_count > 0
+                and baseline_aggregate_residue_source_count > 0
+                else None
             ),
             "residue_pass_truncated_block_count": sum(
                 int(record["residue_pass_truncated_block_count"])
