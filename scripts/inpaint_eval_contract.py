@@ -29,6 +29,9 @@ FINAL_EXPECTED_EDIT_VALUES = frozenset({"required", "none"})
 EXPECTED_EDIT_DECISION_BASIS = "source-only-review"
 SOURCE_ONLY_EVIDENCE_BASIS = "source-only-inpaint-evidence-v1"
 SOURCE_ONLY_EVIDENCE_BASIS_V2 = "source-only-inpaint-evidence-v2"
+SOURCE_ONLY_ADJUDICATED_EVIDENCE_BASIS_V2 = (
+    "source-only-inpaint-evidence-v2-target-adjudicated"
+)
 SPLIT_ROLE_VALUES = frozenset(
     {
         "tuning",
@@ -418,6 +421,7 @@ def load_eval_manifest(path: Path) -> EvalManifest:
         if evidence_basis not in {
             SOURCE_ONLY_EVIDENCE_BASIS,
             SOURCE_ONLY_EVIDENCE_BASIS_V2,
+            SOURCE_ONLY_ADJUDICATED_EVIDENCE_BASIS_V2,
         }:
             raise InpaintEvalManifestError(
                 "manifest_evidence_basis_invalid",
