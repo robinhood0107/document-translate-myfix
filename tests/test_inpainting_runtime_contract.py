@@ -367,7 +367,7 @@ def test_handler_losslessly_restores_every_pixel_outside_edit_mask() -> None:
     with mock.patch(
         "pipeline.inpainting.source_lama_blockwise_inpaint",
         return_value=(unsafe_result, mask.copy(), []),
-    ):
+    ) as run_lama:
         result = handler.inpaint_with_blocks(
             image,
             mask,
@@ -375,6 +375,7 @@ def test_handler_losslessly_restores_every_pixel_outside_edit_mask() -> None:
             config=object(),
         )
 
+    assert run_lama.call_args.kwargs["check_need_inpaint"] is True
     np.testing.assert_array_equal(result[mask <= 0], image[mask <= 0])
     np.testing.assert_array_equal(result[mask > 0], unsafe_result[mask > 0])
     assert (
