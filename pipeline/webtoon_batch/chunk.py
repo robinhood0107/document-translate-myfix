@@ -285,10 +285,26 @@ class ChunkMixin:
             mask,
             mask_blocks,
             config=config,
+            raw_source_mask=raw_mask,
             protected_corner_mask=mask_details.get("protected_corner_mask"),
         )
         inpainted = imk.convert_scale_abs(inpainted)
-        cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
+        cleanup_stats = {
+            "applied": False,
+            "component_count": 0,
+            "block_count": 0,
+            "routing_evidence_block_count": len(
+                tuple(
+                    getattr(
+                        self.inpainting,
+                        "last_inpaint_evidence",
+                        (),
+                    )
+                    or ()
+                )
+            ),
+        }
+        self.inpainting.last_inpaint_evidence = ()
         self._emit_benchmark_event(
             "inpaint_end",
             image_path=image_path,

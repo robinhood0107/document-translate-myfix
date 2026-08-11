@@ -895,6 +895,7 @@ def _apply_protected_corner_guard(
 
 def _build_owned_block_evidence(
     blocks: list[TextBlock],
+    raw_source_mask: np.ndarray | None,
     source_mask: np.ndarray,
     ownership_mask: np.ndarray,
     image_shape: tuple[int, ...],
@@ -914,6 +915,11 @@ def _build_owned_block_evidence(
                 erase_mode=str(getattr(block, "_erase_mode", "") or ""),
                 skipped_reason=str(
                     getattr(block, "_erase_skipped_reason", "") or ""
+                ),
+                source_raw_owned=mask_patch_from_page_mask(
+                    raw_source_mask,
+                    roi,
+                    image_shape,
                 ),
                 source_owned=mask_patch_from_page_mask(
                     source_mask,
@@ -937,6 +943,7 @@ def source_lama_blockwise_inpaint_result(
     inpainter,
     config,
     *,
+    raw_source_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
     protected_corner_mask: np.ndarray | None = None,
 ) -> SourceLamaBlockwiseResult:
@@ -959,6 +966,11 @@ def source_lama_blockwise_inpaint_result(
         )
 
     source_mask = normalize_edit_mask(mask, image.shape)
+    normalized_raw_source = (
+        normalize_edit_mask(raw_source_mask, image.shape)
+        if raw_source_mask is not None
+        else None
+    )
     has_bubble_candidates = any(
         getattr(block, "text_class", "") == "text_bubble"
         for block in block_list
@@ -999,6 +1011,7 @@ def source_lama_blockwise_inpaint_result(
             evidence=tuple(
                 _build_owned_block_evidence(
                     block_list,
+                    normalized_raw_source,
                     source_mask,
                     source_mask,
                     image.shape,
@@ -1075,6 +1088,7 @@ def source_lama_blockwise_inpaint_result(
     )
     evidence = _build_owned_block_evidence(
         lama_blocks,
+        normalized_raw_source,
         source_mask,
         bubble_protected_mask,
         image.shape,
@@ -1093,6 +1107,11 @@ def source_lama_blockwise_inpaint_result(
                 block_index=original_block_indices.get(id(bubble_block)),
                 erase_mode=item.erase_mode,
                 skipped_reason=item.skipped_reason,
+                source_raw_owned=mask_patch_from_page_mask(
+                    normalized_raw_source,
+                    item.source_owned.xyxy if item.source_owned else None,
+                    image.shape,
+                ),
                 source_owned=item.source_owned,
                 structure_protect=item.structure_protect,
                 ownership_protect=item.ownership_protect,
@@ -1170,6 +1189,7 @@ def source_lama_blockwise_inpaint(
     inpainter,
     config,
     *,
+    raw_source_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
     return_edit_mask: bool = False,
     return_diagnostics: bool = False,
@@ -1186,6 +1206,7 @@ def source_lama_blockwise_inpaint(
         blocks,
         inpainter,
         config,
+        raw_source_mask=raw_source_mask,
         check_need_inpaint=check_need_inpaint,
         protected_corner_mask=protected_corner_mask,
     )
