@@ -25,6 +25,7 @@ from scripts.inpaint_eval_contract import (
     load_rgb_reference_array,
     pixel_sha256,
     seal_manifest_payload,
+    seal_source_only_evidence_manifest,
     sha256_file,
     write_blind_review_jsonl,
     write_comparison_and_blind_panels,
@@ -224,6 +225,8 @@ def _install_fake_export_runtime(
             "protected_corner_changed_pixel_count": 0,
             "changed_outside_final_mask_pixel_count_exact": 0,
             "protected_structure_changed_pixel_count_exact": 0,
+            "protected_structure_annotation_available": True,
+            "protected_structure_annotation_changed_pixel_count_exact": 0,
             "residue_pixel_count": 0,
             "residue_source_contrast_pixel_count": 0,
             "residue_pass_truncated_block_count": 0,
@@ -340,6 +343,72 @@ def test_optional_manifest_finalization_is_parent_linked_and_fail_closed(
         )
     assert raised.value.code == "manifest_finalization_page_set_mismatch"
     assert not (tmp_path / "bad-final.json").exists()
+
+
+def test_source_only_evidence_manifest_seals_new_references_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    source = _write_image(tmp_path / "private-source.png")
+    baseline = _write_image(
+        tmp_path / "pr3-cleaned.png",
+        np.full((12, 16, 3), 220, dtype=np.uint8),
+    )
+    baseline_mask = _write_image(
+        tmp_path / "pr3-final-mask.png",
+        np.full((12, 16), 255, dtype=np.uint8),
+    )
+    protected = np.zeros((12, 16), dtype=np.uint8)
+    protected[3:5, 2:14] = 255
+    protected_path = _write_image(tmp_path / "protected.png", protected)
+    parent_path = _write_manifest(
+        tmp_path / "parent.json",
+        _manifest_payload(source),
+    )
+    parent_bytes = parent_path.read_bytes()
+    parent = load_eval_manifest(parent_path)
+    review_path = tmp_path / "source-only-review.json"
+    review_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "parent_manifest_sha256": parent.manifest_sha256,
+                "decision_basis": "source-only-inpaint-evidence-v1",
+                "pages": [
+                    {
+                        "page_id": "a1-001",
+                        "baseline": {
+                            "path": str(baseline),
+                            "sha256": sha256_file(baseline),
+                        },
+                        "baseline_mask": {
+                            "path": str(baseline_mask),
+                            "sha256": sha256_file(baseline_mask),
+                        },
+                        "protected_structure_mask": {
+                            "path": str(protected_path),
+                            "sha256": sha256_file(protected_path),
+                        },
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    sealed = seal_source_only_evidence_manifest(
+        parent_path,
+        review_path,
+        tmp_path / "evidence-v2.json",
+    )
+
+    assert parent_path.read_bytes() == parent_bytes
+    assert sealed.evidence_parent_manifest_sha256 == parent.manifest_sha256
+    assert sealed.evidence_basis == "source-only-inpaint-evidence-v1"
+    assert sealed.evidence_review_sha256 == sha256_file(review_path)
+    assert sealed.pages[0].baseline is not None
+    assert sealed.pages[0].baseline_mask is not None
+    assert sealed.pages[0].protected_structure_mask is not None
 
 
 def test_optional_manifest_finalization_never_clobbers_racing_output(
@@ -1863,6 +1932,8 @@ def test_quality_gate_fails_closed_for_damage_truncation_and_empty_annotation() 
         "page_id": "a1-001",
         "outside_changed_pixel_count_exact": 1,
         "protected_structure_changed_pixel_count_exact": 2,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 2,
         "residue_pass_truncated_block_count": 3,
         "residue_target_is_annotation": True,
         "residue_target_coverage": None,
@@ -1897,6 +1968,8 @@ def test_quality_gate_rejects_unclassified_optional_pages() -> None:
                     "expected_edit": "optional",
                     "outside_changed_pixel_count_exact": 0,
                     "protected_structure_changed_pixel_count_exact": 0,
+                    "protected_structure_annotation_available": True,
+                    "protected_structure_annotation_changed_pixel_count_exact": 0,
                     "residue_pass_truncated_block_count": 0,
                     "residue_target_is_annotation": False,
                     "erase_mode_distribution": {},
@@ -1925,6 +1998,8 @@ def test_quality_gate_rejects_required_bubble_erase_skip() -> None:
                     "expected_edit": "required",
                     "outside_changed_pixel_count_exact": 0,
                     "protected_structure_changed_pixel_count_exact": 0,
+                    "protected_structure_annotation_available": True,
+                    "protected_structure_annotation_changed_pixel_count_exact": 0,
                     "residue_pass_truncated_block_count": 0,
                     "residue_target_is_annotation": False,
                     "erase_mode_distribution": {"bubble_skipped": 1},
@@ -1948,6 +2023,8 @@ def test_quality_gate_rejects_required_bubble_erase_skip() -> None:
         "expected_edit": "required",
         "outside_changed_pixel_count_exact": 0,
         "protected_structure_changed_pixel_count_exact": 0,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 0,
         "residue_pass_truncated_block_count": 0,
         "residue_target_is_annotation": False,
         "erase_mode_distribution": {"bubble_skipped": 1},
@@ -1984,6 +2061,8 @@ def test_quality_gate_rejects_each_required_source_seed_unavailable_route(
         "expected_edit": "required",
         "outside_changed_pixel_count_exact": 0,
         "protected_structure_changed_pixel_count_exact": 0,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 0,
         "residue_pass_truncated_block_count": 0,
         "residue_target_is_annotation": False,
         "erase_mode_distribution": {"bubble_skipped": 1},
@@ -2012,6 +2091,8 @@ def test_quality_gate_accepts_bubble_delegated_to_lama_priority() -> None:
         "final_mask_pixel_count": 16,
         "outside_changed_pixel_count_exact": 0,
         "protected_structure_changed_pixel_count_exact": 0,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 0,
         "residue_pass_truncated_block_count": 0,
         "residue_target_is_annotation": False,
         "erase_mode_distribution": {"bubble_lama_fallback": 1},
@@ -2052,6 +2133,8 @@ def test_quality_gate_requires_source_review_finalization_for_holdout() -> None:
         "final_mask_pixel_count": 10,
         "outside_changed_pixel_count_exact": 0,
         "protected_structure_changed_pixel_count_exact": 0,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 0,
         "residue_pass_truncated_block_count": 0,
         "residue_target_is_annotation": False,
         "erase_mode_distribution": {},
@@ -2096,6 +2179,8 @@ def test_quality_gate_fails_closed_when_a_required_metric_is_missing() -> None:
                     "page_id": "a1-001",
                     "expected_edit": "required",
                     "protected_structure_changed_pixel_count_exact": 0,
+                    "protected_structure_annotation_available": True,
+                    "protected_structure_annotation_changed_pixel_count_exact": 0,
                     "residue_pass_truncated_block_count": 0,
                     "residue_target_is_annotation": False,
                     "erase_mode_distribution": {},
@@ -2114,6 +2199,60 @@ def test_quality_gate_fails_closed_when_a_required_metric_is_missing() -> None:
             "outside_changed_pixel_count_exact"
         )
     ]
+
+
+def test_quality_gate_treats_derived_structure_proxy_as_advisory_only() -> None:
+    module = _load_export_module()
+    record = {
+        "page_id": "a1-001",
+        "expected_edit": "required",
+        "outside_changed_pixel_count_exact": 0,
+        "protected_structure_changed_pixel_count_exact": 6971,
+        "protected_structure_annotation_available": False,
+        "protected_structure_annotation_changed_pixel_count_exact": None,
+        "residue_pass_truncated_block_count": 0,
+        "residue_target_is_annotation": False,
+        "erase_mode_distribution": {},
+        "erase_skipped_reason_distribution": {},
+    }
+
+    failures = module._required_gate_failures(
+        {"input_mode": "direct", "image_count": 1, "success_count": 1},
+        {"corpus-a1": [record]},
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    )
+
+    assert failures == [
+        "corpus-a1/a1-001:protected_structure_annotation_missing"
+    ]
+
+
+def test_quality_gate_uses_private_structure_annotation_for_damage() -> None:
+    module = _load_export_module()
+    record = {
+        "page_id": "a1-001",
+        "expected_edit": "required",
+        "outside_changed_pixel_count_exact": 0,
+        "protected_structure_changed_pixel_count_exact": 0,
+        "protected_structure_annotation_available": True,
+        "protected_structure_annotation_changed_pixel_count_exact": 1,
+        "residue_pass_truncated_block_count": 0,
+        "residue_target_is_annotation": False,
+        "erase_mode_distribution": {},
+        "erase_skipped_reason_distribution": {},
+    }
+
+    failures = module._required_gate_failures(
+        {"input_mode": "direct", "image_count": 1, "success_count": 1},
+        {"corpus-a1": [record]},
+        require_cuda_lama=False,
+        require_rounded_bubble_gate=False,
+        require_quality_gates=True,
+    )
+
+    assert failures == ["corpus-a1/a1-001:protected_structure_changed"]
 
 
 def test_baseline_parity_gate_requires_both_locked_artifacts_and_exact_sha() -> None:

@@ -33,6 +33,7 @@ from modules.utils.inpaint_composite import (
     count_changed_outside_edit_mask,
     normalize_edit_mask,
 )
+from modules.utils.inpaint_evidence import BlockInpaintEvidence
 
 
 @dataclass
@@ -48,6 +49,7 @@ class InpaintCleanupInput:
     page_label: str
     # 모델이 실제로 고친 영역. 없으면 마스크를 그대로 쓴다.
     inpaint_edit_mask: np.ndarray | None = None
+    routing_evidence: tuple[BlockInpaintEvidence, ...] = ()
 
 
 @dataclass

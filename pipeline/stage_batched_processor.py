@@ -3378,22 +3378,34 @@ class StageBatchedProcessor(BatchProcessor):
                         "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
                     },
                 ):
-                    cleanup = run_inpaint_cleanup(
-                        InpaintCleanupInput(
-                            image=ctx.image,
-                            inpaint_input_img=ctx.inpaint_input_img,
-                            mask=ctx.mask,
-                            mask_details=ctx.mask_details,
-                            inpaint_blocks=inpaint_blocks,
-                            config=config,
-                            page_label=f"{index + 1}/{total_images}",
-                            inpaint_edit_mask=getattr(
-                                self.inpainting,
-                                "last_inpaint_edit_mask",
-                                None,
-                            ),
+                    routing_evidence = tuple(
+                        getattr(
+                            self.inpainting,
+                            "last_inpaint_evidence",
+                            (),
                         )
+                        or ()
                     )
+                    try:
+                        cleanup = run_inpaint_cleanup(
+                            InpaintCleanupInput(
+                                image=ctx.image,
+                                inpaint_input_img=ctx.inpaint_input_img,
+                                mask=ctx.mask,
+                                mask_details=ctx.mask_details,
+                                inpaint_blocks=inpaint_blocks,
+                                config=config,
+                                page_label=f"{index + 1}/{total_images}",
+                                inpaint_edit_mask=getattr(
+                                    self.inpainting,
+                                    "last_inpaint_edit_mask",
+                                    None,
+                                ),
+                                routing_evidence=routing_evidence,
+                            )
+                        )
+                    finally:
+                        self.inpainting.last_inpaint_evidence = ()
                     ctx.inpaint_input_img = cleanup.inpaint_input_img
                     ctx.mask = cleanup.mask
                     ctx.cleanup_stats = cleanup.cleanup_stats
