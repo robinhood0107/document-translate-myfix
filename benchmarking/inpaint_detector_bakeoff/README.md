@@ -19,6 +19,24 @@ one page-level positive edit mask. Required conservative skip reasons can scope
 this handoff without adding a new image threshold, Hough rule, or autonomous
 residue search.
 
+The provenance-fusion experiment also keeps RT-DETR's raw text-box origin. A
+required skip directly backed by a raw text detection may use that box as an
+ownership boundary for CTD raw pixels; a block synthesized from unmatched
+bubble content remains restricted to its content components. The box never
+becomes an edit mask, and the final claim remains a subset of CTD raw output.
+
+For a fixed-size finalist, `scripts/export_inpaint_ctd_onnx.py` reproduces the
+CTD graph at the selected input size. The provenance runner accepts
+`--ctd-runtime onnxruntime`; parity is judged on the final `positive_edit`
+binary mask, while the separately retained raw network mask remains diagnostic
+telemetry.
+
+The generic positive-mask Stage 2 runner loads the sealed rewritten-PR3 image,
+generates each page candidate from the immutable source with at most one LaMa
+call, and copies back only the exact positive edit mask. Its final mask is the
+union of the sealed baseline mask and positive edit, so outside-final changes
+remain measurable as a hard invariant.
+
 Reference adapters preserve original Python behavior before any product port:
 
 - Ballons CTD raw/refined/3 px dilated masks;

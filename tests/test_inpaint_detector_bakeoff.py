@@ -35,6 +35,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (
     changed_mask,
+    composite_positive_result,
     residue_score,
     score_stage2_page,
 )
@@ -44,6 +45,15 @@ from benchmarking.inpaint_detector_bakeoff.sickzil import (
     preprocess_sickzil,
 )
 from benchmarking.inpaint_detector_bakeoff.ownership import build_existing_ownership_mask
+from benchmarking.inpaint_detector_bakeoff.provenance_fusion import (
+    build_provenance_fusion,
+)
+from benchmarking.inpaint_detector_bakeoff.fixed_ctd_onnx import (
+    _letterboxed_rgb_to_nchw,
+    _rgb_batch_to_nchw,
+    _require_primary_provider,
+)
+from scripts.check_inpaint_positive_mask_parity import _compare_kind
 
 
 def _tensor_sha256(*arrays: np.ndarray) -> str:
@@ -167,6 +177,129 @@ def test_positive_edit_is_detector_claim_minus_all_exact_protection() -> None:
     assert np.count_nonzero(edit & ambiguous) == 0
     assert np.count_nonzero(edit & existing) == 0
     assert np.count_nonzero(edit[ownership == 0]) == 0
+
+
+def test_provenance_fusion_uses_raw_text_box_only_as_claim_ownership() -> None:
+    shape = (28, 40)
+    raw_claim = np.zeros(shape, dtype=np.uint8)
+    raw_claim[7:12, 6:13] = 255
+    raw_claim[16:21, 25:32] = 255
+    prior = np.zeros(shape, dtype=np.uint8)
+    prior[3:24, 3:36] = 255
+    seed = np.zeros(shape, dtype=np.uint8)
+    seed[8:10, 8:10] = 255
+    content = np.zeros(shape, dtype=np.uint8)
+    content[17:20, 27:30] = 255
+    zeros = np.zeros(shape, dtype=np.uint8)
+
+    result = build_provenance_fusion(
+        raw_claim,
+        required_skip_prior=prior,
+        required_skip_seed=seed,
+        content_component_ownership=content,
+        raw_detector_boxes=(
+            DetectorBox((4, 5, 16, 14), "text", 1.0, "rtdetr"),
+            DetectorBox((22, 14, 35, 23), "text", 1.0, "rtdetr"),
+        ),
+        existing_edit=zeros,
+        structure_protect=zeros,
+        ambiguous_protect=zeros,
+    )
+
+    assert [box.xyxy for box in result.selected_raw_text_boxes] == [(4, 5, 16, 14)]
+    assert np.count_nonzero(result.positive_edit[7:12, 6:13]) == 35
+    assert np.count_nonzero(result.positive_edit[17:20, 27:30]) == 9
+    assert np.count_nonzero(result.positive_edit & cv2.bitwise_not(raw_claim)) == 0
+    assert np.count_nonzero(result.positive_edit) < np.count_nonzero(result.ownership)
+
+
+def test_provenance_fusion_rescue_without_raw_text_box_stays_on_content_pixels() -> None:
+    shape = (20, 28)
+    raw_claim = np.zeros(shape, dtype=np.uint8)
+    raw_claim[5:15, 5:23] = 255
+    prior = np.zeros(shape, dtype=np.uint8)
+    prior[3:17, 3:25] = 255
+    seed = np.zeros(shape, dtype=np.uint8)
+    seed[8:12, 10:14] = 255
+    content = np.zeros(shape, dtype=np.uint8)
+    content[7:13, 9:15] = 255
+    protected = np.zeros(shape, dtype=np.uint8)
+    protected[7:9, 9:15] = 255
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[11:13, 9:11] = 255
+
+    result = build_provenance_fusion(
+        raw_claim,
+        required_skip_prior=prior,
+        required_skip_seed=seed,
+        content_component_ownership=content,
+        raw_detector_boxes=(
+            DetectorBox((16, 4, 25, 16), "text", 1.0, "rtdetr"),
+            DetectorBox((2, 2, 26, 18), "bubble", 1.0, "rtdetr"),
+        ),
+        existing_edit=existing,
+        structure_protect=protected,
+        ambiguous_protect=np.zeros(shape, dtype=np.uint8),
+    )
+
+    assert result.selected_raw_text_boxes == ()
+    assert np.count_nonzero(result.positive_claim[content == 0]) == 0
+    assert np.count_nonzero(result.positive_edit & protected) == 0
+    assert np.count_nonzero(result.positive_edit & existing) == 0
+
+
+def test_fixed_ctd_onnx_preprocess_preserves_rgb_channel_order() -> None:
+    batch = np.array([[[[1, 2, 3]]]], dtype=np.uint8)
+    tensor = _rgb_batch_to_nchw(batch)
+    assert tensor.shape == (1, 3, 1, 1)
+    assert tensor[0, :, 0, 0].tolist() == pytest.approx(
+        [1 / 255, 2 / 255, 3 / 255]
+    )
+
+
+def test_fixed_ctd_onnx_letterbox_matches_reference_tensor_shape() -> None:
+    image = np.zeros((6, 4, 3), dtype=np.uint8)
+    image[..., 0] = 11
+    tensor, _ratio, dw, dh = _letterboxed_rgb_to_nchw(image, 8)
+    assert tensor.shape == (1, 3, 8, 8)
+    assert (dw, dh) == (3, 0)
+    assert tensor[0, 0, 0, 0] == pytest.approx(11 / 255)
+
+
+def test_fixed_ctd_onnx_provider_selection_is_fail_closed() -> None:
+    _require_primary_provider(
+        "CUDAExecutionProvider",
+        ("CUDAExecutionProvider", "CPUExecutionProvider"),
+    )
+    with pytest.raises(RuntimeError, match="was not honored"):
+        _require_primary_provider(
+            "CUDAExecutionProvider",
+            ("CPUExecutionProvider",),
+        )
+
+
+def test_positive_mask_parity_rejects_empty_or_different_masks(tmp_path) -> None:
+    reference = tmp_path / "reference"
+    candidate = tmp_path / "candidate"
+    with pytest.raises(ValueError, match="contains no parity masks"):
+        _compare_kind(reference, candidate, "positive_edit_masks")
+
+    for root in (reference, candidate):
+        (root / "positive_edit_masks").mkdir(parents=True)
+    left = np.zeros((8, 8), dtype=np.uint8)
+    right = left.copy()
+    right[3, 4] = 255
+    assert cv2.imwrite(
+        str(reference / "positive_edit_masks" / "page_positive_edit.png"),
+        left,
+    )
+    assert cv2.imwrite(
+        str(candidate / "positive_edit_masks" / "page_positive_edit.png"),
+        right,
+    )
+    rows = _compare_kind(reference, candidate, "positive_edit_masks")
+    assert rows[0]["page_id"] == "page"
+    assert rows[0]["xor_pixel_count"] == 1
 
 
 def test_stage1_scores_every_connected_target_component() -> None:
@@ -309,6 +442,29 @@ def test_stage2_scores_actual_structure_damage_and_mask_outside_change() -> None
     assert record["minimum_target_component_coverage"] == 1.0
     assert record["protected_changed_pixel_count"] == 12
     assert record["changed_outside_detector_mask_pixel_count"] == 12
+
+
+def test_positive_stage2_composite_changes_only_exact_edit_pixels() -> None:
+    baseline = np.full((12, 16, 3), 150, dtype=np.uint8)
+    baseline[2:4, 2:5] = 90
+    generated = np.full_like(baseline, 230)
+    positive = np.zeros(baseline.shape[:2], dtype=np.uint8)
+    positive[7:10, 9:13] = 255
+    baseline_mask = np.zeros_like(positive)
+    baseline_mask[2:4, 2:5] = 255
+
+    candidate, final_mask = composite_positive_result(
+        baseline,
+        generated,
+        positive,
+        baseline_mask,
+    )
+
+    assert np.all(candidate[positive > 0] == 230)
+    assert np.array_equal(candidate[positive == 0], baseline[positive == 0])
+    assert np.all(final_mask[2:4, 2:5] == 255)
+    assert np.all(final_mask[7:10, 9:13] == 255)
+    assert np.count_nonzero(final_mask) == 18
 
 
 def test_stage2_residue_score_decreases_when_target_contrast_is_removed() -> None:
