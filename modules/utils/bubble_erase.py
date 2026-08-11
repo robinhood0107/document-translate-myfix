@@ -51,6 +51,7 @@ class BubbleEraseResult:
 
 @dataclass(slots=True)
 class BubbleLineArtContext:
+    native_interior_cap: np.ndarray | None
     interior_cap: np.ndarray | None
     source_seed_mask: np.ndarray
     source_glyph_mask: np.ndarray
@@ -1131,6 +1132,15 @@ def _build_bubble_line_art_context(
     *,
     text_prior_mask: np.ndarray | None = None,
 ) -> BubbleLineArtContext:
+    native_interior_cap = extract_bubble_interior_cap_crop(
+        crop,
+        seed_mask,
+        erode_px=0,
+        min_area_ratio=0.0,
+        max_area_ratio=1.0,
+        min_seed_coverage=0.0,
+        preserve_seed_after_erode=False,
+    )
     interior_cap = _validated_bubble_interior_cap_mask(crop, seed_mask)
     line_protect_mask = np.zeros(seed_mask.shape, dtype=np.uint8)
     normalized_seed = normalize_edit_mask(seed_mask, crop.shape)
@@ -1169,6 +1179,7 @@ def _build_bubble_line_art_context(
             text_prior_mask=text_prior_mask,
         )
     return BubbleLineArtContext(
+        native_interior_cap=native_interior_cap,
         interior_cap=interior_cap,
         source_seed_mask=normalized_seed,
         source_glyph_mask=source_glyph_mask,
@@ -3029,7 +3040,14 @@ def erase_text_bubble_regions(
     block_entries: list[dict] = []
     evidence_inputs: dict[
         int,
-        tuple[object, tuple[int, int, int, int], np.ndarray, np.ndarray, np.ndarray],
+        tuple[
+            object,
+            tuple[int, int, int, int],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray | None,
+        ],
     ] = {}
     applied_blocks = 0
     fallback_blocks = 0
@@ -3103,6 +3121,14 @@ def erase_text_bubble_regions(
                     source_crop.shape,
                 ),
                 protected[y1:y2, x1:x2].copy(),
+                (
+                    None
+                    if line_art_context.native_interior_cap is None
+                    else normalize_edit_mask(
+                        line_art_context.native_interior_cap,
+                        source_crop.shape,
+                    )
+                ),
             )
 
         edit_mask, mask_stats = build_bubble_residual_edit_mask(
@@ -3491,7 +3517,14 @@ def erase_text_bubble_regions(
         input_row = evidence_inputs.get(int(entry.get("index", -1)))
         if input_row is None:
             continue
-        evidence_block, evidence_roi, owned_crop, structure_crop, ownership_crop = input_row
+        (
+            evidence_block,
+            evidence_roi,
+            owned_crop,
+            structure_crop,
+            ownership_crop,
+            bubble_interior_crop,
+        ) = input_row
         evidence_entries.append(
             BlockInpaintEvidence(
                 block_id=str(getattr(evidence_block, "block_id", "") or ""),
@@ -3501,6 +3534,11 @@ def erase_text_bubble_regions(
                 source_owned=MaskPatch(evidence_roi, owned_crop),
                 structure_protect=MaskPatch(evidence_roi, structure_crop),
                 ownership_protect=MaskPatch(evidence_roi, ownership_crop),
+                bubble_interior=(
+                    None
+                    if bubble_interior_crop is None
+                    else MaskPatch(evidence_roi, bubble_interior_crop)
+                ),
             )
         )
     return BubbleEraseResult(

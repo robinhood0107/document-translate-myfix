@@ -1115,6 +1115,12 @@ def source_lama_blockwise_inpaint_result(
                 source_owned=item.source_owned,
                 structure_protect=item.structure_protect,
                 ownership_protect=item.ownership_protect,
+                bubble_interior=item.bubble_interior,
+                positive_claim=item.positive_claim,
+                positive_edit=item.positive_edit,
+                claim_providers=item.claim_providers,
+                route_decision=item.route_decision,
+                route_reasons=item.route_reasons,
             )
         )
     for item in list(bubble_result.stats.get("blocks", []) or []):
