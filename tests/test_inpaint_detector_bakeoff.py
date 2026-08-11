@@ -36,6 +36,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
 from benchmarking.inpaint_detector_bakeoff.stage2 import (
     changed_mask,
     composite_positive_result,
+    composite_replacement_result,
     residue_score,
     score_stage2_page,
 )
@@ -47,11 +48,15 @@ from benchmarking.inpaint_detector_bakeoff.sickzil import (
 from benchmarking.inpaint_detector_bakeoff.ownership import build_existing_ownership_mask
 from benchmarking.inpaint_detector_bakeoff.provenance_fusion import (
     build_provenance_fusion,
+    reconcile_source_edit,
 )
 from benchmarking.inpaint_detector_bakeoff.fixed_ctd_onnx import (
     _letterboxed_rgb_to_nchw,
     _rgb_batch_to_nchw,
     _require_primary_provider,
+)
+from benchmarking.inpaint_detector_bakeoff.manga109_yolo26 import (
+    text_ownership_from_result,
 )
 from scripts.check_inpaint_positive_mask_parity import _compare_kind
 
@@ -61,6 +66,49 @@ def _tensor_sha256(*arrays: np.ndarray) -> str:
     for array in arrays:
         digest.update(np.ascontiguousarray(array).tobytes())
     return digest.hexdigest()
+
+
+def test_manga109_yolo26_uses_only_text_instance_pixels_as_ownership() -> None:
+    shape = (12, 16)
+    masks = np.zeros((3, *shape), dtype=np.float32)
+    masks[0, 2:8, 2:7] = 1.0
+    masks[1, 4:10, 9:14] = 1.0
+    masks[2, 0:4, 11:16] = 1.0
+    result = SimpleNamespace(
+        boxes=SimpleNamespace(
+            cls=np.array([0, 1, 2], dtype=np.float32),
+            conf=np.array([0.91, 0.83, 0.72], dtype=np.float32),
+            xyxy=np.array(
+                [[2, 2, 7, 8], [9, 4, 14, 10], [11, 0, 16, 4]],
+                dtype=np.float32,
+            ),
+        ),
+        masks=SimpleNamespace(data=masks),
+    )
+
+    ownership, boxes = text_ownership_from_result(
+        result,
+        shape,
+        provider="python-reference",
+    )
+
+    assert np.count_nonzero(ownership) == 30
+    assert np.count_nonzero(ownership[4:10, 9:14]) == 30
+    assert np.count_nonzero(ownership[2:8, 2:7]) == 0
+    assert np.count_nonzero(ownership[0:4, 11:16]) == 0
+    assert [box.label for box in boxes] == ["text"]
+    assert boxes[0].xyxy == (9, 4, 14, 10)
+
+
+def test_manga109_yolo26_empty_or_non_text_results_fail_closed() -> None:
+    empty = SimpleNamespace(boxes=None, masks=None)
+    ownership, boxes = text_ownership_from_result(
+        empty,
+        (8, 10),
+        provider="python-reference",
+    )
+    assert np.count_nonzero(ownership) == 0
+    assert boxes == ()
 
 
 def test_ballons_e2e_routing_retains_native_whole_bubble_flat_fill(
@@ -276,6 +324,69 @@ def test_provenance_fusion_runtime_skip_does_not_use_annotation_reopened_edit() 
     assert np.count_nonzero(result.positive_edit) == 24
     assert np.count_nonzero(result.positive_edit & existing) == 24
     assert np.count_nonzero(result.positive_edit & protected) == 0
+
+
+def test_source_edit_reconciliation_only_adds_pixels_on_required_page() -> None:
+    claim = np.zeros((16, 16), dtype=np.uint8)
+    claim[2:6, 2:6] = 255
+    claim[9:12, 9:12] = 255
+    existing = np.zeros_like(claim)
+    existing[2:6, 2:5] = 255
+
+    no_edit = reconcile_source_edit(
+        claim,
+        existing,
+        allow_positive_addition=False,
+    )
+    required = reconcile_source_edit(
+        claim,
+        existing,
+        allow_positive_addition=True,
+    )
+
+    assert np.array_equal(no_edit.verified_source_edit, existing)
+    assert np.count_nonzero(no_edit.positive_edit) == 0
+    assert np.array_equal(no_edit.replacement_edit, existing)
+    assert np.count_nonzero(required.verified_source_edit) == 12
+    assert np.count_nonzero(required.positive_edit) == 13
+    assert np.array_equal(required.replacement_edit, claim)
+
+
+def test_source_edit_reconciliation_keeps_whole_touched_existing_component() -> None:
+    claim = np.zeros((20, 24), dtype=np.uint8)
+    claim[4:6, 5:7] = 255
+    existing = np.zeros_like(claim)
+    existing[3:8, 3:9] = 255
+    existing[12:16, 16:20] = 255
+
+    result = reconcile_source_edit(
+        claim,
+        existing,
+        allow_positive_addition=False,
+    )
+
+    assert np.count_nonzero(result.verified_source_edit[3:8, 3:9]) == 30
+    assert np.count_nonzero(result.verified_source_edit[12:16, 16:20]) == 0
+    assert np.count_nonzero(result.positive_edit) == 0
+
+
+def test_source_edit_reconciliation_uses_box_only_as_existing_ownership() -> None:
+    claim = np.zeros((20, 24), dtype=np.uint8)
+    existing = np.zeros_like(claim)
+    existing[4:8, 5:10] = 255
+    ownership = np.zeros_like(claim)
+    ownership[3:10, 3:12] = 255
+
+    result = reconcile_source_edit(
+        claim,
+        existing,
+        allow_positive_addition=True,
+        existing_ownership_evidence=ownership,
+    )
+
+    assert np.array_equal(result.verified_source_edit, existing)
+    assert np.count_nonzero(result.positive_edit) == 0
+    assert np.count_nonzero(result.replacement_edit) == 20
 
 
 def test_fixed_ctd_onnx_preprocess_preserves_rgb_channel_order() -> None:
@@ -495,6 +606,37 @@ def test_positive_stage2_composite_changes_only_exact_edit_pixels() -> None:
     assert np.all(final_mask[2:4, 2:5] == 255)
     assert np.all(final_mask[7:10, 9:13] == 255)
     assert np.count_nonzero(final_mask) == 18
+
+
+def test_replacement_composite_restores_rejected_source_edits() -> None:
+    original = np.full((8, 10, 3), 20, dtype=np.uint8)
+    baseline = original.copy()
+    baseline[1:3, 1:4] = 80
+    baseline[5:7, 1:4] = 90
+    generated = np.full_like(original, 140)
+    baseline_mask = np.zeros((8, 10), dtype=np.uint8)
+    baseline_mask[1:3, 1:4] = 255
+    baseline_mask[5:7, 1:4] = 255
+    existing_source = np.zeros_like(baseline_mask)
+    existing_source[1:3, 1:4] = 255
+    replacement = np.zeros_like(baseline_mask)
+    replacement[1:3, 2:5] = 255
+
+    candidate, final_mask = composite_replacement_result(
+        original,
+        baseline,
+        generated,
+        replacement,
+        baseline_mask,
+        existing_source,
+    )
+
+    assert np.all(candidate[1:3, 1] == 20)
+    assert np.all(candidate[1:3, 2:5] == 140)
+    assert np.all(candidate[5:7, 1:4] == 90)
+    assert np.count_nonzero(final_mask[1:3, 1]) == 0
+    assert np.count_nonzero(final_mask[1:3, 2:5]) == 6
+    assert np.count_nonzero(final_mask[5:7, 1:4]) == 6
 
 
 def test_stage2_residue_score_decreases_when_target_contrast_is_removed() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+import cv2
 import numpy as np
 
 from .contracts import DetectorBox, binary_mask
@@ -14,6 +15,51 @@ class ProvenanceFusionResult:
     positive_claim: np.ndarray
     positive_edit: np.ndarray
     selected_raw_text_boxes: tuple[DetectorBox, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceEditReconciliation:
+    verified_source_edit: np.ndarray
+    positive_edit: np.ndarray
+    replacement_edit: np.ndarray
+
+
+def reconcile_source_edit(
+    detector_claim: np.ndarray,
+    existing_edit: np.ndarray,
+    *,
+    allow_positive_addition: bool,
+    existing_ownership_evidence: np.ndarray | None = None,
+) -> SourceEditReconciliation:
+    """Keep detector-verified source edits and explicitly allowed additions."""
+
+    claim = binary_mask(detector_claim)
+    existing = binary_mask(existing_edit, claim.shape)
+    verification = claim
+    if existing_ownership_evidence is not None:
+        ownership_evidence = binary_mask(existing_ownership_evidence, claim.shape)
+        verification = cv2.bitwise_or(claim, ownership_evidence)
+    component_count, labels = cv2.connectedComponents(
+        (existing > 0).astype(np.uint8),
+        connectivity=8,
+    )
+    verified = np.zeros_like(existing)
+    if component_count > 1:
+        touched = np.unique(labels[verification > 0])
+        touched = touched[touched > 0]
+        if touched.size:
+            verified[np.isin(labels, touched)] = 255
+    positive = np.where(
+        (claim > 0) & (existing == 0) & bool(allow_positive_addition),
+        255,
+        0,
+    ).astype(np.uint8)
+    replacement = cv2.bitwise_or(verified, positive)
+    return SourceEditReconciliation(
+        verified_source_edit=np.ascontiguousarray(verified),
+        positive_edit=np.ascontiguousarray(positive),
+        replacement_edit=np.ascontiguousarray(replacement),
+    )
 
 
 def build_provenance_fusion(
