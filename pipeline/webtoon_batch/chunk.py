@@ -285,9 +285,9 @@ class ChunkMixin:
             mask,
             mask_blocks,
             config=config,
-            raw_source_mask=mask_details.get(
-                "positive_claim_raw_mask",
-                raw_mask,
+            raw_source_mask=raw_mask,
+            positive_claim_raw_mask=mask_details.get(
+                "positive_claim_raw_mask"
             ),
             protected_corner_mask=mask_details.get("protected_corner_mask"),
         )

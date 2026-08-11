@@ -22,6 +22,7 @@ class CTDPositiveClaimResult:
     providers: tuple[str, ...]
     detect_size: int
     model_sha256: str
+    model_opset: int
 
 
 _SESSION_CACHE: dict[tuple[str, tuple[str, ...], int], Any] = {}
@@ -60,7 +61,7 @@ def _cached_session(model_path: str, providers: list[str], detect_size: int):
 class CTDPositiveClaimProvider:
     """Fixed-1280 CTD raw-mask provider used only as positive evidence."""
 
-    MODEL_SHA256 = "c954820c56e611a0470bf9cc119c4a5ffa73c1c15bbdb028c8cd1b58cb008277"
+    MODEL_OPSET = 12
 
     def __init__(
         self,
@@ -72,6 +73,8 @@ class CTDPositiveClaimProvider:
         self.detect_size = int(detect_size)
         self.max_batch_size = max(1, int(max_batch_size))
         self.requested_providers = _required_providers(device)
+        model_spec = ModelDownloader.registry[ModelID.CTD_POSITIVE_CLAIM_ONNX]
+        self.model_sha256 = str(model_spec.sha256[0] or "")
         self.model_path = ModelDownloader.primary_path(
             ModelID.CTD_POSITIVE_CLAIM_ONNX
         )
@@ -148,5 +151,6 @@ class CTDPositiveClaimProvider:
             raw_mask=np.ascontiguousarray(raw),
             providers=self.providers,
             detect_size=self.detect_size,
-            model_sha256=self.MODEL_SHA256,
+            model_sha256=self.model_sha256,
+            model_opset=self.MODEL_OPSET,
         )

@@ -1972,6 +1972,13 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
                             "mask_pixel_count": 20,
                         },
                         {
+                            "phase": "positive_evidence",
+                            "actual_device": "cuda:0",
+                            "status": "completed",
+                            "is_inference": True,
+                            "mask_pixel_count": 14,
+                        },
+                        {
                             "phase": sensitive_path,
                             "actual_device": "secret_model_name",
                             "status": "private-source-title",
@@ -2007,6 +2014,13 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
             "is_inference": True,
             "mask_pixel_count": 20,
             "phase": "generic",
+            "status": "completed",
+        },
+        {
+            "actual_device": "cuda:0",
+            "is_inference": True,
+            "mask_pixel_count": 14,
+            "phase": "positive_evidence",
             "status": "completed",
         },
     ]
