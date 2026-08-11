@@ -17,6 +17,7 @@ from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mas
 from modules.utils.bubble_erase import (
     BubbleEraseBlockStats,
     ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+    ERASE_MODE_TEXT_FREE_LAMA,
     erase_text_bubble_regions,
     set_block_erase_metadata,
 )
@@ -27,6 +28,9 @@ from modules.utils.inpaint_evidence import (
     BlockInpaintEvidence,
     SourceLamaBlockwiseResult,
     mask_patch_from_page_mask,
+)
+from modules.utils.inpaint_positive_evidence import (
+    build_detector_positive_text_evidence,
 )
 from modules.utils.mask_roi import normalize_xyxy, resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
@@ -936,6 +940,106 @@ def _build_owned_block_evidence(
     return evidence
 
 
+def _apply_detector_positive_text_evidence(
+    original_image: np.ndarray,
+    current_image: np.ndarray,
+    combined_mask: np.ndarray,
+    blocks: list[TextBlock],
+    evidence: list[BlockInpaintEvidence],
+    diagnostics: list[dict],
+    inpainter,
+    config,
+    raw_source_mask: np.ndarray | None,
+    protected_corner_mask: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, list[BlockInpaintEvidence]]:
+    positive = build_detector_positive_text_evidence(
+        blocks,
+        raw_source_mask,
+        evidence,
+        image_shape=original_image.shape,
+        existing_edit_mask=combined_mask,
+        protected_corner_mask=protected_corner_mask,
+    )
+    evidence_by_index = {
+        item.block_index: item
+        for item in evidence
+        if item.block_index is not None
+    }
+    for block_index, claim_patch in positive.block_claim_patches.items():
+        block = blocks[block_index]
+        item = evidence_by_index.get(block_index)
+        if item is None:
+            item = BlockInpaintEvidence(
+                block_id=str(
+                    getattr(block, "canonical_block_id", "")
+                    or getattr(block, "block_id", "")
+                    or ""
+                ),
+                block_index=block_index,
+            )
+            evidence.append(item)
+            evidence_by_index[block_index] = item
+        item.positive_claim = claim_patch
+        item.positive_edit = positive.block_edit_patches.get(block_index)
+        item.claim_providers = positive.block_claim_providers.get(
+            block_index,
+            (),
+        )
+
+    if not np.any(positive.positive_edit):
+        return current_image, combined_mask, evidence
+
+    generated, positive_diagnostics = _run_lama_or_fallback(
+        original_image,
+        positive.positive_edit,
+        [],
+        inpainter,
+        config,
+        check_need_inpaint=False,
+    )
+    positive_indices = sorted(positive.block_edit_patches)
+    for diagnostic in positive_diagnostics:
+        diagnostic["phase"] = "positive_evidence"
+        diagnostic["positive_text_evidence"] = True
+        diagnostic["positive_block_indices"] = positive_indices
+        diagnostic["positive_claim_pixel_count"] = int(
+            np.count_nonzero(positive.positive_claim)
+        )
+        diagnostic["positive_edit_pixel_count"] = int(
+            np.count_nonzero(positive.positive_edit)
+        )
+    diagnostics.extend(positive_diagnostics)
+    current_image = composite_with_edit_mask(
+        current_image,
+        generated,
+        positive.positive_edit,
+    )
+    combined_mask = np.where(
+        (combined_mask > 0) | (positive.positive_edit > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    for block_index, patch in positive.block_edit_patches.items():
+        block = blocks[block_index]
+        mode = (
+            ERASE_MODE_TEXT_FREE_LAMA
+            if str(getattr(block, "text_class", "") or "") == "text_free"
+            else ERASE_MODE_BUBBLE_LAMA_FALLBACK
+        )
+        set_block_erase_metadata(
+            block,
+            BubbleEraseBlockStats(
+                mode=mode,
+                edit_pixel_count=patch.pixel_count,
+                skipped_reason="positive_text_evidence_recovered",
+            ),
+        )
+        item = evidence_by_index[block_index]
+        item.erase_mode = mode
+        item.skipped_reason = "positive_text_evidence_recovered"
+    return current_image, combined_mask, evidence
+
+
 def source_lama_blockwise_inpaint_result(
     image: np.ndarray,
     mask: np.ndarray,
@@ -948,7 +1052,7 @@ def source_lama_blockwise_inpaint_result(
     protected_corner_mask: np.ndarray | None = None,
 ) -> SourceLamaBlockwiseResult:
     block_list = list(blocks or [])
-    if image is None or mask is None or not np.any(mask) or not block_list:
+    if image is None or mask is None or not block_list:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
         cleaned = composite_with_edit_mask(image, converted, mask)
@@ -998,6 +1102,26 @@ def source_lama_blockwise_inpaint_result(
             check_need_inpaint=check_need_inpaint,
             diagnostic_block_indices=list(range(len(block_list))),
         )
+        evidence = _build_owned_block_evidence(
+            block_list,
+            normalized_raw_source,
+            source_mask,
+            source_mask,
+            image.shape,
+            original_block_indices,
+        )
+        cleaned, source_mask, evidence = _apply_detector_positive_text_evidence(
+            image,
+            cleaned,
+            source_mask,
+            block_list,
+            evidence,
+            diagnostics,
+            inpainter,
+            config,
+            normalized_raw_source,
+            protected_corner_mask,
+        )
         cleaned, guarded_mask = _apply_protected_corner_guard(
             image,
             cleaned,
@@ -1008,16 +1132,7 @@ def source_lama_blockwise_inpaint_result(
             image=cleaned,
             edit_mask=guarded_mask,
             diagnostics=diagnostics,
-            evidence=tuple(
-                _build_owned_block_evidence(
-                    block_list,
-                    normalized_raw_source,
-                    source_mask,
-                    source_mask,
-                    image.shape,
-                    original_block_indices,
-                )
-            ),
+            evidence=tuple(evidence),
         )
 
     lama_mask = np.where(
@@ -1173,6 +1288,18 @@ def source_lama_blockwise_inpaint_result(
         255,
         0,
     ).astype(np.uint8)
+    result_image, combined_mask, evidence = _apply_detector_positive_text_evidence(
+        image,
+        result_image,
+        combined_mask,
+        block_list,
+        evidence,
+        diagnostics,
+        inpainter,
+        config,
+        normalized_raw_source,
+        protected_corner_mask,
+    )
     result = composite_with_edit_mask(image, result_image, combined_mask)
     result, combined_mask = _apply_protected_corner_guard(
         image,
