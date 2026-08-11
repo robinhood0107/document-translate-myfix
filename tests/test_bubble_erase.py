@@ -3187,8 +3187,15 @@ class BubbleFillBackendTests(unittest.TestCase):
         )
         self.assertEqual(len(result.evidence), 1)
         structure_patch = result.evidence[0].structure_protect
+        interior_patch = result.evidence[0].bubble_interior
         self.assertIsNotNone(structure_patch)
+        self.assertIsNotNone(interior_patch)
         self.assertEqual(structure_patch.xyxy, (8, 8, 88, 88))
+        self.assertEqual(interior_patch.xyxy, (8, 8, 88, 88))
+        self.assertEqual(
+            np.count_nonzero(interior_patch.mask),
+            np.count_nonzero(interior_cap),
+        )
         self.assertGreater(
             np.count_nonzero(structure_patch.mask[34:37, 28:52]),
             0,
