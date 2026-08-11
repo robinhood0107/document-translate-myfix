@@ -255,3 +255,73 @@ def reference_ctd_raw_mask(module, net, image_rgb: np.ndarray, detect_size: int)
     mask = mask[..., : mask.shape[0] - dh, : mask.shape[1] - dw]
     raw = module.postprocess_mask(mask)
     return cv2.resize(raw, (width, height), interpolation=cv2.INTER_LINEAR)
+
+
+def load_ballons_lama_runtime_reference(ballons_root: Path):
+    """Load Ballons' original LaMa class without importing its UI stack."""
+
+    root = ballons_root.resolve()
+    source = root / "ballontranslator" / "modules" / "inpaint" / "inpaint_default.py"
+    if not source.is_file():
+        raise FileNotFoundError(f"Ballons LaMa reference source not found: {source}")
+
+    package_names = {
+        "ballontranslator": root / "ballontranslator",
+        "ballontranslator.modules": root / "ballontranslator" / "modules",
+        "ballontranslator.modules.inpaint": root
+        / "ballontranslator"
+        / "modules"
+        / "inpaint",
+        "ballontranslator.modules.textdetector": root
+        / "ballontranslator"
+        / "modules"
+        / "textdetector",
+        "ballontranslator.utils": root / "ballontranslator" / "utils",
+    }
+    for name, path in package_names.items():
+        sys.modules[name] = _package(name, path)
+
+    import torch
+    from modules.source_parity_vendor.utils.imgproc_utils import resize_keepasp
+
+    def smart_resize(image, size):
+        height, width = map(int, size)
+        return __import__("cv2").resize(image, (width, height))
+
+    _stub_module(
+        "ballontranslator.utils.imgproc_utils",
+        resize_keepasp=resize_keepasp,
+        smart_resize=smart_resize,
+    )
+    _stub_module(
+        "ballontranslator.modules.base",
+        DEFAULT_DEVICE="cpu",
+        DEVICE_SELECTOR=lambda **_kwargs: {"value": "cpu"},
+        TORCH_DTYPE_MAP={"fp32": torch.float32, "bf16": torch.bfloat16},
+        BF16_SUPPORTED="cuda" if torch.cuda.is_available() else "cpu",
+    )
+    textdetector = sys.modules["ballontranslator.modules.textdetector"]
+    textdetector.TextBlock = _ReferenceTextBlock
+
+    class _InpainterBase(_ReferenceBase):
+        def __init__(self, **_params):
+            self.params = copy.deepcopy(getattr(self.__class__, "params", {}))
+            self.logger = _ReferenceLogger()
+
+        def updateParam(self, key, value):
+            self.params[key]["value"] = value
+
+    _stub_module(
+        "ballontranslator.modules.inpaint.base",
+        InpainterBase=_InpainterBase,
+        register_inpainter=lambda _name: (lambda value: value),
+    )
+
+    module_name = "ballontranslator.modules.inpaint.inpaint_default"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    if spec is None or spec.loader is None:
+        raise ImportError("unable to build the Ballons LaMa module spec")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module

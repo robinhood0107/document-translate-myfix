@@ -30,3 +30,12 @@ Use the scripts in `scripts/` with the managed private-artifact harness. A
 candidate is not a finalist merely because target coverage is high: raw claim
 structure overlap, no-edit false edits, component coverage, ownership leakage,
 runtime, and model provenance are all retained in the Stage 1 record.
+
+Stage 2 includes a pinned Ballons end-to-end reference. It runs Ballons' native
+CTD refined mask, block order, sequential crops, and whole-bubble flat fill
+with the source-parity LaMa Large core, writes the actual changed mask, and
+scores target components, exact protected and
+ambiguous annotations, detector-mask outside changes, residue, CUDA runtime,
+and VRAM. `check_inpaint_ballons_lama_reference_parity.py` proves the maintained
+LaMa path is pixel-exact against Ballons' original Python `_inpaint` method on a
+golden CUDA fixture before the reference result is used.

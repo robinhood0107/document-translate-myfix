@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from dataclasses import dataclass
 from pathlib import Path
 import time
 from typing import Iterable
@@ -18,6 +19,13 @@ from modules.utils.textblock import TextBlock
 from .contracts import CandidateMaskResult, binary_mask
 from .contracts import DetectorBox
 from .reference_probe import load_ballons_ctd_runtime_reference
+
+
+@dataclass(frozen=True, slots=True)
+class BallonsCTDNativeDetection:
+    raw_mask: np.ndarray
+    refined_mask: np.ndarray
+    blocks: tuple[object, ...]
 
 
 class BallonsCTDFullPageReference:
@@ -107,8 +115,7 @@ class BallonsCTDOriginalReference:
         self.detect_size = int(detect_size)
         self.dilate_size = max(0, int(dilate_size))
 
-    def infer(self, image_rgb: np.ndarray) -> CandidateMaskResult:
-        start = time.perf_counter()
+    def detect_native(self, image_rgb: np.ndarray) -> BallonsCTDNativeDetection:
         raw, refined, blocks = self.detector(
             image_rgb,
             refine_mode=self.module.REFINEMASK_INPAINT,
@@ -116,6 +123,13 @@ class BallonsCTDOriginalReference:
         )
         raw = binary_mask(raw)
         refined = binary_mask(refined, raw.shape)
+        return BallonsCTDNativeDetection(raw, refined, tuple(blocks))
+
+    def infer(self, image_rgb: np.ndarray) -> CandidateMaskResult:
+        start = time.perf_counter()
+        detection = self.detect_native(image_rgb)
+        raw = detection.raw_mask
+        refined = detection.refined_mask
         if self.dilate_size > 0:
             kernel = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE,
@@ -126,7 +140,7 @@ class BallonsCTDOriginalReference:
         else:
             dilated = raw.copy()
         records: list[DetectorBox] = []
-        for block in blocks:
+        for block in detection.blocks:
             xyxy = getattr(block, "xyxy", None)
             if xyxy is None or len(xyxy) < 4:
                 continue
