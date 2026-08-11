@@ -367,32 +367,12 @@ class InpaintDebugTests(unittest.TestCase):
                 ),
             ) as run_lama, mock.patch.object(
                 module,
-                "refine_bubble_residue_inpaint",
-                return_value=(
-                    np.zeros((32, 32, 3), dtype=np.uint8),
-                    mask.copy(),
-                    {
-                        "applied": False,
-                        "component_count": 0,
-                        "block_count": 0,
-                        "residue_pass_truncated_block_count": 2,
-                        "residue_pass_cap_dropped_candidate_count": 5,
-                        "residue_pass_structure_guard_block_count": 3,
-                    },
-                ),
-            ), mock.patch.object(
-                module,
                 "apply_duplicate_bubble_inner_fill",
                 return_value=(
                     np.zeros((32, 32, 3), dtype=np.uint8),
                     mask.copy(),
                     {
-                        "applied": False,
-                        "component_count": 0,
-                        "block_count": 0,
-                        "residue_pass_truncated_block_count": 2,
-                        "residue_pass_cap_dropped_candidate_count": 5,
-                        "residue_pass_structure_guard_block_count": 3,
+                        "autonomous_residue_cleanup": "disabled",
                         "duplicate_bubble_inner_fill": {"applied": False},
                     },
                 ),
@@ -455,12 +435,7 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(record["refiner_device"], "cuda")
         self.assertEqual(record["inpaint_runtime_inference_call_count"], 1)
         self.assertEqual(record["inpaint_runtime_cpu_fallback_count"], 0)
-        self.assertEqual(record["residue_pass_truncated_block_count"], 2)
-        self.assertEqual(
-            record["residue_pass_cap_dropped_candidate_count"],
-            5,
-        )
-        self.assertEqual(record["residue_pass_structure_guard_block_count"], 3)
+        self.assertEqual(record["residue_pass_truncated_block_count"], 0)
         self.assertEqual(record["erase_mode_distribution"], {"bubble_skipped": 1})
         self.assertEqual(
             record["erase_skipped_reason_distribution"],

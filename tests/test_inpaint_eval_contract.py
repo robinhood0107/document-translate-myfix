@@ -1382,15 +1382,6 @@ def test_main_projects_required_skip_to_page_summary_and_gate(
                 "erase_skipped_reason_distribution": {
                     "microtexture_source_seed_unavailable": 1,
                 },
-                "residue_pass_cap_dropped_candidate_count": 5,
-                "residue_pass_structure_guard_block_count": 3,
-                "pass2_backend_distribution": {
-                    "bubble_lama_fallback": 1,
-                    "bubble_flat_fill": 2,
-                },
-                "pass2_applied_block_count": 2,
-                "pass2_fallback_block_count": 1,
-                "pass2_applied_pixel_count": 17,
             }
         )
         return record
@@ -1418,28 +1409,10 @@ def test_main_projects_required_skip_to_page_summary_and_gate(
     assert page["erase_skipped_reason_distribution"] == {
         "microtexture_source_seed_unavailable": 1,
     }
-    assert page["residue_pass_cap_dropped_candidate_count"] == 5
-    assert page["residue_pass_structure_guard_block_count"] == 3
-    assert page["pass2_backend_distribution"] == {
-        "bubble_lama_fallback": 1,
-        "bubble_flat_fill": 2,
-    }
-    assert page["pass2_applied_block_count"] == 2
-    assert page["pass2_fallback_block_count"] == 1
-    assert page["pass2_applied_pixel_count"] == 17
     assert summary["erase_mode_distribution"] == {"bubble_skipped": 1}
     assert summary["erase_skipped_reason_distribution"] == {
         "microtexture_source_seed_unavailable": 1,
     }
-    assert summary["residue_pass_cap_dropped_candidate_count"] == 5
-    assert summary["residue_pass_structure_guard_block_count"] == 3
-    assert summary["pass2_backend_distribution"] == {
-        "bubble_lama_fallback": 1,
-        "bubble_flat_fill": 2,
-    }
-    assert summary["pass2_applied_block_count"] == 2
-    assert summary["pass2_fallback_block_count"] == 1
-    assert summary["pass2_applied_pixel_count"] == 17
     assert summary["required_skipped_block_count"] == 1
     assert summary["required_gate_failures"] == [
         "corpus-a1/a1-001:required_bubble_erase_skipped"

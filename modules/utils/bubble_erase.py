@@ -2982,19 +2982,8 @@ def _fill_bubble_mask(
     )
 
 
-def fill_bubble_edit_mask(
-    image_rgb: np.ndarray,
-    edit_mask: np.ndarray,
-    *,
-    bubble_roi: tuple[int, int, int, int] | None = None,
-    background_exclude_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, str]:
-    return _fill_bubble_mask(
-        image_rgb,
-        edit_mask,
-        bubble_roi=bubble_roi,
-        background_exclude_mask=background_exclude_mask,
-    )
+def fill_bubble_edit_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
+    return _fill_bubble_mask(image_rgb, edit_mask)
 
 
 def erase_text_bubble_regions(
