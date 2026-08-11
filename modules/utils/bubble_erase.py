@@ -12,6 +12,10 @@ from modules.utils.inpaint_composite import (
     count_changed_outside_edit_mask,
     normalize_edit_mask,
 )
+from modules.utils.inpaint_evidence import (
+    BlockInpaintEvidence,
+    MaskPatch,
+)
 from modules.utils.mask_roi import (
     build_text_prior_mask,
     normalize_xyxy,
@@ -42,6 +46,7 @@ class BubbleEraseResult:
     fallback_mask: np.ndarray
     expanded_bubble_mask: np.ndarray
     stats: dict
+    evidence: tuple[BlockInpaintEvidence, ...] = ()
 
 
 @dataclass(slots=True)
@@ -3022,6 +3027,10 @@ def erase_text_bubble_regions(
     fallback_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
     bubble_roi_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
     block_entries: list[dict] = []
+    evidence_inputs: dict[
+        int,
+        tuple[object, tuple[int, int, int, int], np.ndarray, np.ndarray, np.ndarray],
+    ] = {}
     applied_blocks = 0
     fallback_blocks = 0
 
@@ -3084,6 +3093,16 @@ def erase_text_bubble_regions(
                 np.asarray(original_image)[y1:y2, x1:x2],
                 context_source_crop,
                 text_prior_mask=semantic_text_prior,
+            )
+            evidence_inputs[index] = (
+                block,
+                bubble_roi,
+                source_crop.copy(),
+                normalize_edit_mask(
+                    line_art_context.line_protect_mask,
+                    source_crop.shape,
+                ),
+                protected[y1:y2, x1:x2].copy(),
             )
 
         edit_mask, mask_stats = build_bubble_residual_edit_mask(
@@ -3467,6 +3486,23 @@ def erase_text_bubble_regions(
 
     result = composite_with_edit_mask(current_cleaned, result, union_edit_mask)
     outside_changed = count_changed_outside_edit_mask(current_cleaned, result, union_edit_mask)
+    evidence_entries: list[BlockInpaintEvidence] = []
+    for entry in block_entries:
+        input_row = evidence_inputs.get(int(entry.get("index", -1)))
+        if input_row is None:
+            continue
+        evidence_block, evidence_roi, owned_crop, structure_crop, ownership_crop = input_row
+        evidence_entries.append(
+            BlockInpaintEvidence(
+                block_id=str(getattr(evidence_block, "block_id", "") or ""),
+                block_index=int(entry.get("index", -1)),
+                erase_mode=str(entry.get("mode", "") or ""),
+                skipped_reason=str(entry.get("skipped_reason", "") or ""),
+                source_owned=MaskPatch(evidence_roi, owned_crop),
+                structure_protect=MaskPatch(evidence_roi, structure_crop),
+                ownership_protect=MaskPatch(evidence_roi, ownership_crop),
+            )
+        )
     return BubbleEraseResult(
         image=result,
         edit_mask=union_edit_mask,
@@ -3482,4 +3518,5 @@ def erase_text_bubble_regions(
             "changed_outside_edit_mask_pixel_count": int(outside_changed),
             "blocks": block_entries,
         },
+        evidence=tuple(evidence_entries),
     )

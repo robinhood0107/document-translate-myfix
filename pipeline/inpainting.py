@@ -44,7 +44,7 @@ from modules.utils.inpaint_composite import (
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
 from modules.inpainting.source_lama_blockwise import (
     release_source_lama_cache,
-    source_lama_blockwise_inpaint,
+    source_lama_blockwise_inpaint_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class InpaintingHandler:
         self.cached_inpainter_runtime_signature = None
         self.inpainter_driver_baseline = None
         self.last_inpaint_edit_mask = None
+        self.last_inpaint_evidence = ()
         self.last_inpaint_diagnostics: dict[str, Any] = {}
         self.inpainter_runtime_contract: dict[str, Any] = {}
         self.last_profile_change_release: dict[str, Any] = {}
@@ -279,6 +280,7 @@ class InpaintingHandler:
         protected_corner_mask: np.ndarray | None = None,
     ):
         self.last_inpaint_edit_mask = None
+        self.last_inpaint_evidence = ()
         self.last_inpaint_diagnostics = {}
         if image is None or mask is None:
             return None
@@ -315,19 +317,19 @@ class InpaintingHandler:
             "status": "running",
         }
         try:
-            result, edit_mask, model_diagnostics = (
-                source_lama_blockwise_inpaint(
+            blockwise_result = source_lama_blockwise_inpaint_result(
                     image,
                     mask,
                     blocks,
                     self.inpainter_cache,
                     config,
                     check_need_inpaint=True,
-                    return_edit_mask=True,
-                    return_diagnostics=True,
                     protected_corner_mask=protected_corner_mask,
                 )
-            )
+            result = blockwise_result.image
+            edit_mask = blockwise_result.edit_mask
+            model_diagnostics = blockwise_result.diagnostics
+            self.last_inpaint_evidence = blockwise_result.evidence
             diagnostics["model_call_diagnostics"] = model_diagnostics
             diagnostics["oom_retry_count"] = sum(
                 int(item.get("oom_retry_count", 0) or 0)

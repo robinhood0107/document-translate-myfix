@@ -20,6 +20,7 @@ from modules.inpainting.source_lama_blockwise import (
     _split_bubble_source_mask,
     release_source_lama_cache,
     source_lama_blockwise_inpaint,
+    source_lama_blockwise_inpaint_result,
 )
 from modules.inpainting.runtime_contract import InpaintingCudaOOMError
 from modules.utils.image_utils import annotate_block_mask_attribution, generate_mask
@@ -60,6 +61,78 @@ def _unloaded_inpainter() -> SourceLaMaLarge:
     inpainter.check_need_inpaint = False
     inpainter.ensure_loaded = lambda: None
     return inpainter
+
+
+def test_canonical_result_preserves_legacy_pixels_and_returns_sparse_evidence(
+    monkeypatch,
+) -> None:
+    image = np.full((32, 32, 3), 180, dtype=np.uint8)
+    mask = np.zeros((32, 32), dtype=np.uint8)
+    mask[12:16, 12:16] = 255
+    canonical_block = _text_block(
+        xyxy=[8, 8, 20, 20],
+        text_class="text_free",
+    )
+    legacy_block = deepcopy(canonical_block)
+
+    class _FakeSourceLaMa:
+        def __init__(self) -> None:
+            self.run_diagnostics: list[dict] = []
+
+        def inpaint(
+            self,
+            source_image,
+            source_mask,
+            _blocks,
+            *,
+            check_need_inpaint,
+            diagnostic_block_indices,
+        ):
+            output = source_image.copy()
+            output[source_mask > 0] = 99
+            self.run_diagnostics.append(
+                {
+                    "phase": "block",
+                    "status": "completed",
+                    "is_inference": True,
+                    "block_index": diagnostic_block_indices[0],
+                }
+            )
+            return output
+
+    monkeypatch.setattr(
+        "modules.inpainting.source_lama_blockwise.get_source_lama_large",
+        lambda **_kwargs: _FakeSourceLaMa(),
+    )
+
+    canonical = source_lama_blockwise_inpaint_result(
+        image,
+        mask,
+        [canonical_block],
+        _CallableInpainter(),
+        config=None,
+    )
+    legacy_image, legacy_mask, legacy_diagnostics = source_lama_blockwise_inpaint(
+        image,
+        mask,
+        [legacy_block],
+        _CallableInpainter(),
+        config=None,
+        return_edit_mask=True,
+        return_diagnostics=True,
+    )
+
+    np.testing.assert_array_equal(canonical.image, legacy_image)
+    np.testing.assert_array_equal(canonical.edit_mask, legacy_mask)
+    assert canonical.diagnostics == legacy_diagnostics
+    assert len(canonical.evidence) == 1
+    item = canonical.evidence[0]
+    assert item.block_index == 0
+    assert item.source_owned is not None
+    assert item.source_owned.pixel_count == 16
+    assert item.source_owned.mask.nbytes < mask.nbytes
+    assert item.ownership_protect is not None
+    assert item.ownership_protect.pixel_count == 16
 
 
 def test_clip_half_open_bbox_clips_to_image_and_skips_empty() -> None:
