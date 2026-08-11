@@ -805,6 +805,24 @@ def _process_image(
             "residue_pass_truncated_block_count": int(
                 cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
             ),
+            "residue_pass_cap_dropped_candidate_count": int(
+                cleanup_stats.get("residue_pass_cap_dropped_candidate_count", 0) or 0
+            ),
+            "residue_pass_structure_guard_block_count": int(
+                cleanup_stats.get("residue_pass_structure_guard_block_count", 0) or 0
+            ),
+            "pass2_backend_distribution": dict(
+                cleanup_stats.get("pass2_backend_distribution", {}) or {}
+            ),
+            "pass2_applied_block_count": int(
+                cleanup_stats.get("pass2_applied_block_count", 0) or 0
+            ),
+            "pass2_fallback_block_count": int(
+                cleanup_stats.get("pass2_fallback_block_count", 0) or 0
+            ),
+            "pass2_applied_pixel_count": int(
+                cleanup_stats.get("pass2_applied_pixel_count", 0) or 0
+            ),
         }
     )
 
@@ -990,6 +1008,24 @@ def _process_image(
         ),
         "residue_pass_truncated_block_count": int(
             cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
+        ),
+        "residue_pass_cap_dropped_candidate_count": int(
+            cleanup_stats.get("residue_pass_cap_dropped_candidate_count", 0) or 0
+        ),
+        "residue_pass_structure_guard_block_count": int(
+            cleanup_stats.get("residue_pass_structure_guard_block_count", 0) or 0
+        ),
+        "pass2_backend_distribution": dict(
+            cleanup_stats.get("pass2_backend_distribution", {}) or {}
+        ),
+        "pass2_applied_block_count": int(
+            cleanup_stats.get("pass2_applied_block_count", 0) or 0
+        ),
+        "pass2_fallback_block_count": int(
+            cleanup_stats.get("pass2_fallback_block_count", 0) or 0
+        ),
+        "pass2_applied_pixel_count": int(
+            cleanup_stats.get("pass2_applied_pixel_count", 0) or 0
         ),
         **changed_stats,
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
@@ -1462,6 +1498,12 @@ def _write_page_metrics_jsonl(
         "cleanup_component_count",
         "cleanup_block_count",
         "residue_pass_truncated_block_count",
+        "residue_pass_cap_dropped_candidate_count",
+        "residue_pass_structure_guard_block_count",
+        "pass2_backend_distribution",
+        "pass2_applied_block_count",
+        "pass2_fallback_block_count",
+        "pass2_applied_pixel_count",
         "erase_mode_distribution",
         "erase_skipped_reason_distribution",
         "stage_timings_seconds",
@@ -1951,11 +1993,15 @@ def main() -> int:
         ]
         erase_mode_distribution: Counter[str] = Counter()
         erase_skipped_reason_distribution: Counter[str] = Counter()
+        pass2_backend_distribution: Counter[str] = Counter()
         block_timings: list[float] = []
         for record in all_records:
             erase_mode_distribution.update(record.get("erase_mode_distribution", {}))
             erase_skipped_reason_distribution.update(
                 record.get("erase_skipped_reason_distribution", {})
+            )
+            pass2_backend_distribution.update(
+                record.get("pass2_backend_distribution", {})
             )
             block_timings.extend(
                 float(item.get("elapsed_seconds", 0.0) or 0.0)
@@ -2094,6 +2140,41 @@ def main() -> int:
             ),
             "residue_pass_truncated_block_count": sum(
                 int(record["residue_pass_truncated_block_count"])
+                for record in all_records
+            ),
+            "residue_pass_cap_dropped_candidate_count": sum(
+                int(
+                    record.get(
+                        "residue_pass_cap_dropped_candidate_count",
+                        0,
+                    )
+                    or 0
+                )
+                for record in all_records
+            ),
+            "residue_pass_structure_guard_block_count": sum(
+                int(
+                    record.get(
+                        "residue_pass_structure_guard_block_count",
+                        0,
+                    )
+                    or 0
+                )
+                for record in all_records
+            ),
+            "pass2_backend_distribution": dict(
+                sorted(pass2_backend_distribution.items())
+            ),
+            "pass2_applied_block_count": sum(
+                int(record.get("pass2_applied_block_count", 0) or 0)
+                for record in all_records
+            ),
+            "pass2_fallback_block_count": sum(
+                int(record.get("pass2_fallback_block_count", 0) or 0)
+                for record in all_records
+            ),
+            "pass2_applied_pixel_count": sum(
+                int(record.get("pass2_applied_pixel_count", 0) or 0)
                 for record in all_records
             ),
             "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
