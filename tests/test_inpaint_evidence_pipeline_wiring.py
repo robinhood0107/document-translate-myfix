@@ -14,6 +14,7 @@ def _assert_raw_mask_handoff_and_evidence_release(callable_object) -> None:
     source = inspect.getsource(callable_object)
 
     assert "raw_source_mask=" in source
+    assert "positive_claim_raw_mask=" in source
     assert "last_inpaint_evidence" in source
     assert "last_inpaint_evidence = ()" in source
 

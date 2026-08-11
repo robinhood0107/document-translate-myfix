@@ -61,6 +61,8 @@ def test_detector_positive_evidence_uses_one_page_call_and_exact_mask(
 ) -> None:
     image = np.full((40, 40, 3), 150, dtype=np.uint8)
     source_mask = np.zeros((40, 40), dtype=np.uint8)
+    raw_source_mask = np.zeros_like(source_mask)
+    raw_source_mask[8:10, 8:10] = 255
     raw_claim = np.zeros_like(source_mask)
     raw_claim[12:16, 12:16] = 255
     block = TextBlock(
@@ -94,6 +96,12 @@ def test_detector_positive_evidence_uses_one_page_call_and_exact_mask(
         fake_erase,
     )
     inpainter = _CallableInpainter()
+    inpainter.name = "lama_large_512px"
+    inpainter.runtime_device = "cuda"
+    inpainter.precision = "bf16"
+    inpainter.session = SimpleNamespace(
+        get_providers=lambda: ["CUDAExecutionProvider"]
+    )
 
     result = source_lama_blockwise_inpaint_result(
         image,
@@ -101,7 +109,8 @@ def test_detector_positive_evidence_uses_one_page_call_and_exact_mask(
         [block],
         inpainter,
         {},
-        raw_source_mask=raw_claim,
+        raw_source_mask=raw_source_mask,
+        positive_claim_raw_mask=raw_claim,
     )
 
     assert inpainter.calls == 1
@@ -113,7 +122,61 @@ def test_detector_positive_evidence_uses_one_page_call_and_exact_mask(
     ) == 1
     assert result.evidence[0].positive_claim.pixel_count == 16
     assert result.evidence[0].positive_edit.pixel_count == 16
+    assert result.evidence[0].source_raw_owned.pixel_count == 4
     assert "ctd_raw_fixed1280" in result.evidence[0].claim_providers
+
+
+def test_detector_positive_evidence_is_fail_closed_for_non_lama_backend(
+    monkeypatch,
+) -> None:
+    image = np.full((40, 40, 3), 150, dtype=np.uint8)
+    source_mask = np.zeros((40, 40), dtype=np.uint8)
+    raw_claim = np.zeros_like(source_mask)
+    raw_claim[12:16, 12:16] = 255
+    block = TextBlock(
+        text_bbox=np.asarray([8, 8, 28, 28], dtype=np.int32),
+        bubble_bbox=np.asarray([4, 4, 32, 32], dtype=np.int32),
+        text_class="text_bubble",
+        inpaint_bboxes=[[12, 12, 16, 16]],
+        detector_origin="bubble_text_rescue",
+    )
+    local_zero = np.zeros((28, 28), dtype=np.uint8)
+
+    monkeypatch.setattr(
+        "modules.inpainting.source_lama_blockwise.erase_text_bubble_regions",
+        lambda _original, current, _mask, _blocks, _config, **_kwargs: SimpleNamespace(
+            image=np.asarray(current).copy(),
+            edit_mask=np.zeros_like(source_mask),
+            fallback_mask=np.zeros_like(source_mask),
+            evidence=(
+                BlockInpaintEvidence(
+                    block_id=block.block_id,
+                    block_index=0,
+                    erase_mode="bubble_skipped",
+                    skipped_reason="microtexture_source_seed_unavailable",
+                    source_owned=MaskPatch((4, 4, 32, 32), local_zero),
+                ),
+            ),
+            stats={"blocks": []},
+        ),
+    )
+    inpainter = _CallableInpainter()
+    inpainter.name = "AOT"
+
+    result = source_lama_blockwise_inpaint_result(
+        image,
+        source_mask,
+        [block],
+        inpainter,
+        {},
+        positive_claim_raw_mask=raw_claim,
+    )
+
+    assert inpainter.calls == 0
+    assert np.count_nonzero(result.edit_mask) == 0
+    assert np.array_equal(result.image, image)
+    assert result.evidence[0].positive_claim.pixel_count == 16
+    assert result.evidence[0].positive_edit is None
 
 
 def _unloaded_inpainter() -> SourceLaMaLarge:

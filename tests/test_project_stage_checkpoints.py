@@ -142,6 +142,11 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             block_id="block-a",
             direction="vertical",
             font_color=(0, 0, 0),
+            detector_origin="direct_text",
+            detector_text_bbox=np.array(
+                [10, 20, 110, 160], dtype=np.int32
+            ),
+            detector_provider="RTDetrV2ONNXDetection",
         )
         first._render_original_xyxy = [10, 20, 110, 160]
         first._render_area_source = "detected_bubble"
@@ -232,6 +237,18 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             self.assertEqual(
                 restored.blocks[0]._render_area_source,
                 "detected_bubble",
+            )
+            self.assertEqual(
+                restored.blocks[0].detector_origin,
+                "direct_text",
+            )
+            np.testing.assert_array_equal(
+                restored.blocks[0].detector_text_bbox,
+                blocks[0].detector_text_bbox,
+            )
+            self.assertEqual(
+                restored.blocks[0].detector_provider,
+                "RTDetrV2ONNXDetection",
             )
             np.testing.assert_array_equal(
                 restored.precomputed_mask_details["raw"],

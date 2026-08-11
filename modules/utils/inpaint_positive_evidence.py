@@ -133,6 +133,11 @@ def build_detector_positive_text_evidence(
         content_ownership = _content_component_ownership(block, image_shape)
         ownership = content_ownership.copy()
         providers = ["content_component_ownership"]
+        detector_provider = str(
+            getattr(block, "detector_provider", "") or ""
+        ).strip()
+        if detector_provider:
+            providers.append(f"block_detector:{detector_provider}")
 
         if str(getattr(block, "detector_origin", "") or "") == "direct_text":
             detector_box = normalize_xyxy(

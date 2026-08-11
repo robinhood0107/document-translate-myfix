@@ -147,7 +147,7 @@ SAFE_PROCESSING_CAUSE_CODES = frozenset(
     }
 )
 SAFE_RUNTIME_PHASES = frozenset(
-    {"block", "bubble_erase", "full", "generic"}
+    {"block", "bubble_erase", "full", "generic", "positive_evidence"}
 )
 SAFE_RUNTIME_STATUSES = frozenset(
     {
@@ -583,9 +583,9 @@ def _process_image(
                 blocks,
                 inpainter,
                 config,
-                raw_source_mask=mask_details.get(
-                    "positive_claim_raw_mask",
-                    raw_mask,
+                raw_source_mask=raw_mask,
+                positive_claim_raw_mask=mask_details.get(
+                    "positive_claim_raw_mask"
                 ),
                 check_need_inpaint=True,
                 protected_corner_mask=mask_details.get("protected_corner_mask"),

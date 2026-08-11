@@ -27,6 +27,7 @@ def _block(xyxy=(20, 30, 80, 70), bubble_xyxy=(10, 20, 90, 90)) -> TextBlock:
         text_bbox=np.asarray(xyxy, dtype=np.int32),
         bubble_bbox=np.asarray(bubble_xyxy, dtype=np.int32),
         text_class="text_bubble",
+        detector_text_bbox=np.asarray(xyxy, dtype=np.int32),
         text="demo",
     )
     block._render_original_xyxy = [30, 40, 70, 60]
@@ -52,6 +53,7 @@ def test_common_mapper_updates_render_and_dynamic_panel_geometry() -> None:
     )
 
     assert _as_ints(block.xyxy) == [27, 27, 87, 67]
+    assert _as_ints(block.detector_text_bbox) == [27, 27, 87, 67]
     assert _as_ints(block.bubble_xyxy) == [17, 17, 97, 87]
     assert _as_ints(block._render_original_xyxy) == [37, 37, 77, 57]
     assert _as_ints(block._render_area_xyxy) == [27, 27, 87, 67]
@@ -140,6 +142,7 @@ def test_visible_coordinate_round_trip_restores_render_metadata() -> None:
         field: _as_ints(getattr(block, field))
         for field in (
             "xyxy",
+            "detector_text_bbox",
             "bubble_xyxy",
             "_render_original_xyxy",
             "_render_area_xyxy",

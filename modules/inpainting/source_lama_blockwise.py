@@ -32,6 +32,7 @@ from modules.utils.inpaint_evidence import (
 from modules.utils.inpaint_positive_evidence import (
     build_detector_positive_text_evidence,
 )
+from modules.utils.inpainting_runtime import is_lama_family_inpainter
 from modules.utils.mask_roi import normalize_xyxy, resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
@@ -949,12 +950,12 @@ def _apply_detector_positive_text_evidence(
     diagnostics: list[dict],
     inpainter,
     config,
-    raw_source_mask: np.ndarray | None,
+    positive_claim_raw_mask: np.ndarray | None,
     protected_corner_mask: np.ndarray | None,
 ) -> tuple[np.ndarray, np.ndarray, list[BlockInpaintEvidence]]:
     positive = build_detector_positive_text_evidence(
         blocks,
-        raw_source_mask,
+        positive_claim_raw_mask,
         evidence,
         image_shape=original_image.shape,
         existing_edit_mask=combined_mask,
@@ -965,6 +966,9 @@ def _apply_detector_positive_text_evidence(
         for item in evidence
         if item.block_index is not None
     }
+    positive_backend_supported = is_lama_family_inpainter(
+        getattr(inpainter, "name", "")
+    )
     for block_index, claim_patch in positive.block_claim_patches.items():
         block = blocks[block_index]
         item = evidence_by_index.get(block_index)
@@ -980,13 +984,19 @@ def _apply_detector_positive_text_evidence(
             evidence.append(item)
             evidence_by_index[block_index] = item
         item.positive_claim = claim_patch
-        item.positive_edit = positive.block_edit_patches.get(block_index)
+        item.positive_edit = (
+            positive.block_edit_patches.get(block_index)
+            if positive_backend_supported
+            else None
+        )
         item.claim_providers = positive.block_claim_providers.get(
             block_index,
             (),
         )
 
     if not np.any(positive.positive_edit):
+        return current_image, combined_mask, evidence
+    if not positive_backend_supported:
         return current_image, combined_mask, evidence
 
     generated, positive_diagnostics = _run_lama_or_fallback(
@@ -1048,6 +1058,7 @@ def source_lama_blockwise_inpaint_result(
     config,
     *,
     raw_source_mask: np.ndarray | None = None,
+    positive_claim_raw_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
     protected_corner_mask: np.ndarray | None = None,
 ) -> SourceLamaBlockwiseResult:
@@ -1073,6 +1084,11 @@ def source_lama_blockwise_inpaint_result(
     normalized_raw_source = (
         normalize_edit_mask(raw_source_mask, image.shape)
         if raw_source_mask is not None
+        else None
+    )
+    normalized_positive_claim = (
+        normalize_edit_mask(positive_claim_raw_mask, image.shape)
+        if positive_claim_raw_mask is not None
         else None
     )
     has_bubble_candidates = any(
@@ -1119,7 +1135,7 @@ def source_lama_blockwise_inpaint_result(
             diagnostics,
             inpainter,
             config,
-            normalized_raw_source,
+            normalized_positive_claim,
             protected_corner_mask,
         )
         cleaned, guarded_mask = _apply_protected_corner_guard(
@@ -1297,7 +1313,7 @@ def source_lama_blockwise_inpaint_result(
         diagnostics,
         inpainter,
         config,
-        normalized_raw_source,
+        normalized_positive_claim,
         protected_corner_mask,
     )
     result = composite_with_edit_mask(image, result_image, combined_mask)
@@ -1323,6 +1339,7 @@ def source_lama_blockwise_inpaint(
     config,
     *,
     raw_source_mask: np.ndarray | None = None,
+    positive_claim_raw_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
     return_edit_mask: bool = False,
     return_diagnostics: bool = False,
@@ -1340,6 +1357,7 @@ def source_lama_blockwise_inpaint(
         inpainter,
         config,
         raw_source_mask=raw_source_mask,
+        positive_claim_raw_mask=positive_claim_raw_mask,
         check_need_inpaint=check_need_inpaint,
         protected_corner_mask=protected_corner_mask,
     )
