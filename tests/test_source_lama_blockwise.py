@@ -24,6 +24,7 @@ from modules.inpainting.source_lama_blockwise import (
 )
 from modules.inpainting.runtime_contract import InpaintingCudaOOMError
 from modules.utils.image_utils import annotate_block_mask_attribution, generate_mask
+from modules.utils.inpaint_evidence import BlockInpaintEvidence, MaskPatch
 from modules.utils.textblock import TextBlock
 
 
@@ -53,6 +54,66 @@ def _text_block(*, xyxy, text_class, bubble_xyxy=None) -> TextBlock:
         bubble_bbox=np.asarray(bubble_xyxy, dtype=np.int32) if bubble_xyxy is not None else None,
         text_class=text_class,
     )
+
+
+def test_detector_positive_evidence_uses_one_page_call_and_exact_mask(
+    monkeypatch,
+) -> None:
+    image = np.full((40, 40, 3), 150, dtype=np.uint8)
+    source_mask = np.zeros((40, 40), dtype=np.uint8)
+    raw_claim = np.zeros_like(source_mask)
+    raw_claim[12:16, 12:16] = 255
+    block = TextBlock(
+        text_bbox=np.asarray([8, 8, 28, 28], dtype=np.int32),
+        bubble_bbox=np.asarray([4, 4, 32, 32], dtype=np.int32),
+        text_class="text_bubble",
+        inpaint_bboxes=[[12, 12, 16, 16]],
+        detector_origin="bubble_text_rescue",
+    )
+    local_zero = np.zeros((28, 28), dtype=np.uint8)
+
+    def fake_erase(_original, current, _mask, _blocks, _config, **_kwargs):
+        return SimpleNamespace(
+            image=np.asarray(current).copy(),
+            edit_mask=np.zeros_like(source_mask),
+            fallback_mask=np.zeros_like(source_mask),
+            evidence=(
+                BlockInpaintEvidence(
+                    block_id=block.block_id,
+                    block_index=0,
+                    erase_mode="bubble_skipped",
+                    skipped_reason="microtexture_source_seed_unavailable",
+                    source_owned=MaskPatch((4, 4, 32, 32), local_zero),
+                ),
+            ),
+            stats={"blocks": []},
+        )
+
+    monkeypatch.setattr(
+        "modules.inpainting.source_lama_blockwise.erase_text_bubble_regions",
+        fake_erase,
+    )
+    inpainter = _CallableInpainter()
+
+    result = source_lama_blockwise_inpaint_result(
+        image,
+        source_mask,
+        [block],
+        inpainter,
+        {},
+        raw_source_mask=raw_claim,
+    )
+
+    assert inpainter.calls == 1
+    assert np.count_nonzero(result.edit_mask) == 16
+    assert np.all(result.image[12:16, 12:16] == 99)
+    assert np.all(result.image[result.edit_mask == 0] == 150)
+    assert len(
+        [row for row in result.diagnostics if row.get("phase") == "positive_evidence"]
+    ) == 1
+    assert result.evidence[0].positive_claim.pixel_count == 16
+    assert result.evidence[0].positive_edit.pixel_count == 16
+    assert "ctd_raw_fixed1280" in result.evidence[0].claim_providers
 
 
 def _unloaded_inpainter() -> SourceLaMaLarge:

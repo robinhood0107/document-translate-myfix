@@ -11,6 +11,8 @@ DEFAULT_CTD_SETTINGS = {
     "ctd_font_size_max": -1,
     "ctd_font_size_min": -1,
     "ctd_mask_dilate_size": 2,
+    "positive_text_evidence_enabled": True,
+    "positive_claim_detect_size": 1280,
     "final_mask_dilate_size": 8,
     "keep_existing_lines": True,
 }
@@ -89,6 +91,12 @@ def normalized_mask_refiner_settings(raw: dict[str, Any] | None) -> dict[str, An
     merged["ctd_font_size_max"] = int(merged.get("ctd_font_size_max", -1) or -1)
     merged["ctd_font_size_min"] = int(merged.get("ctd_font_size_min", -1) or -1)
     merged["ctd_mask_dilate_size"] = int(merged.get("ctd_mask_dilate_size", 2) or 2)
+    merged["positive_text_evidence_enabled"] = bool(
+        merged.get("positive_text_evidence_enabled", True)
+    )
+    merged["positive_claim_detect_size"] = int(
+        merged.get("positive_claim_detect_size", 1280) or 1280
+    )
     merged["final_mask_dilate_size"] = max(0, int(merged.get("final_mask_dilate_size", 8) or 0))
     merged["keep_existing_lines"] = bool(merged.get("keep_existing_lines", True))
     return merged

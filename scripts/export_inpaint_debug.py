@@ -583,7 +583,10 @@ def _process_image(
                 blocks,
                 inpainter,
                 config,
-                raw_source_mask=raw_mask,
+                raw_source_mask=mask_details.get(
+                    "positive_claim_raw_mask",
+                    raw_mask,
+                ),
                 check_need_inpaint=True,
                 protected_corner_mask=mask_details.get("protected_corner_mask"),
             )
@@ -785,6 +788,17 @@ def _process_image(
     )
     quality_metrics.update(
         {
+            "positive_claim_raw_pixel_count": int(
+                np.count_nonzero(
+                    normalize_edit_mask(
+                        mask_details.get("positive_claim_raw_mask"),
+                        image.shape,
+                    )
+                )
+            ),
+            "positive_claim_runtime": dict(
+                mask_details.get("positive_claim_runtime", {}) or {}
+            ),
             "protected_structure_annotation_available": bool(
                 protected_structure_is_annotation
             ),
@@ -1064,6 +1078,7 @@ def _process_image(
     routing_ownership_protect_path = corpus_output / "routing_ownership_protect_masks" / f"{page_base_name}_routing_ownership_protect.png"
     routing_positive_claim_path = corpus_output / "routing_positive_claim_masks" / f"{page_base_name}_routing_positive_claim.png"
     routing_positive_edit_path = corpus_output / "routing_positive_edit_masks" / f"{page_base_name}_routing_positive_edit.png"
+    positive_claim_raw_path = corpus_output / "positive_claim_raw_masks" / f"{page_base_name}_positive_claim_raw.png"
     changed_routing_structure_path = corpus_output / "routing_structure_changes" / f"{page_base_name}_routing_structure_changed.png"
     structure_contact_sheet_path = corpus_output / "routing_structure_contact_sheets" / f"{page_base_name}_routing_structure_changes.png"
     structure_source_contact_sheet_path = corpus_output / "routing_structure_source_contact_sheets" / f"{page_base_name}_routing_structure_source.png"
@@ -1105,6 +1120,13 @@ def _process_image(
     _write_image(routing_ownership_protect_path, routing_ownership_protect)
     _write_image(routing_positive_claim_path, routing_positive_claim)
     _write_image(routing_positive_edit_path, routing_positive_edit)
+    _write_image(
+        positive_claim_raw_path,
+        normalize_edit_mask(
+            mask_details.get("positive_claim_raw_mask"),
+            image.shape,
+        ),
+    )
     _write_image(changed_routing_structure_path, changed_routing_structure)
     _write_image(derived_structure_path, derived_protected_structure)
     _write_image(changed_derived_structure_path, changed_derived_structure)
@@ -1241,6 +1263,7 @@ def _process_image(
         "routing_ownership_protect_mask": routing_ownership_protect_path,
         "routing_positive_claim_mask": routing_positive_claim_path,
         "routing_positive_edit_mask": routing_positive_edit_path,
+        "positive_claim_raw_mask": positive_claim_raw_path,
         "routing_structure_changed_mask": changed_routing_structure_path,
         "routing_structure_contact_sheet": written_structure_contact_sheet,
         "routing_structure_source_contact_sheet": written_structure_source_contact_sheet,
@@ -1888,6 +1911,8 @@ def _write_page_metrics_jsonl(
         "routing_ownership_protect_pixel_count",
         "routing_positive_claim_pixel_count",
         "routing_positive_edit_pixel_count",
+        "positive_claim_raw_pixel_count",
+        "positive_claim_runtime",
         "routing_claim_providers",
         "routing_structure_changed_pixel_count_exact",
         "outline_damage_ratio",
@@ -2613,6 +2638,24 @@ def main() -> int:
             "routing_positive_edit_pixel_count": sum(
                 int(record.get("routing_positive_edit_pixel_count", 0) or 0)
                 for record in all_records
+            ),
+            "positive_claim_raw_pixel_count": sum(
+                int(record.get("positive_claim_raw_pixel_count", 0) or 0)
+                for record in all_records
+            ),
+            "positive_claim_runtime_status_distribution": dict(
+                sorted(
+                    Counter(
+                        str(
+                            (record.get("positive_claim_runtime") or {}).get(
+                                "status",
+                                "",
+                            )
+                            or "unknown"
+                        )
+                        for record in all_records
+                    ).items()
+                )
             ),
             "routing_claim_providers": sorted(
                 {
