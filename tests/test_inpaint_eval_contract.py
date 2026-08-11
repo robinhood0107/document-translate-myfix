@@ -464,6 +464,45 @@ def test_manifest_v2_requires_three_disjoint_annotation_masks(
     assert raised.value.code == "manifest_annotation_masks_overlap"
 
 
+def test_manifest_v2_accepts_source_only_target_adjudication(
+    tmp_path: Path,
+) -> None:
+    source = _write_image(tmp_path / "source.png")
+    payload = _manifest_payload(source)
+    payload.update(
+        {
+            "schema_version": 2,
+            "evidence_parent_manifest_sha256": "2" * 64,
+            "evidence_basis": (
+                "source-only-inpaint-evidence-v2-target-adjudicated"
+            ),
+            "evidence_review_sha256": "3" * 64,
+        }
+    )
+    for field in (
+        "target_text_mask",
+        "protected_structure_mask",
+        "ambiguous_structure_mask",
+    ):
+        mask_path = _write_image(
+            tmp_path / f"{field}.png",
+            np.zeros((12, 16), dtype=np.uint8),
+        )
+        payload["pages"][0][field] = {
+            "path": str(mask_path),
+            "sha256": sha256_file(mask_path),
+        }
+
+    manifest = load_eval_manifest(
+        _write_manifest(tmp_path / "adjudicated-v2.json", payload)
+    )
+
+    assert (
+        manifest.evidence_basis
+        == "source-only-inpaint-evidence-v2-target-adjudicated"
+    )
+
+
 def test_source_only_evidence_review_v2_migrates_v1_target_name(
     tmp_path: Path,
 ) -> None:
