@@ -248,6 +248,36 @@ def test_provenance_fusion_rescue_without_raw_text_box_stays_on_content_pixels()
     assert np.count_nonzero(result.positive_edit & existing) == 0
 
 
+def test_provenance_fusion_runtime_skip_does_not_use_annotation_reopened_edit() -> None:
+    shape = (20, 28)
+    raw_claim = np.zeros(shape, dtype=np.uint8)
+    raw_claim[5:15, 5:23] = 255
+    prior = np.full(shape, 255, dtype=np.uint8)
+    seed = np.zeros(shape, dtype=np.uint8)
+    seed[8:12, 10:14] = 255
+    content = np.zeros(shape, dtype=np.uint8)
+    content[7:13, 9:15] = 255
+    existing = content.copy()
+    protected = np.zeros(shape, dtype=np.uint8)
+    protected[7:9, 9:15] = 255
+
+    result = build_provenance_fusion(
+        raw_claim,
+        required_skip_prior=prior,
+        required_skip_seed=seed,
+        content_component_ownership=content,
+        raw_detector_boxes=(),
+        existing_edit=existing,
+        structure_protect=protected,
+        ambiguous_protect=np.zeros(shape, dtype=np.uint8),
+        subtract_existing_edit=False,
+    )
+
+    assert np.count_nonzero(result.positive_edit) == 24
+    assert np.count_nonzero(result.positive_edit & existing) == 24
+    assert np.count_nonzero(result.positive_edit & protected) == 0
+
+
 def test_fixed_ctd_onnx_preprocess_preserves_rgb_channel_order() -> None:
     batch = np.array([[[[1, 2, 3]]]], dtype=np.uint8)
     tensor = _rgb_batch_to_nchw(batch)

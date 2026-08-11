@@ -92,6 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ctd-provider", default="CUDAExecutionProvider")
     parser.add_argument("--rtdetr-provider", default="CPUExecutionProvider")
     parser.add_argument("--detect-size", type=int, default=1280)
+    parser.add_argument(
+        "--existing-edit-mode",
+        choices=("annotation-reopened", "runtime-skipped"),
+        default="annotation-reopened",
+        help=(
+            "runtime-skipped models the product path: recoverable skipped "
+            "blocks have no successful existing edit to subtract."
+        ),
+    )
     parser.add_argument("--output-dir", type=Path)
     return parser
 
@@ -181,6 +190,9 @@ def main(argv: list[str] | None = None) -> int:
                 existing_edit=routing_masks.existing_edit,
                 structure_protect=evaluation_masks.protected,
                 ambiguous_protect=evaluation_masks.ambiguous,
+                subtract_existing_edit=(
+                    args.existing_edit_mode == "annotation-reopened"
+                ),
             )
             scoring_masks = PageMasks(
                 evaluation_masks.target,
@@ -188,7 +200,11 @@ def main(argv: list[str] | None = None) -> int:
                 evaluation_masks.ambiguous,
                 fusion.ownership,
                 np.full(shape, 255, dtype=np.uint8),
-                routing_masks.existing_edit,
+                (
+                    routing_masks.existing_edit
+                    if args.existing_edit_mode == "annotation-reopened"
+                    else np.zeros(shape, dtype=np.uint8)
+                ),
             )
             candidate = CandidateMaskResult(
                 CANDIDATE_ID,
@@ -201,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
                     "selected_raw_text_box_count": len(
                         fusion.selected_raw_text_boxes
                     ),
+                    "existing_edit_mode": args.existing_edit_mode,
                     "rtdetr_providers": rtdetr.providers,
                 },
             )
@@ -237,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "schema_version": "inpaint-detector-provenance-fusion-stage1-v1",
             "candidate": CANDIDATE_ID,
+            "existing_edit_mode": args.existing_edit_mode,
             "routing_manifest_sha256": _sha256(routing_manifest),
             "evaluation_manifest_sha256": _sha256(evaluation_manifest),
             "models": {
