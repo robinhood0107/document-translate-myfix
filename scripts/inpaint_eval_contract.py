@@ -1230,7 +1230,7 @@ def build_quality_metrics(
     residue_target_is_annotation: bool = False,
     protected_structure_mask: np.ndarray | None = None,
     pre_composite_candidate_image: np.ndarray | None = None,
-) -> dict[str, float | int | str | bool | None]:
+) -> dict[str, object]:
     source = np.asarray(source_image)
     candidate = np.asarray(candidate_image)
     if source.shape != candidate.shape:
@@ -1309,6 +1309,33 @@ def build_quality_metrics(
 
     target_pixel_count = int(np.count_nonzero(target))
     target_covered_count = int(np.count_nonzero((target > 0) & (mask > 0)))
+    target_component_coverages: list[float] = []
+    if target_pixel_count > 0 and residue_target_is_annotation:
+        component_count, component_labels, component_stats, _centroids = (
+            cv2.connectedComponentsWithStats(
+                (target > 0).astype(np.uint8),
+                connectivity=8,
+            )
+        )
+        for component_index in range(1, component_count):
+            component_pixel_count = int(
+                component_stats[component_index, cv2.CC_STAT_AREA]
+            )
+            if component_pixel_count <= 0:
+                continue
+            x = int(component_stats[component_index, cv2.CC_STAT_LEFT])
+            y = int(component_stats[component_index, cv2.CC_STAT_TOP])
+            width = int(component_stats[component_index, cv2.CC_STAT_WIDTH])
+            height = int(component_stats[component_index, cv2.CC_STAT_HEIGHT])
+            component = (
+                component_labels[y : y + height, x : x + width]
+                == component_index
+            )
+            local_mask = mask[y : y + height, x : x + width] > 0
+            target_component_coverages.append(
+                float(np.count_nonzero(component & local_mask))
+                / float(component_pixel_count)
+            )
     protected_pixel_count = int(np.count_nonzero(protected))
     protected_changed_count = int(np.count_nonzero((protected > 0) & changed_exact))
     pre_composite_protected_changed_count = int(
@@ -1349,6 +1376,12 @@ def build_quality_metrics(
             if target_pixel_count > 0 and residue_target_is_annotation
             else None
         ),
+        "residue_target_component_coverages": target_component_coverages,
+        "residue_target_minimum_component_coverage": (
+            min(target_component_coverages)
+            if target_component_coverages
+            else None
+        ),
         "residue_source_contrast_pixel_count": residue_source_count,
         "residue_pixel_count": residue_pixel_count,
         "residue_ratio": (
@@ -1357,6 +1390,11 @@ def build_quality_metrics(
             else None
         ),
         "residue_score": residue_score,
+        "residue_score_sum": (
+            float(residue_score * residue_source_count)
+            if residue_score is not None
+            else None
+        ),
         "protected_structure_pixel_count": protected_pixel_count,
         "protected_structure_changed_pixel_count_exact": protected_changed_count,
         "outline_damage_ratio": (
