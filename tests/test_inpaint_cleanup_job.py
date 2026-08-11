@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -12,7 +13,6 @@ import imkit as imk  # noqa: E402
 
 from modules.utils.inpaint_cleanup import (  # noqa: E402
     apply_duplicate_bubble_inner_fill,
-    refine_bubble_residue_inpaint,
 )
 from modules.utils.inpaint_composite import (  # noqa: E402
     composite_with_edit_mask,
@@ -42,9 +42,7 @@ def _reference(image, inpainted, mask, mask_details, blocks, config, label, edit
     work_mask = mask
     if edit_mask is not None:
         work_mask = np.where((work_mask > 0) | (edit_mask > 0), 255, 0).astype(np.uint8)
-    out, work_mask, stats = refine_bubble_residue_inpaint(
-        out, work_mask, blocks, None, config, page_label=label
-    )
+    stats = {"autonomous_residue_cleanup": "disabled"}
     out, work_mask, stats = apply_duplicate_bubble_inner_fill(
         out, work_mask, mask_details, stats
     )
@@ -135,6 +133,29 @@ class CleanupEquivalenceTests(unittest.TestCase):
 
 
 class CleanupContractTests(unittest.TestCase):
+    def test_product_job_never_calls_autonomous_residue_cleanup(self) -> None:
+        image, inpainted, mask = _scene()
+        with mock.patch(
+            "modules.utils.inpaint_cleanup.refine_bubble_residue_inpaint",
+            side_effect=AssertionError("autonomous cleanup must stay retired"),
+        ):
+            result = run_inpaint_cleanup(
+                InpaintCleanupInput(
+                    image=image,
+                    inpaint_input_img=inpainted,
+                    mask=mask,
+                    mask_details={},
+                    inpaint_blocks=[object()],
+                    config=None,
+                    page_label="1/1",
+                )
+            )
+
+        self.assertEqual(
+            result.cleanup_stats["autonomous_residue_cleanup"],
+            "disabled",
+        )
+
     def test_the_result_is_contiguous_uint8(self) -> None:
         # 하류가 이 배열을 그대로 저장하고 해시한다.
         image, inpainted, mask = _scene()

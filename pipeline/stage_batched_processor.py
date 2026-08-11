@@ -114,7 +114,7 @@ from modules.utils.image_utils import (
     generate_mask,
     release_protected_mask_for_explicit_additions,
 )
-from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
