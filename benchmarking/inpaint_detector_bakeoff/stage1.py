@@ -365,6 +365,14 @@ def load_page_masks(
         for region in page.regions
     )
     if region_masks:
+        ownership_by_region = {region.region_id: region.ownership for region in region_masks}
+        for record, instance_mask in all_instance_masks:
+            referenced_ownership = ownership_by_region[record.region_id]
+            if np.any((instance_mask > 0) & (referenced_ownership == 0)):
+                raise ValueError(
+                    f"target instance is outside its referenced region ownership: "
+                    f"{record.instance_id}"
+                )
         region_ownership = np.zeros(shape, dtype=np.uint8)
         for region in region_masks:
             region_ownership[region.ownership > 0] = 255

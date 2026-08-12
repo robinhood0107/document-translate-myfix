@@ -213,7 +213,19 @@ class ProposalOnlyReference:
             raise ValueError("paired reference path must not be empty")
 
 
-ROLE_NAMES = frozenset({"seed", "ownership", "silhouette", "router", "expansion", "fill"})
+ROLE_NAMES = frozenset(
+    {
+        "seed",
+        "semantic",
+        "ownership",
+        "silhouette",
+        "router",
+        "expansion",
+        "protection",
+        "fill",
+        "composite",
+    }
+)
 ROLE_STATES = frozenset(
     {
         "active",
