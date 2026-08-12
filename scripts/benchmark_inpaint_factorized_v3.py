@@ -693,6 +693,12 @@ def _run_combination(
 
     metrics = {
         "page_count": len(rows),
+        "target_extent_independent": all(
+            page.target_extent_independent for page in pages
+        ),
+        "target_mask_provenance": sorted(
+            {page.target_mask_provenance for page in pages}
+        ),
         "target_instance_seed_recall": (
             float(seed_hits) / float(seed_total) if seed_total else None
         ),

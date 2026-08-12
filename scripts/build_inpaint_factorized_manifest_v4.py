@@ -184,6 +184,8 @@ def build_manifest(
             "corner_protect_mask",
             "paired_reference",
             "expected_edit",
+            "target_mask_provenance",
+            "target_extent_independent",
         ):
             if field in decision:
                 page[field] = decision[field]
@@ -191,6 +193,12 @@ def build_manifest(
             {
                 "page_id": page_id,
                 "annotation_basis": "source_only_v4",
+                "target_mask_provenance": str(
+                    page.get("target_mask_provenance") or "legacy_unknown"
+                ),
+                "target_extent_independent": bool(
+                    page.get("target_extent_independent", False)
+                ),
             }
         )
         if baselines is not None:
