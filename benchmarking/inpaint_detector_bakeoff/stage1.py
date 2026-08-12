@@ -807,9 +807,19 @@ def run_stage1(
     candidate_spec: RoleCandidateSpec | None = None,
     cache_root: Path | None = None,
     result_sink: Callable[[Stage1Page, CandidateMaskResult], None] | None = None,
+    page_infer: Callable[[Stage1Page, np.ndarray], CandidateMaskResult] | None = None,
+    cache_input_sha256: Callable[[Stage1Page], str] | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object], dict[str, np.ndarray]]:
     if (candidate_spec is None) != (cache_root is None):
         raise ValueError("candidate_spec and cache_root must be provided together")
+    if (
+        page_infer is not None
+        and candidate_spec is not None
+        and cache_input_sha256 is None
+    ):
+        raise ValueError(
+            "cached page inference requires a composite cache input SHA"
+        )
     rows: list[dict[str, object]] = []
     edits: dict[str, np.ndarray] = {}
     for page in pages:
@@ -817,10 +827,14 @@ def run_stage1(
         result = None
         source_sha256 = None
         if candidate_spec is not None and cache_root is not None:
-            source_sha256 = _file_sha256(page.source_image)
+            source_sha256 = (
+                cache_input_sha256(page)
+                if cache_input_sha256 is not None
+                else _file_sha256(page.source_image)
+            )
             result = read_detector_cache(cache_root, candidate_spec, source_sha256)
         if result is None:
-            result = infer(image)
+            result = page_infer(page, image) if page_infer is not None else infer(image)
             if candidate_spec is not None and cache_root is not None:
                 assert source_sha256 is not None
                 write_detector_cache(cache_root, candidate_spec, source_sha256, result)

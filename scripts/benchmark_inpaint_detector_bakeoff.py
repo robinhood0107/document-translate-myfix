@@ -93,6 +93,15 @@ def _existing_edit_paths(manifest_path: Path) -> dict[str, str]:
     return paths
 
 
+def _ownership_path(args: argparse.Namespace, page) -> Path:
+    if args.ownership_root is not None:
+        return args.ownership_root.resolve() / f"{page.page_id}_ownership.png"
+    value = str(page.ownership_mask or "").strip()
+    if not value:
+        raise ValueError("ownership-ROI CTD requires an ownership mask")
+    return Path(value)
+
+
 def _candidate(args: argparse.Namespace):
     if args.candidate == "ballons-ctbd":
         model_path = Path(args.model or ModelDownloader.get_file_path(
@@ -110,7 +119,7 @@ def _candidate(args: argparse.Namespace):
                 inpaint_mask_dilate=int(args.ctbd_dilate),
             ),
         )
-        return adapter.infer, model_path
+        return adapter.infer, model_path, None
 
     model_path = Path(args.model or ModelDownloader.get_file_path(
         ModelID.CTD_TORCH if args.device != "cpu" else ModelID.CTD_ONNX,
@@ -130,7 +139,7 @@ def _candidate(args: argparse.Namespace):
         def original_infer(image_bgr):
             return adapter.infer(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
 
-        return original_infer, model_path
+        return original_infer, model_path, None
 
     adapter = BallonsCTDFullPageReference(
         CTDRefinerSettings(
@@ -140,13 +149,37 @@ def _candidate(args: argparse.Namespace):
             mask_dilate_size=0,
         ),
         dilate_size=3,
+        model_path=model_path,
     )
 
     def infer(image_bgr):
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         return adapter.infer(image_rgb)
 
-    return infer, model_path
+    def infer_ownership_roi(page, image_bgr):
+        ownership_path = _ownership_path(args, page)
+        ownership = cv2.imread(str(ownership_path), cv2.IMREAD_GRAYSCALE)
+        if ownership is None or ownership.size == 0:
+            raise FileNotFoundError(ownership_path)
+        return adapter.infer_with_ownership_rois(
+            cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB),
+            ownership,
+        )
+
+    return (
+        infer,
+        model_path,
+        infer_ownership_roi if args.candidate == "ballons-ctd-text-roi" else None,
+    )
+
+
+def _source_and_ownership_sha256(args: argparse.Namespace, page) -> str:
+    ownership_path = _ownership_path(args, page)
+    digest = hashlib.sha256()
+    for path in (Path(page.source_image), ownership_path):
+        digest.update(_sha256(path).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -156,7 +189,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument(
         "--candidate",
-        choices=("ballons-ctd", "ballons-ctd-original", "ballons-ctbd"),
+        choices=(
+            "ballons-ctd",
+            "ballons-ctd-text-roi",
+            "ballons-ctd-original",
+            "ballons-ctbd",
+        ),
         required=True,
     )
     parser.add_argument("--variant", choices=("raw", "refined", "dilated"), default="raw")
@@ -175,6 +213,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ctbd-dilate", type=int, default=4)
     parser.add_argument("--detect-size", type=int, default=1280)
     parser.add_argument("--max-batches", type=int, default=4)
+    parser.add_argument(
+        "--ownership-root",
+        type=Path,
+        help=(
+            "Optional sparse authoritative ownership masks named "
+            "<page_id>_ownership.png for the ownership-ROI CTD variant."
+        ),
+    )
     return parser
 
 
@@ -189,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
     try:
         pages = load_stage1_manifest(manifest_path)
-        infer, model_path = _candidate(args)
+        infer, model_path, page_infer = _candidate(args)
         preprocessing_contract = {
             "candidate": args.candidate,
             "detect_size": int(args.detect_size),
@@ -197,6 +243,12 @@ def main(argv: list[str] | None = None) -> int:
             "confidence": float(args.confidence),
             "ctbd_dilate": int(args.ctbd_dilate),
             "device": args.device,
+            "ownership_roi": args.candidate == "ballons-ctd-text-roi",
+            "ownership_contract": (
+                "external-page-id-mask"
+                if args.ownership_root
+                else "manifest-sparse-mask"
+            ),
         }
         candidate_spec = RoleCandidateSpec(
             candidate_id=args.candidate,
@@ -247,6 +299,12 @@ def main(argv: list[str] | None = None) -> int:
             candidate_spec=candidate_spec,
             cache_root=cache_root,
             result_sink=write_native_masks,
+            page_infer=page_infer,
+            cache_input_sha256=(
+                (lambda page: _source_and_ownership_sha256(args, page))
+                if args.candidate == "ballons-ctd-text-roi"
+                else None
+            ),
         )
         edit_root = output_root / "positive_edit_masks"
         edit_root.mkdir(parents=True, exist_ok=True)
