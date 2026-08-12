@@ -186,6 +186,7 @@ def build_manifest(
             "expected_edit",
             "target_mask_provenance",
             "target_extent_independent",
+            "target_inventory_independent",
         ):
             if field in decision:
                 page[field] = decision[field]
@@ -198,6 +199,9 @@ def build_manifest(
                 ),
                 "target_extent_independent": bool(
                     page.get("target_extent_independent", False)
+                ),
+                "target_inventory_independent": bool(
+                    page.get("target_inventory_independent", False)
                 ),
             }
         )

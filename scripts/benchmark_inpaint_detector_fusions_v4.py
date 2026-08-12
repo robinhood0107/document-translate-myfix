@@ -225,6 +225,7 @@ def _hard_gate_passes(summary: dict[str, object]) -> bool:
     )
     return (
         summary.get("target_extent_independent") is True
+        and summary.get("target_inventory_independent") is True
         and
         all(int(summary[name]) == 0 for name in zero)
         and float(summary.get("aggregate_target_coverage") or 0.0) >= 0.98
@@ -262,6 +263,9 @@ def run_fusion_matrix(
     )
     target_mask_provenance = sorted(
         {page.target_mask_provenance for page in pages}
+    )
+    target_inventory_independent = all(
+        page.target_inventory_independent for page in pages
     )
     existing_edit_paths = _existing_edit_paths(manifest_path)
     for page in pages:
@@ -342,6 +346,7 @@ def run_fusion_matrix(
     for run in runs:
         summary = totals[run["run_id"]].summary()
         summary["target_extent_independent"] = target_extent_independent
+        summary["target_inventory_independent"] = target_inventory_independent
         summary["target_mask_provenance"] = target_mask_provenance
         content_sha = str(summary["output_mask_set_sha256"])
         reused_from = content_owner.get(content_sha, "")
@@ -367,6 +372,7 @@ def run_fusion_matrix(
                     else (
                         "information_limited"
                         if not target_extent_independent
+                        or not target_inventory_independent
                         else "dominated"
                     )
                 ),
@@ -374,8 +380,13 @@ def run_fusion_matrix(
                     ""
                     if _hard_gate_passes(summary)
                     else (
-                        "target_extent_not_independent"
+                        (
+                            "target_extent_not_independent"
+                            if not target_extent_independent
+                            else "target_inventory_not_independent"
+                        )
                         if not target_extent_independent
+                        or not target_inventory_independent
                         else "hard_gate_failed"
                     )
                 ),

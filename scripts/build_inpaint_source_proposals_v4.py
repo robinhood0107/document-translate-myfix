@@ -458,6 +458,7 @@ def build_source_proposals(
                 "target_instances": target_instances,
                 "target_mask_provenance": "current_ctd_raw_components",
                 "target_extent_independent": False,
+                "target_inventory_independent": False,
                 "regions": regions,
                 "reviewed_source_only": False,
                 "candidate_seen": False,

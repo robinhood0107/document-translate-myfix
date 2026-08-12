@@ -140,6 +140,7 @@ class Stage1Page:
     paired_reference: "ProposalOnlyReference | None" = None
     target_mask_provenance: str = "legacy_unknown"
     target_extent_independent: bool = False
+    target_inventory_independent: bool = False
 
 
 @dataclass(frozen=True, slots=True)

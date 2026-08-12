@@ -715,6 +715,9 @@ def _run_combination(
         "target_extent_independent": all(
             page.target_extent_independent for page in pages
         ),
+        "target_inventory_independent": all(
+            page.target_inventory_independent for page in pages
+        ),
         "target_mask_provenance": sorted(
             {page.target_mask_provenance for page in pages}
         ),
