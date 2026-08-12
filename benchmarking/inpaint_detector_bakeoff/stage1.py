@@ -11,9 +11,14 @@ import numpy as np
 
 from .contracts import (
     BUBBLE_ROUTE_CLASSES,
+    INSTANCE_PRIORITIES,
+    PROCESSING_ACTIONS,
+    SEMANTIC_ROLES,
     BubbleRouteDecision,
     CandidateMaskResult,
     DetectorBox,
+    ProposalOnlyReference,
+    RegionEvaluationSpec,
     RoleCandidateSpec,
     Stage1Page,
     TargetInstance,
@@ -22,6 +27,17 @@ from .contracts import (
     mask_sha256,
     tensor_sha256,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class RegionMasks:
+    region_id: str
+    bubble_route_class: str
+    bubble_interior: np.ndarray
+    ownership: np.ndarray
+    protected: np.ndarray
+    ambiguous: np.ndarray
+    corner: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +52,8 @@ class PageMasks:
     bubble_interior: np.ndarray | None = None
     corner: np.ndarray | None = None
     broad_ownership: np.ndarray | None = None
+    preserve: np.ndarray | None = None
+    regions: tuple[RegionMasks, ...] = ()
 
 
 def _path_value(value: object) -> str | None:
@@ -52,6 +70,9 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     schema_version = str(payload.get("schema_version") or "").strip()
     is_v3 = schema_version == "inpaint-detector-bakeoff-manifest-v3"
+    is_v4 = schema_version == "inpaint-detector-bakeoff-manifest-v4"
+    if schema_version and not (is_v3 or is_v4):
+        raise ValueError(f"unsupported mask-only manifest schema: {schema_version}")
     pages = payload.get("pages")
     if not isinstance(pages, list):
         raise ValueError("mask-only manifest must contain a pages array")
@@ -66,6 +87,39 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
         if expected_edit not in {"required", "none"}:
             raise ValueError(f"invalid expected_edit for {entry.get('page_id')}: {expected_edit}")
         route_class = str(entry.get("bubble_route_class") or "").strip().lower()
+        regions: list[RegionEvaluationSpec] = []
+        raw_regions = entry.get("regions", [])
+        if not isinstance(raw_regions, list):
+            raise ValueError("regions must be an array")
+        for raw_region in raw_regions:
+            if not isinstance(raw_region, dict):
+                raise ValueError("region evaluation spec must be an object")
+            region_id = str(raw_region.get("region_id") or "").strip()
+            region_route = str(
+                raw_region.get("bubble_route_class") or ""
+            ).strip().lower()
+            region_paths = {
+                field: _path_value(raw_region.get(field))
+                for field in (
+                    "bubble_interior_mask",
+                    "ownership_mask",
+                    "protected_structure_mask",
+                    "ambiguous_structure_mask",
+                    "corner_protect_mask",
+                )
+            }
+            if any(value is None for value in region_paths.values()):
+                raise ValueError(f"region {region_id or '<empty>'} is missing mask paths")
+            regions.append(
+                RegionEvaluationSpec(
+                    region_id=region_id,
+                    bubble_route_class=region_route,
+                    **{key: str(value) for key, value in region_paths.items()},
+                )
+            )
+        if len({region.region_id for region in regions}) != len(regions):
+            raise ValueError("region ids must be unique within a page")
+        known_region_ids = {region.region_id for region in regions}
         target_instances: list[TargetInstance] = []
         raw_instances = entry.get("target_instances", [])
         if not isinstance(raw_instances, list):
@@ -79,7 +133,38 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
             )
             if not instance_id or instance_path is None:
                 raise ValueError("target instance requires instance_id and mask_path")
-            target_instances.append(TargetInstance(instance_id, instance_path))
+            region_id = str(instance.get("region_id") or "page").strip()
+            semantic_role = str(
+                instance.get("semantic_role") or "dialogue_bubble"
+            ).strip().lower()
+            processing_action = str(
+                instance.get("processing_action") or "translate_inpaint"
+            ).strip().lower()
+            priority = str(instance.get("priority") or "required").strip().lower()
+            if semantic_role not in SEMANTIC_ROLES:
+                raise ValueError(f"invalid semantic_role: {semantic_role}")
+            if processing_action not in PROCESSING_ACTIONS:
+                raise ValueError(f"invalid processing_action: {processing_action}")
+            if priority not in INSTANCE_PRIORITIES:
+                raise ValueError(f"invalid target instance priority: {priority}")
+            if is_v4 and region_id not in known_region_ids:
+                raise ValueError(f"target instance references unknown region: {region_id}")
+            if priority == "required" and processing_action != "translate_inpaint":
+                raise ValueError("required target instance must use translate_inpaint")
+            if priority == "optional" and processing_action != "preserve":
+                raise ValueError("optional target instance must use preserve")
+            if priority == "ambiguous" and processing_action != "review":
+                raise ValueError("ambiguous target instance must use review")
+            target_instances.append(
+                TargetInstance(
+                    instance_id,
+                    instance_path,
+                    region_id,
+                    semantic_role,
+                    processing_action,
+                    priority,
+                )
+            )
         if len({record.instance_id for record in target_instances}) != len(target_instances):
             raise ValueError("target instance ids must be unique within a page")
         if is_v3:
@@ -102,6 +187,42 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
                 raise ValueError("required manifest v3 page needs target text and instances")
             if expected_edit == "none" and (target is not None or target_instances):
                 raise ValueError("no-edit manifest v3 page cannot contain target instances")
+        paired_reference = None
+        raw_reference = entry.get("paired_reference")
+        if raw_reference is not None:
+            if not isinstance(raw_reference, dict):
+                raise ValueError("paired_reference must be an object")
+            reference_path = _path_value(raw_reference.get("path"))
+            if reference_path is None:
+                raise ValueError("paired_reference requires a path")
+            paired_reference = ProposalOnlyReference(
+                source_sha256=str(raw_reference.get("source_sha256") or "").lower(),
+                reference_sha256=str(
+                    raw_reference.get("reference_sha256") or ""
+                ).lower(),
+                path=reference_path,
+                proposal_only=bool(raw_reference.get("proposal_only", False)),
+            )
+        if is_v4:
+            required_fields = {
+                "target_text_mask",
+                "preserve_mask",
+                "target_instances",
+                "regions",
+                "expected_edit",
+            }
+            missing = sorted(required_fields.difference(entry))
+            if missing:
+                raise ValueError("manifest v4 page is missing fields: " + ", ".join(missing))
+            if not regions:
+                raise ValueError("manifest v4 page requires at least one region")
+            required_instances = [
+                instance for instance in target_instances if instance.priority == "required"
+            ]
+            if expected_edit == "required" and (target is None or not required_instances):
+                raise ValueError("required manifest v4 page needs required target instances")
+            if expected_edit == "none" and (target is not None or required_instances):
+                raise ValueError("no-edit manifest v4 page cannot contain required targets")
         records.append(
             Stage1Page(
                 page_id=str(entry.get("page_id") or "").strip(),
@@ -117,6 +238,9 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
                 bubble_interior_mask=_path_value(entry.get("bubble_interior_mask")),
                 corner_protect_mask=_path_value(entry.get("corner_protect_mask")),
                 expected_edit=expected_edit,
+                regions=tuple(regions),
+                preserve_mask=_path_value(entry.get("preserve_mask")),
+                paired_reference=paired_reference,
             )
         )
     if not all(record.page_id and record.source_image for record in records):
@@ -168,10 +292,25 @@ def load_page_masks(
         else np.full(shape, 255, dtype=np.uint8)
     )
     existing_edit = _read_mask(existing_edit_path, shape)
-    target_instances = tuple(
-        (record.instance_id, _read_mask(record.mask_path, shape))
+    all_instance_masks = tuple(
+        (record, _read_mask(record.mask_path, shape))
         for record in page.target_instances
     )
+    target_instances = tuple(
+        (record.instance_id, mask)
+        for record, mask in all_instance_masks
+        if record.priority == "required"
+    )
+    preserve = _read_mask(page.preserve_mask, shape)
+    declared_preserve = np.zeros(shape, dtype=np.uint8)
+    declared_ambiguous = np.zeros(shape, dtype=np.uint8)
+    for record, instance_mask in all_instance_masks:
+        if not np.any(instance_mask):
+            raise ValueError(f"target instance mask is empty: {record.instance_id}")
+        if record.priority == "optional":
+            declared_preserve[instance_mask > 0] = 255
+        elif record.priority == "ambiguous":
+            declared_ambiguous[instance_mask > 0] = 255
     if target_instances:
         instance_union = np.zeros(shape, dtype=np.uint8)
         occupied = np.zeros(shape, dtype=np.uint8)
@@ -184,6 +323,10 @@ def load_page_masks(
             instance_union[instance_mask > 0] = 255
         if not np.array_equal(instance_union, target):
             raise ValueError("target_text_mask must equal the union of target_instances")
+    if page.regions and not np.array_equal(declared_preserve, preserve):
+        raise ValueError("preserve_mask must equal the union of optional instances")
+    if np.any((declared_ambiguous > 0) & (ambiguous == 0)):
+        raise ValueError("ambiguous target instances must be inside ambiguous_structure_mask")
     bubble_interior = _read_mask(page.bubble_interior_mask, shape)
     corner = _read_mask(page.corner_protect_mask, shape)
     assert_disjoint_masks(
@@ -191,8 +334,27 @@ def load_page_masks(
             "target_text_mask": target,
             "protected_structure_mask": protected,
             "ambiguous_structure_mask": ambiguous,
+            "preserve_mask": preserve,
         }
     )
+    region_masks = tuple(
+        RegionMasks(
+            region.region_id,
+            region.bubble_route_class,
+            _read_mask(region.bubble_interior_mask, shape),
+            _read_mask(region.ownership_mask, shape),
+            _read_mask(region.protected_structure_mask, shape),
+            _read_mask(region.ambiguous_structure_mask, shape),
+            _read_mask(region.corner_protect_mask, shape),
+        )
+        for region in page.regions
+    )
+    if region_masks:
+        region_ownership = np.zeros(shape, dtype=np.uint8)
+        for region in region_masks:
+            region_ownership[region.ownership > 0] = 255
+        if np.any((target > 0) & (region_ownership == 0)):
+            raise ValueError("required target is outside all region ownership masks")
     return PageMasks(
         target,
         protected,
@@ -203,6 +365,9 @@ def load_page_masks(
         target_instances,
         bubble_interior,
         corner,
+        None,
+        preserve,
+        region_masks,
     )
 
 
@@ -240,6 +405,8 @@ def positive_edit_from_claim(claim: np.ndarray, masks: PageMasks) -> np.ndarray:
     ).astype(np.uint8)
     if masks.corner is not None:
         edit[masks.corner > 0] = 0
+    if masks.preserve is not None:
+        edit[masks.preserve > 0] = 0
     return np.ascontiguousarray(edit)
 
 
@@ -318,6 +485,8 @@ def _subtract_exact_protection(
     ).astype(np.uint8)
     if masks.corner is not None:
         edit[masks.corner > 0] = 0
+    if masks.preserve is not None:
+        edit[masks.preserve > 0] = 0
     return np.ascontiguousarray(edit)
 
 
@@ -563,6 +732,12 @@ def score_page(
     protected_overlap = int(np.count_nonzero((edit > 0) & (masks.protected > 0)))
     ambiguous_overlap = int(np.count_nonzero((edit > 0) & (masks.ambiguous > 0)))
     ownership_leak = int(np.count_nonzero((edit > 0) & (masks.ownership == 0)))
+    preserve_overlap = int(
+        np.count_nonzero(
+            (edit > 0)
+            & ((masks.preserve > 0) if masks.preserve is not None else False)
+        )
+    )
     record = {
         "page_id": page.page_id,
         "candidate_id": result.candidate_id,
@@ -608,6 +783,7 @@ def score_page(
         "protected_edit_overlap": protected_overlap,
         "ambiguous_edit_overlap": ambiguous_overlap,
         "ownership_leak_pixel_count": ownership_leak,
+        "preserve_edit_overlap": preserve_overlap,
         "false_edit_pixel_count": int(np.count_nonzero(edit)) if page.no_edit else 0,
         "runtime": dict(result.runtime),
     }
@@ -671,6 +847,7 @@ def summarize(records: Iterable[dict[str, object]]) -> dict[str, object]:
         "ownership_leak_pixel_count": sum(
             int(row["ownership_leak_pixel_count"]) for row in rows
         ),
+        "preserve_edit_overlap": sum(int(row["preserve_edit_overlap"]) for row in rows),
         "false_edit_pixel_count": sum(int(row["false_edit_pixel_count"]) for row in rows),
     }
 

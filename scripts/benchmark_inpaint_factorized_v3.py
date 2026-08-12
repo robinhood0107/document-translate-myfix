@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
+    CombinationClosureRecord,
     FactorizedRunRecord,
     binary_mask,
 )
@@ -30,6 +31,8 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_stage1_manifest,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (  # noqa: E402
+    assert_complete_closure_ledger,
+    build_combination_closure_ledger,
     build_factorized_matrix,
     composite_positive_result,
     fill_factorized_mask,
@@ -342,6 +345,7 @@ def _run_combination(
     reconstruction_values: list[float] = []
     protected_changed = 0
     protected_overlap = 0
+    preserve_overlap = 0
     ambiguous_changed = 0
     ambiguous_overlap = 0
     outside_changed = 0
@@ -426,6 +430,8 @@ def _run_combination(
         exclude = cv2.bitwise_or(masks.protected, masks.ambiguous)
         if masks.corner is not None:
             exclude = cv2.bitwise_or(exclude, masks.corner)
+        if masks.preserve is not None:
+            exclude = cv2.bitwise_or(exclude, masks.preserve)
         background_samples = int(
             np.count_nonzero(
                 (interior > 0)
@@ -545,6 +551,10 @@ def _run_combination(
         protected_overlap += int(
             np.count_nonzero((decision.edit_mask > 0) & (masks.protected > 0))
         )
+        if masks.preserve is not None:
+            preserve_overlap += int(
+                np.count_nonzero((decision.edit_mask > 0) & (masks.preserve > 0))
+            )
         ambiguous_changed += int(metrics["ambiguous_changed_pixel_count"])
         ambiguous_overlap += int(
             np.count_nonzero((decision.edit_mask > 0) & (masks.ambiguous > 0))
@@ -612,6 +622,7 @@ def _run_combination(
         ),
         "protected_structure_overlap": protected_overlap,
         "protected_structure_changed": protected_changed,
+        "preserve_edit_overlap": preserve_overlap,
         "ambiguous_structure_overlap": ambiguous_overlap,
         "ambiguous_structure_changed": ambiguous_changed,
         "outside_final_changed": outside_changed,
@@ -700,6 +711,111 @@ def _declared_combinations(
     return combinations
 
 
+def _logical_id(selection: dict[str, str]) -> str:
+    return "__".join(selection[role] for role in selection)
+
+
+def _content_value(value: object) -> object:
+    """Replace artifact paths with bytes SHA while retaining algorithm settings."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): _content_value(nested)
+            for key, nested in sorted(value.items())
+            if key not in {"provider", "candidate_id", "status"}
+        }
+    if isinstance(value, list):
+        return [_content_value(nested) for nested in value]
+    if isinstance(value, str):
+        path = Path(value)
+        if path.is_file():
+            return {"artifact_sha256": _sha256(path)}
+        return value
+    return value
+
+
+def _combination_content_sha256(
+    combination: dict[str, str],
+    *,
+    matrix: dict[str, object],
+    manifest_sha256: str,
+) -> str:
+    families = matrix.get("families")
+    if not isinstance(families, dict):
+        raise ValueError("matrix spec must contain families")
+    payload: dict[str, object] = {
+        "manifest_sha256": manifest_sha256,
+        "expansion": combination["expansion"],
+        "fill": combination["fill"],
+    }
+    for role in ("detector", "ownership", "silhouette", "router"):
+        role_families = families.get(role)
+        if not isinstance(role_families, dict):
+            raise ValueError(f"matrix families lacks role: {role}")
+        selected = role_families.get(combination[role])
+        if not isinstance(selected, dict):
+            raise ValueError(f"matrix lacks selected family: {role}/{combination[role]}")
+        payload[role] = _content_value(selected)
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _prepare_closure_ledger(
+    combinations: list[dict[str, str]],
+    *,
+    matrix: dict[str, object],
+    manifest_sha256: str,
+) -> tuple[list[CombinationClosureRecord], list[dict[str, str]]]:
+    families = matrix.get("families")
+    family_metadata = families if isinstance(families, dict) else None
+    oracle_only = matrix.get("oracle_only", [])
+    initial: list[CombinationClosureRecord] = []
+    executable: list[dict[str, str]] = []
+    content_owner: dict[str, str] = {}
+    for combination in combinations:
+        stage = "stage1" if combination["fill"] == "mask_only" else "product"
+        row = build_combination_closure_ledger(
+            [combination],
+            stage=stage,
+            family_metadata=family_metadata,
+            oracle_only_ids=oracle_only if isinstance(oracle_only, list) else (),
+        )[0]
+        if row.closure_state != "executed":
+            initial.append(row)
+            continue
+        content_sha = _combination_content_sha256(
+            combination,
+            matrix=matrix,
+            manifest_sha256=manifest_sha256,
+        )
+        owner = content_owner.get(content_sha)
+        if owner is not None:
+            initial.append(
+                CombinationClosureRecord(
+                    logical_id=row.logical_id,
+                    selection=row.selection,
+                    closure_state="reused_by_sha",
+                    content_sha256=content_sha,
+                    reused_from=owner,
+                )
+            )
+            continue
+        content_owner[content_sha] = row.logical_id
+        initial.append(
+            CombinationClosureRecord(
+                logical_id=row.logical_id,
+                selection=row.selection,
+                closure_state="executed",
+                content_sha256=content_sha,
+            )
+        )
+        executable.append(combination)
+    assert_complete_closure_ledger(combinations, initial)
+    return initial, executable
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     manifest_path = args.manifest.resolve()
@@ -712,9 +828,15 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(axes, dict) or not isinstance(controls, dict):
         raise ValueError("factorized matrix requires axes and controls")
     all_combinations = _declared_combinations(matrix, axes, controls)
+    manifest_sha256 = _sha256(manifest_path)
+    closure_ledger, physical_combinations = _prepare_closure_ledger(
+        all_combinations,
+        matrix=matrix,
+        manifest_sha256=manifest_sha256,
+    )
     if args.start_index < 1:
         raise ValueError("--start-index must be at least 1")
-    indexed_combinations = list(enumerate(all_combinations, start=1))[
+    indexed_combinations = list(enumerate(physical_combinations, start=1))[
         args.start_index - 1:
     ]
     if args.limit is not None:
@@ -766,9 +888,12 @@ def main(argv: list[str] | None = None) -> int:
         ranked = select_pareto_records(records)
         result = {
             "schema_version": "inpaint-factorized-results-v3",
-            "manifest_sha256": _sha256(manifest_path),
+            "manifest_sha256": manifest_sha256,
             "matrix_sha256": _sha256(matrix_path),
+            "logical_combination_count": len(all_combinations),
+            "physical_combination_count": len(physical_combinations),
             "combination_count": len(ranked),
+            "closure_ledger": [row.as_record() for row in closure_ledger],
             "positive_lama_inference_count": lama_pool.call_count,
             "runs": [record.as_record() for record in ranked],
             "pages": page_rows,

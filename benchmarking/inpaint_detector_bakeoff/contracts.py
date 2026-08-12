@@ -128,12 +128,78 @@ class Stage1Page:
     bubble_interior_mask: str | None = None
     corner_protect_mask: str | None = None
     expected_edit: str = "required"
+    regions: tuple["RegionEvaluationSpec", ...] = ()
+    preserve_mask: str | None = None
+    paired_reference: "ProposalOnlyReference | None" = None
 
 
 @dataclass(frozen=True, slots=True)
 class TargetInstance:
     instance_id: str
     mask_path: str
+    region_id: str = "page"
+    semantic_role: str = "dialogue_bubble"
+    processing_action: str = "translate_inpaint"
+    priority: str = "required"
+
+
+SEMANTIC_ROLES = frozenset(
+    {
+        "dialogue_bubble",
+        "dialogue_free",
+        "narration",
+        "ui_or_sign",
+        "sfx",
+        "decorative",
+        "ambiguous",
+    }
+)
+PROCESSING_ACTIONS = frozenset({"translate_inpaint", "preserve", "review"})
+INSTANCE_PRIORITIES = frozenset({"required", "optional", "ambiguous"})
+
+
+@dataclass(frozen=True, slots=True)
+class RegionEvaluationSpec:
+    region_id: str
+    bubble_route_class: str
+    bubble_interior_mask: str
+    ownership_mask: str
+    protected_structure_mask: str
+    ambiguous_structure_mask: str
+    corner_protect_mask: str
+
+    def __post_init__(self) -> None:
+        if not self.region_id.strip():
+            raise ValueError("region id must not be empty")
+        if self.bubble_route_class not in BUBBLE_ROUTE_CLASSES:
+            raise ValueError(
+                f"invalid region bubble_route_class: {self.bubble_route_class}"
+            )
+        paths = (
+            self.bubble_interior_mask,
+            self.ownership_mask,
+            self.protected_structure_mask,
+            self.ambiguous_structure_mask,
+            self.corner_protect_mask,
+        )
+        if any(not str(value).strip() for value in paths):
+            raise ValueError(f"region {self.region_id} contains an empty mask path")
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalOnlyReference:
+    source_sha256: str
+    reference_sha256: str
+    path: str
+    proposal_only: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.proposal_only:
+            raise ValueError("paired human reference must be proposal_only")
+        if len(self.source_sha256) != 64 or len(self.reference_sha256) != 64:
+            raise ValueError("paired reference requires source and reference SHA-256")
+        if not self.path.strip():
+            raise ValueError("paired reference path must not be empty")
 
 
 ROLE_NAMES = frozenset({"seed", "ownership", "silhouette", "router", "expansion", "fill"})
@@ -146,6 +212,9 @@ ROLE_STATES = frozenset(
         "information_limited",
         "blocked_asset",
     }
+)
+COMBINATION_CLOSURE_STATES = frozenset(
+    {"executed", "reused_by_sha", "invalid_with_reason", "blocked_asset"}
 )
 ROUTE_DECISIONS = frozenset({"narrow", "broad", "skip"})
 BUBBLE_ROUTE_CLASSES = frozenset(
@@ -264,6 +333,43 @@ class FactorizedRunRecord:
             "status": self.status,
             "metrics": dict(self.metrics),
             "closure_reason": self.closure_reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CombinationClosureRecord:
+    logical_id: str
+    selection: Mapping[str, str]
+    closure_state: str
+    reason: str = ""
+    content_sha256: str = ""
+    reused_from: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.logical_id.strip():
+            raise ValueError("combination logical id must not be empty")
+        if self.closure_state not in COMBINATION_CLOSURE_STATES:
+            raise ValueError(f"unknown combination closure state: {self.closure_state}")
+        if not self.selection or any(
+            not str(role).strip() or not str(value).strip()
+            for role, value in self.selection.items()
+        ):
+            raise ValueError("combination selection contains an empty role or value")
+        if self.closure_state in {"invalid_with_reason", "blocked_asset"} and not self.reason:
+            raise ValueError(f"{self.closure_state} requires a reason")
+        if self.closure_state == "reused_by_sha" and (
+            not self.content_sha256 or not self.reused_from
+        ):
+            raise ValueError("reused_by_sha requires content SHA and source run")
+
+    def as_record(self) -> dict[str, object]:
+        return {
+            "logical_id": self.logical_id,
+            "selection": dict(self.selection),
+            "closure_state": self.closure_state,
+            "reason": self.reason,
+            "content_sha256": self.content_sha256,
+            "reused_from": self.reused_from,
         }
 
 
