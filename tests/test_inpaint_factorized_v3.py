@@ -1260,6 +1260,22 @@ def test_route_hybrid_uses_lama_only_for_narrow_and_flat_for_broad() -> None:
         == "robust_flat_median"
     )
     assert _route_fill_backend("telea", "broad") == "telea"
+    assert (
+        _route_fill_backend("conditional_hybrid", "broad", "clean_flat")
+        == "robust_flat_median"
+    )
+    assert (
+        _route_fill_backend("conditional_hybrid", "broad", "clean_gradient")
+        == "planar_gradient"
+    )
+    assert (
+        _route_fill_backend("conditional_hybrid", "broad", "texture")
+        == "current_lama"
+    )
+    assert (
+        _route_fill_backend("conditional_hybrid", "narrow", "clean_flat")
+        == "current_lama"
+    )
 
 
 def test_oracle_background_reconstruction_scores_fill_independently() -> None:
@@ -2238,12 +2254,14 @@ def test_known_background_synthetic_manifest_covers_all_fill_routes(
 ) -> None:
     manifest = build_synthetic_manifest(tmp_path)
 
-    assert [page["bubble_route_class"] for page in manifest["pages"]] == [
+    assert len(manifest["pages"]) == 10
+    assert {page["bubble_route_class"] for page in manifest["pages"]} == {
         "clean_flat",
         "clean_gradient",
         "texture",
         "line_art",
-    ]
+        "ambiguous",
+    }
     for page in manifest["pages"]:
         source = cv2.imread(page["path"], cv2.IMREAD_COLOR)
         truth = cv2.imread(page["known_background"], cv2.IMREAD_COLOR)

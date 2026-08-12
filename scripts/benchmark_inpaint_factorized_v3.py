@@ -48,10 +48,22 @@ from scripts.validation_artifact_harness import (  # noqa: E402
 )
 
 
-def _route_fill_backend(fill_id: str, route_decision: str) -> str:
+def _route_fill_backend(
+    fill_id: str,
+    route_decision: str,
+    bubble_route_class: str | None = None,
+) -> str:
     normalized = str(fill_id).strip().lower()
     if normalized == "narrow_lama_broad_flat":
         return "robust_flat_median" if route_decision == "broad" else "current_lama"
+    if normalized == "conditional_hybrid":
+        if route_decision != "broad":
+            return "current_lama"
+        if bubble_route_class == "clean_flat":
+            return "robust_flat_median"
+        if bubble_route_class == "clean_gradient":
+            return "planar_gradient"
+        return "current_lama"
     return normalized
 
 
@@ -584,7 +596,11 @@ def _run_combination(
             final_mask = cv2.bitwise_or(baseline_mask, decision.edit_mask)
             fill_diagnostics = {"backend": fill_id, "applied": False}
         else:
-            selected_fill = _route_fill_backend(fill_id, decision.decision)
+            selected_fill = _route_fill_backend(
+                fill_id,
+                decision.decision,
+                page.bubble_route_class,
+            )
             callback = (
                 lama_pool.fill
                 if selected_fill in {"current_lama", "ballons_lama"}
