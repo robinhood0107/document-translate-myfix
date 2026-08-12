@@ -250,6 +250,9 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
                 target_inventory_independent=bool(
                     entry.get("target_inventory_independent", False)
                 ),
+                target_review_complete=bool(
+                    entry.get("target_review_complete", False)
+                ),
             )
         )
     if not all(record.page_id and record.source_image for record in records):

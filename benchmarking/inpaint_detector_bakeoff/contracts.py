@@ -141,6 +141,7 @@ class Stage1Page:
     target_mask_provenance: str = "legacy_unknown"
     target_extent_independent: bool = False
     target_inventory_independent: bool = False
+    target_review_complete: bool = False
 
 
 @dataclass(frozen=True, slots=True)

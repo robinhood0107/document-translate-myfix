@@ -226,6 +226,7 @@ def _hard_gate_passes(summary: dict[str, object]) -> bool:
     return (
         summary.get("target_extent_independent") is True
         and summary.get("target_inventory_independent") is True
+        and summary.get("target_review_complete") is True
         and
         all(int(summary[name]) == 0 for name in zero)
         and float(summary.get("aggregate_target_coverage") or 0.0) >= 0.98
@@ -267,6 +268,7 @@ def run_fusion_matrix(
     target_inventory_independent = all(
         page.target_inventory_independent for page in pages
     )
+    target_review_complete = all(page.target_review_complete for page in pages)
     existing_edit_paths = _existing_edit_paths(manifest_path)
     for page in pages:
         source = cv2.imdecode(
@@ -347,6 +349,7 @@ def run_fusion_matrix(
         summary = totals[run["run_id"]].summary()
         summary["target_extent_independent"] = target_extent_independent
         summary["target_inventory_independent"] = target_inventory_independent
+        summary["target_review_complete"] = target_review_complete
         summary["target_mask_provenance"] = target_mask_provenance
         content_sha = str(summary["output_mask_set_sha256"])
         reused_from = content_owner.get(content_sha, "")
@@ -373,6 +376,7 @@ def run_fusion_matrix(
                         "information_limited"
                         if not target_extent_independent
                         or not target_inventory_independent
+                        or not target_review_complete
                         else "dominated"
                     )
                 ),
@@ -383,10 +387,15 @@ def run_fusion_matrix(
                         (
                             "target_extent_not_independent"
                             if not target_extent_independent
-                            else "target_inventory_not_independent"
+                            else (
+                                "target_inventory_not_independent"
+                                if not target_inventory_independent
+                                else "target_review_incomplete"
+                            )
                         )
                         if not target_extent_independent
                         or not target_inventory_independent
+                        or not target_review_complete
                         else "hard_gate_failed"
                     )
                 ),
