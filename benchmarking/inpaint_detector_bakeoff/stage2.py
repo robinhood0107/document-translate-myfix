@@ -75,6 +75,7 @@ def fill_factorized_mask(
     backend: str,
     interior_mask: np.ndarray | None = None,
     background_exclude_mask: np.ndarray | None = None,
+    background_sample_edit_mask: np.ndarray | None = None,
     lama_fill: FillCallable | None = None,
     minimum_samples: int = 32,
 ) -> tuple[np.ndarray, dict[str, object]]:
@@ -98,7 +99,14 @@ def fill_factorized_mask(
         else np.zeros(shape, dtype=np.uint8)
     )
     domain = _local_fill_domain(shape, edit, interior)
-    ys, xs, samples = _fill_samples(original, edit, domain, exclude)
+    sample_edit = (
+        binary_mask(background_sample_edit_mask, shape)
+        if background_sample_edit_mask is not None
+        else edit
+    )
+    if np.any((sample_edit > 0) & (edit == 0)):
+        raise ValueError("background sample exclusion must be inside the edit mask")
+    ys, xs, samples = _fill_samples(original, sample_edit, domain, exclude)
     sample_count = int(samples.shape[0])
     normalized = str(backend).strip().lower()
     generated = original.copy()
@@ -108,6 +116,7 @@ def fill_factorized_mask(
         "reason": "",
         "edit_pixel_count": int(np.count_nonzero(edit)),
         "sample_pixel_count": sample_count,
+        "sample_exclusion_pixel_count": int(np.count_nonzero(sample_edit)),
     }
 
     if normalized in {"current_lama", "ballons_lama"}:

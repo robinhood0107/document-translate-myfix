@@ -612,6 +612,9 @@ def _run_combination(
                 backend=selected_fill,
                 interior_mask=interior,
                 background_exclude_mask=exclude,
+                background_sample_edit_mask=(
+                    route_seed if decision.decision == "broad" else None
+                ),
                 lama_fill=callback,
             )
             if selected_fill != fill_id:
@@ -880,7 +883,11 @@ def _prepare_closure_ledger(
     executable: list[dict[str, str]] = []
     content_owner: dict[str, str] = {}
     for combination in combinations:
-        stage = "stage1" if combination["fill"] == "mask_only" else "product"
+        stage = (
+            "oracle"
+            if bool(matrix.get("oracle_experiment", False))
+            else ("stage1" if combination["fill"] == "mask_only" else "product")
+        )
         row = build_combination_closure_ledger(
             [combination],
             stage=stage,
