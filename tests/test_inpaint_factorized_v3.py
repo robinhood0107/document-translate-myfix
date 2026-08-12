@@ -29,6 +29,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     run_stage1,
     score_page,
     write_detector_cache,
+    _read_image as read_stage1_image,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (
     assert_complete_closure_ledger,
@@ -67,6 +68,30 @@ from scripts.merge_inpaint_factorized_v3 import merge_results
 def _write_image(path: Path, image: np.ndarray) -> str:
     assert cv2.imwrite(str(path), image)
     return str(path)
+
+
+def test_stage1_reads_unicode_source_and_mask_paths(tmp_path: Path) -> None:
+    unicode_dir = tmp_path / "日本語_경로"
+    unicode_dir.mkdir()
+    source = np.full((9, 11, 3), 177, np.uint8)
+    mask = np.zeros((9, 11), np.uint8)
+    mask[2:5, 3:7] = 255
+    source_path = unicode_dir / "원본_日本.png"
+    mask_path = unicode_dir / "마스크_日本.png"
+    assert cv2.imencode(".png", source)[1].tofile(source_path) is None
+    assert cv2.imencode(".png", mask)[1].tofile(mask_path) is None
+    page = Stage1Page(
+        page_id="unicode",
+        source_image=str(source_path),
+        target_text_mask=str(mask_path),
+        protected_structure_mask=None,
+        ambiguous_structure_mask=None,
+    )
+
+    loaded = load_page_masks(page, source.shape[:2])
+
+    assert np.array_equal(read_stage1_image(str(source_path)), source)
+    assert np.array_equal(loaded.target, mask)
 
 
 def _page_masks(shape: tuple[int, int] = (48, 64)) -> PageMasks:

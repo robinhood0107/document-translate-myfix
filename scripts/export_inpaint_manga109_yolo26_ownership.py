@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 import cv2
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,7 +75,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         rows: list[dict[str, object]] = []
         for page in load_stage1_manifest(manifest_path):
-            image = cv2.imread(page.source_image, cv2.IMREAD_COLOR)
+            image = cv2.imdecode(
+                np.fromfile(page.source_image, dtype=np.uint8), cv2.IMREAD_COLOR
+            )
             if image is None or image.size == 0:
                 raise FileNotFoundError(page.source_image)
             result = reference.infer(image)

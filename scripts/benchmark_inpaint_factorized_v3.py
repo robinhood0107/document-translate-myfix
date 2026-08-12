@@ -5,6 +5,7 @@ import argparse
 import gc
 import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path
 import sys
 import time
@@ -58,6 +59,7 @@ FAMILY = "inpaint-factorized-v3"
 CATEGORY = "40-inpaint-mask-render"
 
 
+@lru_cache(maxsize=None)
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -99,7 +101,7 @@ def _read_image(
     key = str(path)
     if cache is not None and key in cache:
         return cache[key]
-    image = cv2.imread(key, cv2.IMREAD_COLOR)
+    image = cv2.imdecode(np.fromfile(key, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None or image.size == 0:
         raise FileNotFoundError(path)
     if cache is not None:
@@ -120,13 +122,29 @@ def _read_mask(
         if mask.shape != shape:
             raise ValueError(f"mask shape mismatch: {mask.shape} != {shape}")
         return mask
-    mask = cv2.imread(value, cv2.IMREAD_GRAYSCALE)
+    mask = cv2.imdecode(np.fromfile(value, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
     if mask is None or mask.size == 0:
         raise FileNotFoundError(value)
     normalized = binary_mask(mask, shape)
     if cache is not None:
         cache[value] = normalized
     return normalized
+
+
+def _sparse_mask_indices(
+    path: str,
+    shape: tuple[int, int],
+    cache: dict[str, np.ndarray],
+) -> np.ndarray:
+    cached = cache.get(path)
+    if cached is not None:
+        return cached
+    mask = _read_mask(path, shape, None)
+    indices = np.flatnonzero(mask.reshape(-1)).astype(np.int64, copy=False)
+    if indices.size == 0:
+        raise ValueError(f"target instance mask is empty: {path}")
+    cache[path] = indices
+    return indices
 
 
 def _page_artifact(
@@ -184,6 +202,8 @@ def _annotation_masks(
     entry: dict[str, object],
     shape: tuple[int, int],
     cache: dict[str, np.ndarray],
+    *,
+    sparse_evidence: bool = False,
 ) -> PageMasks:
     target = _read_mask(page.target_text_mask, shape, cache)
     protected = _read_mask(page.protected_structure_mask, shape, cache)
@@ -202,14 +222,19 @@ def _annotation_masks(
         entry.get("existing_source_edit_mask", entry.get("baseline_mask"))
     )
     existing = _read_mask(existing_path, shape, cache)
-    instances = tuple(
-        (record.instance_id, _read_mask(record.mask_path, shape, cache))
-        for record in page.target_instances
-    )
     interior = _read_mask(page.bubble_interior_mask, shape, cache)
     corner = _read_mask(page.corner_protect_mask, shape, cache)
     preserve = _read_mask(page.preserve_mask, shape, cache)
-    regions = tuple(
+    instances = () if sparse_evidence else tuple(
+        (record.instance_id, _read_mask(record.mask_path, shape, cache))
+        for record in page.target_instances
+        if record.priority == "required"
+    )
+    # Region and target-instance artifacts are full-page PNGs in the sealed
+    # source manifest.  Keeping hundreds of those arrays resident turns E1
+    # evaluation into multi-gigabyte work.  The full helper contract remains
+    # the default; the matrix runner opts into sparse streaming explicitly.
+    regions = () if sparse_evidence else tuple(
         RegionMasks(
             region.region_id,
             region.bubble_route_class,
@@ -332,7 +357,9 @@ def _run_combination(
     lama_pool: _LamaPool,
     image_cache: dict[str, np.ndarray],
     mask_cache: dict[str, np.ndarray],
+    instance_index_cache: dict[str, np.ndarray],
     mask_only_score_cache: dict[str, tuple[dict[str, object], np.ndarray]],
+    annotation_cache: dict[str, PageMasks],
 ) -> tuple[FactorizedRunRecord, list[dict[str, object]]]:
     families = matrix.get("families")
     if not isinstance(families, dict):
@@ -376,9 +403,24 @@ def _run_combination(
 
     for page in pages:
         entry = entries[page.page_id]
-        source = _read_image(page.source_image, image_cache)
-        shape = source.shape[:2]
-        annotation = _annotation_masks(page, entry, shape, mask_cache)
+        if fill_id == "mask_only":
+            height = int(entry.get("height") or 0)
+            width = int(entry.get("width") or 0)
+            if height <= 0 or width <= 0:
+                source = _read_image(page.source_image, image_cache)
+                shape = source.shape[:2]
+            else:
+                shape = (height, width)
+                source = np.zeros((height, width, 3), np.uint8)
+        else:
+            source = _read_image(page.source_image, image_cache)
+            shape = source.shape[:2]
+        annotation = annotation_cache.get(page.page_id)
+        if annotation is None:
+            annotation = _annotation_masks(
+                page, entry, shape, mask_cache, sparse_evidence=True
+            )
+            annotation_cache[page.page_id] = annotation
         ownership = _read_mask(
             _page_artifact(ownership_family, page.page_id, "mask"), shape, mask_cache
         )
@@ -484,9 +526,14 @@ def _run_combination(
         broad_only = np.where(
             (decision.edit_mask > 0) & (detector_seed == 0), 255, 0
         ).astype(np.uint8)
-        if masks.regions:
-            broad_false_pixels = broad_route_false_positive_pixels(broad_only, masks)
-            broad_route_false = broad_false_pixels > 0
+        if page.regions:
+            source_clean = route_masks.get("pr2_clean_mask")
+            if source_clean is None:
+                source_clean = np.zeros(shape, np.uint8)
+            broad_route_false_pixels = int(
+                np.count_nonzero((broad_only > 0) & (source_clean == 0))
+            )
+            broad_route_false = broad_route_false_pixels > 0
         else:
             broad_route_false_pixels = int(np.count_nonzero(broad_only)) if (
                 decision.decision == "broad" and not clean_annotation
@@ -498,15 +545,18 @@ def _run_combination(
 
         seed_scores = []
         edit_scores = []
-        instances = masks.target_instances
-        for instance_id, instance in instances:
-            pixels = int(np.count_nonzero(instance))
-            seed_covered = int(
-                np.count_nonzero((instance > 0) & (detector_seed > 0))
+        flat_seed = detector_seed.reshape(-1)
+        flat_edit = decision.edit_mask.reshape(-1)
+        for instance_record in page.target_instances:
+            if instance_record.priority != "required":
+                continue
+            instance_id = instance_record.instance_id
+            indices = _sparse_mask_indices(
+                instance_record.mask_path, shape, instance_index_cache
             )
-            edit_covered = int(
-                np.count_nonzero((instance > 0) & (decision.edit_mask > 0))
-            )
+            pixels = int(indices.size)
+            seed_covered = int(np.count_nonzero(flat_seed[indices]))
+            edit_covered = int(np.count_nonzero(flat_edit[indices]))
             seed_scores.append(
                 {"instance_id": instance_id, "seeded": seed_covered > 0}
             )
@@ -892,9 +942,11 @@ def main(argv: list[str] | None = None) -> int:
         page_rows: dict[str, list[dict[str, object]]] = {}
         image_cache: dict[str, np.ndarray] = {}
         mask_cache: dict[str, np.ndarray] = {}
+        instance_index_cache: dict[str, np.ndarray] = {}
         mask_only_score_cache: dict[
             str, tuple[dict[str, object], np.ndarray]
         ] = {}
+        annotation_cache: dict[str, PageMasks] = {}
         for combination_index, combination in enumerate(combinations_to_run, start=1):
             print(
                 f"factorized-v3 {combination_index}/{len(combinations_to_run)} "
@@ -910,7 +962,9 @@ def main(argv: list[str] | None = None) -> int:
                 lama_pool=lama_pool,
                 image_cache=image_cache,
                 mask_cache=mask_cache,
+                instance_index_cache=instance_index_cache,
                 mask_only_score_cache=mask_only_score_cache,
+                annotation_cache=annotation_cache,
             )
             records.append(record)
             page_rows[record.run_id] = rows

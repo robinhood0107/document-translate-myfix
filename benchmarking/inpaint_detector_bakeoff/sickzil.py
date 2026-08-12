@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 import time
 
 import cv2
 import numpy as np
 
 from .contracts import CandidateMaskResult, binary_mask
+
+
+def prepare_sickzil_runtime() -> None:
+    """Keep the long-running frozen-graph reference stable on TensorFlow 2.x."""
+    os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 
 
 def modulo_padded(image: np.ndarray, modulo: int = 16) -> np.ndarray:
@@ -38,6 +44,11 @@ class SickZilSegmentationReference:
     """Exact SickZil SegNet 0.1.0 frozen-graph segmentation reference."""
 
     def __init__(self, model_path: str, *, segment_pixel_limit: int = 4_000_000) -> None:
+        # A long sequence of differently sized pages can exhaust TensorFlow
+        # 2.21's oneDNN primitive cache.  The frozen graph is pixel-identical
+        # with oneDNN disabled, so select the stable reference runtime before
+        # importing TensorFlow.
+        prepare_sickzil_runtime()
         import tensorflow as tf
 
         tf.compat.v1.disable_eager_execution()
@@ -90,6 +101,7 @@ class SickZilSegmentationReference:
                 "seconds": time.perf_counter() - start,
                 "provider": "tensorflow_cpu_frozen_graph",
                 "reference": "SickZil-Machine SegNet 0.1.0",
+                "onednn_enabled": os.environ.get("TF_ENABLE_ONEDNN_OPTS") != "0",
             },
         )
 
