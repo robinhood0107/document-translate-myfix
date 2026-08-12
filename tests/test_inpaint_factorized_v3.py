@@ -63,6 +63,7 @@ from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
 from scripts.export_inpaint_silhouette_router_v3 import export_candidates
 from scripts.merge_inpaint_factorized_v3 import merge_results
+from scripts.export_inpaint_silhouette_consensus_v4 import consensus_masks
 
 
 def _write_image(path: Path, image: np.ndarray) -> str:
@@ -2002,6 +2003,34 @@ def test_isolated_factorized_results_require_every_executed_closure_row(
     assert merged["physical_combination_count"] == 2
     assert merged["unaccounted_combination_count"] == 0
     assert merged["closure_ledger"] == ledger
+
+
+def test_silhouette_consensus_builds_union_intersection_and_n_of_four() -> None:
+    masks = {name: np.zeros((6, 8), np.uint8) for name in (
+        "ballons", "pr2", "ctbd", "manga109"
+    )}
+    masks["ballons"][1:4, 1:4] = 255
+    masks["pr2"][2:5, 2:5] = 255
+    masks["ctbd"][2:4, 3:6] = 255
+    masks["manga109"][3:5, 2:6] = 255
+
+    products = consensus_masks(masks)
+
+    expected_union = (masks["ballons"] > 0) | (masks["pr2"] > 0)
+    expected_intersection = (masks["ballons"] > 0) & (masks["pr2"] > 0)
+    stack = np.stack([mask > 0 for mask in masks.values()], axis=0)
+    assert np.array_equal(products["ballons_pr2_union"] > 0, expected_union)
+    assert np.array_equal(
+        products["ballons_pr2_intersection"] > 0, expected_intersection
+    )
+    assert np.array_equal(
+        products["two_of_four_consensus"] > 0,
+        np.count_nonzero(stack, axis=0) >= 2,
+    )
+    assert np.array_equal(
+        products["three_of_four_consensus"] > 0,
+        np.count_nonzero(stack, axis=0) >= 3,
+    )
 
 
 def test_known_background_synthetic_manifest_covers_all_fill_routes(
