@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 import cv2
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         rows = []
         for page in manifest.get("pages", []):
             page_id = str(page.get("page_id") or "").strip()
-            image = cv2.imread(str(page.get("path") or ""), cv2.IMREAD_COLOR)
+            image = cv2.imdecode(
+                np.fromfile(str(page.get("path") or ""), dtype=np.uint8),
+                cv2.IMREAD_COLOR,
+            )
             if not page_id or image is None or image.size == 0:
                 raise ValueError(f"invalid YSG source page: {page_id}")
             result = detector.infer(image)

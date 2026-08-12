@@ -101,9 +101,13 @@ def _manifest_control_families(
     annotation_silhouette_pages: dict[str, dict[str, Any]] = {}
     for page in pages:
         entry = entries[page.page_id]
-        existing = entry.get("existing_source_edit_mask") or entry.get("baseline_mask")
+        existing = (
+            entry.get("existing_source_edit_mask")
+            or entry.get("baseline_mask")
+            or entry.get("claim_seed_mask")
+        )
         if not isinstance(existing, str) or not existing:
-            raise ValueError(f"page {page.page_id} has no control edit mask")
+            raise ValueError(f"page {page.page_id} has no control edit or seed mask")
         if not page.ownership_mask or not page.bubble_interior_mask:
             raise ValueError(f"page {page.page_id} has incomplete v3 control evidence")
         detector_pages[page.page_id] = {

@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 import cv2
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,7 +159,9 @@ def _candidate(args: argparse.Namespace):
 
     def infer_ownership_roi(page, image_bgr):
         ownership_path = _ownership_path(args, page)
-        ownership = cv2.imread(str(ownership_path), cv2.IMREAD_GRAYSCALE)
+        ownership = cv2.imdecode(
+            np.fromfile(ownership_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE
+        )
         if ownership is None or ownership.size == 0:
             raise FileNotFoundError(ownership_path)
         return adapter.infer_with_ownership_rois(

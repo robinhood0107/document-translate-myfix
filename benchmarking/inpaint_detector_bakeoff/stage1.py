@@ -249,7 +249,7 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
 
 
 def _read_image(path: str) -> np.ndarray:
-    image = cv2.imread(path, cv2.IMREAD_COLOR)
+    image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None or image.size == 0:
         raise FileNotFoundError(f"unable to read source image: {path}")
     return image
@@ -266,7 +266,7 @@ def _file_sha256(path: str) -> str:
 def _read_mask(path: str | None, shape: tuple[int, int]) -> np.ndarray:
     if not path:
         return np.zeros(shape, dtype=np.uint8)
-    mask = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    mask = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
     if mask is None or mask.size == 0:
         raise FileNotFoundError(f"unable to read evaluation mask: {path}")
     return binary_mask(mask, shape)

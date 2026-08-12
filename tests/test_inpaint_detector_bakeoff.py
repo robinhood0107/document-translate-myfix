@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -52,6 +53,7 @@ from benchmarking.inpaint_detector_bakeoff.stage2 import (
 from benchmarking.inpaint_detector_bakeoff.sickzil import (
     class_map_to_mask,
     modulo_padded,
+    prepare_sickzil_runtime,
     preprocess_sickzil,
 )
 from benchmarking.inpaint_detector_bakeoff.ownership import build_existing_ownership_mask
@@ -938,6 +940,14 @@ def test_sickzil_preprocess_padding_and_class_mapping_match_reference() -> None:
     assert padded.shape == (16, 16, 3)
     assert np.all(mask[1:4, 2:6] == 255)
     assert np.count_nonzero(mask) == 12
+
+
+def test_sickzil_reference_disables_onednn_before_tensorflow_import(monkeypatch) -> None:
+    monkeypatch.delenv("TF_ENABLE_ONEDNN_OPTS", raising=False)
+
+    prepare_sickzil_runtime()
+
+    assert os.environ["TF_ENABLE_ONEDNN_OPTS"] == "0"
 
 
 @pytest.mark.parametrize(
