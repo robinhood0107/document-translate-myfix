@@ -179,6 +179,82 @@ def test_detector_positive_evidence_is_fail_closed_for_non_lama_backend(
     assert result.evidence[0].positive_edit is None
 
 
+def test_clean_bubble_positive_evidence_uses_robust_flat_without_extra_lama_call(
+    monkeypatch,
+) -> None:
+    image = np.full((40, 40, 3), 240, dtype=np.uint8)
+    image[4:32, 4:32] = 20
+    image[10:26, 10:26] = 240
+    image[20:24, 20:24] = 20
+    source_mask = np.zeros((40, 40), dtype=np.uint8)
+    source_mask[10:18, 10:18] = 255
+    raw_claim = np.zeros_like(source_mask)
+    raw_claim[20:24, 20:24] = 255
+    block = TextBlock(
+        text_bbox=np.asarray([8, 8, 28, 28], dtype=np.int32),
+        bubble_bbox=np.asarray([4, 4, 32, 32], dtype=np.int32),
+        text_class="text_bubble",
+        inpaint_bboxes=[[20, 20, 24, 24]],
+        detector_origin="bubble_text_rescue",
+    )
+    routing_interior = np.full((28, 28), 255, dtype=np.uint8)
+    detector_seeded_interior = np.zeros((28, 28), dtype=np.uint8)
+    detector_seeded_interior[6:22, 6:22] = 255
+
+    def fake_erase(_original, current, _mask, _blocks, _config, **_kwargs):
+        baseline = np.asarray(current).copy()
+        baseline[source_mask > 0] = 240
+        return SimpleNamespace(
+            image=baseline,
+            edit_mask=source_mask.copy(),
+            fallback_mask=np.zeros_like(source_mask),
+            evidence=(
+                BlockInpaintEvidence(
+                    block_id=block.block_id,
+                    block_index=0,
+                    erase_mode="bubble_skipped",
+                    skipped_reason="bubble_residual_source_seed_unavailable",
+                    source_owned=MaskPatch((4, 4, 32, 32), source_mask[4:32, 4:32]),
+                    bubble_interior=MaskPatch((4, 4, 32, 32), routing_interior),
+                ),
+            ),
+            stats={"blocks": []},
+        )
+
+    monkeypatch.setattr(
+        "modules.inpainting.source_lama_blockwise.erase_text_bubble_regions",
+        fake_erase,
+    )
+    monkeypatch.setattr(
+        "modules.utils.inpaint_positive_evidence.extract_bubble_interior_cap_crop",
+        lambda *_args, **_kwargs: detector_seeded_interior,
+    )
+    inpainter = _CallableInpainter()
+    inpainter.name = "lama_large_512px"
+
+    result = source_lama_blockwise_inpaint_result(
+        image,
+        source_mask,
+        [block],
+        inpainter,
+        {},
+        positive_claim_raw_mask=raw_claim,
+    )
+
+    assert inpainter.calls == 0
+    assert result.evidence[0].route_decision == "broad"
+    assert np.all(result.image[20:24, 20:24] == 240)
+    assert np.count_nonzero(result.edit_mask[4:32, 4:32]) == 16 * 16
+    broad_rows = [
+        row
+        for row in result.diagnostics
+        if row.get("phase") == "positive_evidence"
+        and row.get("backend") == "robust_flat_median"
+    ]
+    assert len(broad_rows) == 1
+    assert broad_rows[0]["is_inference"] is False
+
+
 def _unloaded_inpainter() -> SourceLaMaLarge:
     inpainter = object.__new__(SourceLaMaLarge)
     inpainter.inpaint_by_block = True
