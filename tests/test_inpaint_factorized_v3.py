@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from benchmarking.inpaint_detector_bakeoff.contracts import (
+    binary_mask,
     CandidateMaskResult,
     DetectorBox,
     FactorizedRunRecord,
@@ -69,6 +70,21 @@ from scripts.export_inpaint_silhouette_consensus_v4 import consensus_masks
 def _write_image(path: Path, image: np.ndarray) -> str:
     assert cv2.imwrite(str(path), image)
     return str(path)
+
+
+def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:
+    source = np.array([[0, 1], [255, -1]], dtype=np.int16)
+
+    def forbidden_where(*_args, **_kwargs):
+        raise AssertionError("binary mask must not promote 2K masks through np.where")
+
+    monkeypatch.setattr(np, "where", forbidden_where)
+
+    result = binary_mask(source)
+
+    assert result.dtype == np.uint8
+    assert result.flags.c_contiguous
+    assert result.tolist() == [[0, 255], [255, 0]]
 
 
 def test_stage1_reads_unicode_source_and_mask_paths(tmp_path: Path) -> None:

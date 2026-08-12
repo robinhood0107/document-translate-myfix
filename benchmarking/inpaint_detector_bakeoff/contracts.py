@@ -15,7 +15,14 @@ def binary_mask(mask: np.ndarray, shape: tuple[int, int] | None = None) -> np.nd
         raise ValueError("detector mask must be a two-dimensional array")
     if shape is not None and tuple(array.shape) != tuple(shape):
         raise ValueError(f"detector mask shape mismatch: {array.shape} != {shape}")
-    return np.ascontiguousarray(np.where(array > 0, 255, 0).astype(np.uint8))
+    # ``np.where(condition, 255, 0)`` promotes the two Python integers to
+    # int64 before the final uint8 cast.  A single 2K-page mask therefore
+    # needs an avoidable ~22 MiB temporary allocation.  Keep normalization in
+    # uint8 so factorized corpus evaluation remains bounded per page.
+    normalized = np.empty(array.shape, dtype=np.uint8)
+    np.greater(array, 0, out=normalized)
+    normalized *= np.uint8(255)
+    return np.ascontiguousarray(normalized)
 
 
 def mask_sha256(mask: np.ndarray) -> str:

@@ -283,20 +283,23 @@ def _score_cached_mask_only(
     baseline: np.ndarray,
     final_mask: np.ndarray,
     masks: PageMasks,
-    cache: dict[str, tuple[dict[str, object], np.ndarray]],
+    cache: dict[str, dict[str, object]],
 ) -> tuple[dict[str, object], np.ndarray]:
     cached = cache.get(page_id)
     if cached is None:
-        invariant, changed = score_stage2_page(
+        invariant, _changed = score_stage2_page(
             source,
             baseline,
             np.zeros(source.shape[:2], np.uint8),
             masks,
             baseline=baseline,
         )
-        cache[page_id] = (invariant, changed)
+        cache[page_id] = invariant
     else:
-        invariant, changed = cached
+        invariant = cached
+    # A mask-only run never changes pixels.  Do not retain one full-page zero
+    # array per corpus page merely to report that invariant across candidates.
+    changed = np.zeros(source.shape[:2], np.uint8)
     detector = binary_mask(final_mask, source.shape[:2])
     metrics = dict(invariant)
     covered = int(np.count_nonzero((masks.target > 0) & (detector > 0)))
@@ -355,11 +358,8 @@ def _run_combination(
     entries: dict[str, dict[str, object]],
     output_root: Path,
     lama_pool: _LamaPool,
-    image_cache: dict[str, np.ndarray],
-    mask_cache: dict[str, np.ndarray],
     instance_index_cache: dict[str, np.ndarray],
-    mask_only_score_cache: dict[str, tuple[dict[str, object], np.ndarray]],
-    annotation_cache: dict[str, PageMasks],
+    mask_only_score_cache: dict[str, dict[str, object]],
 ) -> tuple[FactorizedRunRecord, list[dict[str, object]]]:
     families = matrix.get("families")
     if not isinstance(families, dict):
@@ -402,6 +402,13 @@ def _run_combination(
     calls_before = lama_pool.call_count
 
     for page in pages:
+        # E1 contains ~400 MiB for each full corpus mask.  A process-wide
+        # artifact cache held several detector/ownership/silhouette families
+        # plus annotations simultaneously and grew past 8 GiB.  Keep only one
+        # page's decoded images and masks alive; the OS file cache still makes
+        # repeated combinations inexpensive without retaining NumPy arrays.
+        image_cache: dict[str, np.ndarray] = {}
+        mask_cache: dict[str, np.ndarray] = {}
         entry = entries[page.page_id]
         if fill_id == "mask_only":
             height = int(entry.get("height") or 0)
@@ -415,12 +422,9 @@ def _run_combination(
         else:
             source = _read_image(page.source_image, image_cache)
             shape = source.shape[:2]
-        annotation = annotation_cache.get(page.page_id)
-        if annotation is None:
-            annotation = _annotation_masks(
-                page, entry, shape, mask_cache, sparse_evidence=True
-            )
-            annotation_cache[page.page_id] = annotation
+        annotation = _annotation_masks(
+            page, entry, shape, mask_cache, sparse_evidence=True
+        )
         ownership = _read_mask(
             _page_artifact(ownership_family, page.page_id, "mask"), shape, mask_cache
         )
@@ -452,9 +456,7 @@ def _run_combination(
             "refined": refined,
             "dilated": dilated,
         }[seed_variant]
-        route_seed = np.where(
-            (detector_seed > 0) & (ownership > 0), 255, 0
-        ).astype(np.uint8)
+        route_seed = cv2.bitwise_and(detector_seed, ownership)
         content = None
         if expansion_id == "content_component":
             content = _read_mask(
@@ -523,9 +525,10 @@ def _run_combination(
             **route_masks,
         )
         clean_annotation = page.bubble_route_class in {"clean_flat", "clean_gradient"}
-        broad_only = np.where(
-            (decision.edit_mask > 0) & (detector_seed == 0), 255, 0
-        ).astype(np.uint8)
+        broad_only = cv2.bitwise_and(
+            decision.edit_mask,
+            cv2.bitwise_not(detector_seed),
+        )
         if page.regions:
             source_clean = route_masks.get("pr2_clean_mask")
             if source_clean is None:
@@ -940,13 +943,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         records: list[FactorizedRunRecord] = []
         page_rows: dict[str, list[dict[str, object]]] = {}
-        image_cache: dict[str, np.ndarray] = {}
-        mask_cache: dict[str, np.ndarray] = {}
         instance_index_cache: dict[str, np.ndarray] = {}
-        mask_only_score_cache: dict[
-            str, tuple[dict[str, object], np.ndarray]
-        ] = {}
-        annotation_cache: dict[str, PageMasks] = {}
+        mask_only_score_cache: dict[str, dict[str, object]] = {}
         for combination_index, combination in enumerate(combinations_to_run, start=1):
             print(
                 f"factorized-v3 {combination_index}/{len(combinations_to_run)} "
@@ -960,11 +958,8 @@ def main(argv: list[str] | None = None) -> int:
                 entries=entries,
                 output_root=output_root,
                 lama_pool=lama_pool,
-                image_cache=image_cache,
-                mask_cache=mask_cache,
                 instance_index_cache=instance_index_cache,
                 mask_only_score_cache=mask_only_score_cache,
-                annotation_cache=annotation_cache,
             )
             records.append(record)
             page_rows[record.run_id] = rows
