@@ -132,7 +132,13 @@ def test_source_extent_variants_expand_only_source_local_seed_support() -> None:
 
     variants = source_extent_variants(source, seed)
 
-    assert set(variants) == {"strict", "balanced", "edge_supported"}
+    assert set(variants) == {
+        "strict",
+        "balanced",
+        "edge_supported",
+        "location_dilate1",
+        "location_dilate2",
+    }
     assert all(np.count_nonzero(value & text) >= np.count_nonzero(seed) for value in variants.values())
     assert all(np.count_nonzero(value & line) == 0 for value in variants.values())
 

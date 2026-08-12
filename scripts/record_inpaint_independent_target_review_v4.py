@@ -8,7 +8,17 @@ from typing import Any
 
 
 SCHEMA_VERSION = "inpaint-independent-target-review-decisions-v4"
-EXTENT_CHOICES = frozenset({"strict", "balanced", "edge_supported", "location", "reject"})
+EXTENT_CHOICES = frozenset(
+    {
+        "strict",
+        "balanced",
+        "edge_supported",
+        "location_dilate1",
+        "location_dilate2",
+        "location",
+        "reject",
+    }
+)
 SEMANTIC_CHOICES = frozenset({"required", "preserve", "ambiguous", "not_text"})
 
 
