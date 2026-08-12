@@ -23,7 +23,9 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     RegionMasks,
     broad_route_false_positive_pixels,
     decide_bubble_route,
+    detector_roi_trigger_mask,
     expand_detector_claim,
+    fuse_detector_claims,
     load_page_masks,
     load_stage1_manifest,
     read_detector_cache,
@@ -65,6 +67,10 @@ from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
 from scripts.export_inpaint_silhouette_router_v3 import export_candidates
 from scripts.merge_inpaint_factorized_v3 import merge_results
 from scripts.export_inpaint_silhouette_consensus_v4 import consensus_masks
+from scripts.benchmark_inpaint_detector_fusions_v4 import (
+    _logical_runs as detector_fusion_runs,
+    run_fusion_matrix,
+)
 
 
 def _write_image(path: Path, image: np.ndarray) -> str:
@@ -85,6 +91,159 @@ def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> Non
     assert result.dtype == np.uint8
     assert result.flags.c_contiguous
     assert result.tolist() == [[0, 255], [255, 0]]
+
+
+def test_detector_roi_triggers_select_source_only_ownership_components() -> None:
+    shape = (24, 36)
+    ownership = np.zeros(shape, np.uint8)
+    ownership[3:11, 3:13] = 255
+    ownership[13:21, 22:33] = 255
+    raw = np.zeros(shape, np.uint8)
+    raw[5:7, 5:8] = 255
+    refined = raw.copy()
+    refined[7:9, 8:10] = 255
+    source_seed = np.zeros(shape, np.uint8)
+    source_seed[4:6, 4:6] = 255
+
+    missing = detector_roi_trigger_mask(
+        "seed-missing",
+        ownership=ownership,
+        primary_raw=raw,
+        primary_refined=refined,
+        source_seed=source_seed,
+    )
+    disagreement = detector_roi_trigger_mask(
+        "raw-refined-disagreement",
+        ownership=ownership,
+        primary_raw=raw,
+        primary_refined=refined,
+        source_seed=source_seed,
+    )
+    unavailable = detector_roi_trigger_mask(
+        "source-seed-unavailable",
+        ownership=ownership,
+        primary_raw=raw,
+        primary_refined=refined,
+        source_seed=source_seed,
+    )
+
+    assert np.count_nonzero(missing[13:21, 22:33]) == 88
+    assert np.count_nonzero(missing[:12]) == 0
+    assert np.count_nonzero(disagreement[3:11, 3:13]) == 80
+    assert np.count_nonzero(disagreement[13:21, 22:33]) == 0
+    assert np.array_equal(unavailable, missing)
+
+
+def test_detector_fusion_never_turns_ownership_geometry_into_claim() -> None:
+    shape = (20, 28)
+    ownership = np.zeros(shape, np.uint8)
+    ownership[2:18, 2:26] = 255
+    primary = np.zeros(shape, np.uint8)
+    primary[5:8, 5:8] = 255
+    secondary = np.zeros(shape, np.uint8)
+    secondary[12:15, 18:22] = 255
+    secondary[0:2, 0:2] = 255
+    trigger = np.zeros(shape, np.uint8)
+    trigger[10:18, 15:26] = 255
+
+    union = fuse_detector_claims(
+        "or", primary, secondary, ownership=ownership
+    )
+    intersection = fuse_detector_claims(
+        "and", primary, secondary, ownership=ownership
+    )
+    recovery = fuse_detector_claims(
+        "gated-recovery",
+        primary,
+        secondary,
+        ownership=ownership,
+        trigger_mask=trigger,
+    )
+
+    assert np.count_nonzero(union) == 21
+    assert np.count_nonzero(intersection) == 0
+    assert np.count_nonzero(recovery) == 21
+    assert np.count_nonzero(recovery[trigger > 0]) == 12
+    assert np.count_nonzero(recovery[(trigger > 0) & (secondary == 0)]) == 0
+    assert np.count_nonzero(union[ownership == 0]) == 0
+
+
+def test_detector_fusion_matrix_covers_singles_pairs_and_roi_triggers() -> None:
+    runs = detector_fusion_runs(
+        ("primary", "secondary", "roi"),
+        frozenset({"roi"}),
+    )
+    run_ids = {row["run_id"] for row in runs}
+
+    assert len(runs) == 17
+    assert {"primary", "secondary", "roi"}.issubset(run_ids)
+    assert "primary__or__secondary" in run_ids
+    assert "primary__and__roi" in run_ids
+    assert "primary__gated_seed_missing__roi" in run_ids
+    assert "secondary__gated_union__roi" in run_ids
+
+
+def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) -> None:
+    shape = (18, 24)
+    source = np.full((*shape, 3), 180, np.uint8)
+    target = np.zeros(shape, np.uint8)
+    target[5:9, 6:12] = 255
+    ownership = np.full(shape, 255, np.uint8)
+    zero = np.zeros(shape, np.uint8)
+    existing = target.copy()
+    source_path = _write_image(tmp_path / "source.png", source)
+    target_path = _write_image(tmp_path / "target.png", target)
+    ownership_path = _write_image(tmp_path / "ownership.png", ownership)
+    zero_path = _write_image(tmp_path / "zero.png", zero)
+    existing_path = _write_image(tmp_path / "existing.png", existing)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-detector-bakeoff-manifest-v3",
+                "pages": [
+                    {
+                        "page_id": "p1",
+                        "path": source_path,
+                        "target_text_mask": target_path,
+                        "target_instances": [
+                            {"instance_id": "i1", "mask_path": target_path}
+                        ],
+                        "bubble_route_class": "clean_flat",
+                        "bubble_interior_mask": ownership_path,
+                        "protected_structure_mask": zero_path,
+                        "ambiguous_structure_mask": zero_path,
+                        "ownership_mask": ownership_path,
+                        "corner_protect_mask": zero_path,
+                        "existing_source_edit_mask": existing_path,
+                        "expected_edit": "required",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-detector-fusion-spec-v4",
+                "candidates": {
+                    "detector": {
+                        "templates": {"raw": target_path, "refined": target_path}
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_fusion_matrix(manifest_path, spec_path)
+
+    metrics = result["runs"][0]["metrics"]
+    assert metrics["target_instance_seed_recall"] == 1.0
+    assert metrics["aggregate_target_coverage"] == 0.0
+    assert metrics["output_mask_set_sha256"] != hashlib.sha256().hexdigest()
 
 
 def test_stage1_reads_unicode_source_and_mask_paths(tmp_path: Path) -> None:

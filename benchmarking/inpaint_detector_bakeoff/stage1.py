@@ -422,6 +422,99 @@ def _components_touching_seed(mask: np.ndarray, seed: np.ndarray) -> np.ndarray:
     return np.where(np.isin(labels, selected_labels), 255, 0).astype(np.uint8)
 
 
+def detector_roi_trigger_mask(
+    trigger_id: str,
+    *,
+    ownership: np.ndarray,
+    primary_raw: np.ndarray,
+    primary_refined: np.ndarray,
+    source_seed: np.ndarray,
+) -> np.ndarray:
+    """Select authoritative ownership components that may run a ROI detector.
+
+    Geometry is only a routing boundary: every returned component still needs
+    detector pixels before it can become an edit.  The rules are page-agnostic
+    and operate on source-only evidence.
+    """
+
+    shape = binary_mask(ownership).shape
+    owned = binary_mask(ownership, shape)
+    raw = binary_mask(primary_raw, shape)
+    refined = binary_mask(primary_refined, shape)
+    seed = binary_mask(source_seed, shape)
+    trigger = str(trigger_id).strip().lower().replace("-", "_")
+    if trigger == "none" or not np.any(owned):
+        return np.zeros(shape, np.uint8)
+    if trigger == "always":
+        return owned
+    supported = {
+        "seed_missing",
+        "raw_refined_disagreement",
+        "source_seed_unavailable",
+        "union",
+    }
+    if trigger not in supported:
+        raise KeyError(f"unknown ROI trigger: {trigger_id}")
+    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (owned > 0).astype(np.uint8), 8, cv2.CV_32S
+    )
+    selected = np.zeros(shape, np.uint8)
+    disagreement = cv2.bitwise_xor(raw, refined)
+    for index in range(1, count):
+        x, y, width, height, area = (int(value) for value in stats[index])
+        if area <= 0:
+            continue
+        local_label = labels[y:y + height, x:x + width] == index
+        local_raw = raw[y:y + height, x:x + width]
+        local_disagreement = disagreement[y:y + height, x:x + width]
+        local_seed = seed[y:y + height, x:x + width]
+        seed_missing = not np.any(local_label & (local_raw > 0))
+        raw_refined_disagreement = np.any(
+            local_label & (local_disagreement > 0)
+        )
+        source_seed_unavailable = not np.any(local_label & (local_seed > 0))
+        matches = {
+            "seed_missing": seed_missing,
+            "raw_refined_disagreement": raw_refined_disagreement,
+            "source_seed_unavailable": source_seed_unavailable,
+        }
+        if matches.get(trigger, False) or (trigger == "union" and any(matches.values())):
+            selected[y:y + height, x:x + width][local_label] = 255
+    return np.ascontiguousarray(selected)
+
+
+def fuse_detector_claims(
+    fusion_id: str,
+    primary: np.ndarray,
+    secondary: np.ndarray,
+    *,
+    ownership: np.ndarray,
+    trigger_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Fuse at most two detector pixel claims without converting ROI to edit."""
+
+    shape = binary_mask(primary).shape
+    left = binary_mask(primary, shape)
+    right = binary_mask(secondary, shape)
+    owned = binary_mask(ownership, shape)
+    mode = str(fusion_id).strip().lower().replace("-", "_")
+    if mode == "single":
+        fused = left
+    elif mode == "or":
+        fused = cv2.bitwise_or(left, right)
+    elif mode == "and":
+        fused = cv2.bitwise_and(left, right)
+    elif mode == "gated_recovery":
+        if trigger_mask is None:
+            raise ValueError("gated recovery requires a ROI trigger mask")
+        allowed = binary_mask(trigger_mask, shape)
+        recovery = cv2.bitwise_and(right, allowed)
+        fused = cv2.bitwise_or(left, recovery)
+    else:
+        raise KeyError(f"unknown detector fusion: {fusion_id}")
+    return np.ascontiguousarray(cv2.bitwise_and(fused, owned))
+
+
 def expand_detector_claim(
     expansion_id: str,
     *,
