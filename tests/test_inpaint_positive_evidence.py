@@ -207,6 +207,104 @@ class DetectorPositiveTextEvidenceTests(unittest.TestCase):
             result.block_claim_providers[1],
         )
 
+    def test_clean_bubble_uses_native_interior_but_keeps_detector_claim_as_seed(self) -> None:
+        raw = np.zeros((40, 40), dtype=np.uint8)
+        raw[12:16, 12:16] = 255
+        existing = np.zeros_like(raw)
+        existing[10:18, 10:18] = 255
+        interior = np.full((28, 28), 255, dtype=np.uint8)
+        evidence = (
+            BlockInpaintEvidence(
+                block_id="block-0",
+                block_index=0,
+                skipped_reason="bubble_residual_source_seed_unavailable",
+                bubble_interior=MaskPatch((4, 4, 32, 32), interior),
+            ),
+        )
+
+        result = build_detector_positive_text_evidence(
+            [self._block(origin="bubble_text_rescue")],
+            raw,
+            evidence,
+            image_shape=(40, 40, 3),
+            existing_edit_mask=existing,
+        )
+
+        self.assertEqual(np.count_nonzero(result.positive_claim), 16)
+        self.assertEqual(result.block_route_decisions[0], "broad")
+        self.assertEqual(result.block_route_reasons[0], ())
+        self.assertEqual(np.count_nonzero(result.broad_edit), 28 * 28 - 8 * 8)
+        self.assertEqual(np.count_nonzero(result.narrow_edit), 0)
+        self.assertIn(
+            "ballons_native_bubble_interior",
+            result.block_claim_providers[0],
+        )
+
+    def test_microtexture_veto_keeps_native_interior_route_narrow(self) -> None:
+        raw = np.zeros((40, 40), dtype=np.uint8)
+        raw[12:16, 12:16] = 255
+        block = self._block(origin="bubble_text_rescue")
+        block._erase_skipped_reason = "microtexture_source_seed_unavailable"
+        evidence = (
+            BlockInpaintEvidence(
+                block_id="block-0",
+                block_index=0,
+                skipped_reason="microtexture_source_seed_unavailable",
+                bubble_interior=MaskPatch(
+                    (4, 4, 32, 32),
+                    np.full((28, 28), 255, dtype=np.uint8),
+                ),
+            ),
+        )
+
+        result = build_detector_positive_text_evidence(
+            [block],
+            raw,
+            evidence,
+            image_shape=(40, 40, 3),
+        )
+
+        self.assertEqual(result.block_route_decisions[0], "narrow")
+        self.assertEqual(np.count_nonzero(result.positive_edit), 16)
+        self.assertEqual(np.count_nonzero(result.broad_edit), 0)
+        self.assertIn(
+            "pr2_structure_or_ambiguity_veto",
+            result.block_route_reasons[0],
+        )
+
+    def test_recoverable_anchor_reopens_only_detector_claimed_source(self) -> None:
+        raw = np.zeros((40, 40), dtype=np.uint8)
+        raw[12:16, 12:16] = 255
+        source_owned = np.zeros_like(raw)
+        source_owned[12:16, 12:16] = 255
+        source_owned[18:22, 18:22] = 255
+        existing = np.zeros_like(raw)
+        existing[6:12, 6:12] = 255
+        evidence = (
+            BlockInpaintEvidence(
+                block_id="block-0",
+                block_index=0,
+                skipped_reason="bubble_residual_source_seed_unavailable",
+                source_owned=MaskPatch((4, 4, 32, 32), source_owned[4:32, 4:32]),
+                bubble_interior=MaskPatch(
+                    (4, 4, 32, 32),
+                    np.full((28, 28), 255, dtype=np.uint8),
+                ),
+            ),
+        )
+
+        result = build_detector_positive_text_evidence(
+            [self._block(origin="bubble_text_rescue")],
+            raw,
+            evidence,
+            image_shape=(40, 40, 3),
+            existing_edit_mask=existing,
+        )
+
+        self.assertEqual(result.block_route_decisions[0], "broad")
+        self.assertEqual(np.count_nonzero(result.broad_edit[12:16, 12:16]), 16)
+        self.assertEqual(np.count_nonzero(result.broad_edit[18:22, 18:22]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
