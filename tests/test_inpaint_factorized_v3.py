@@ -1661,6 +1661,7 @@ def test_factorized_matrix_builder_resolves_control_and_family_artifacts(
         Path(paths["candidate_owner"]).resolve()
     )
     assert matrix["controls"]["silhouette"] == "control_empty_silhouette"
+    assert "control_dual_ownership" in matrix["families"]["ownership"]
     assert "annotation_interior_oracle" in matrix["oracle_only"]
 
 
