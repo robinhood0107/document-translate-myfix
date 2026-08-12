@@ -249,6 +249,74 @@ def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) 
     assert metrics["output_mask_set_sha256"] != hashlib.sha256().hexdigest()
 
 
+def test_detector_fusion_marks_detector_derived_targets_information_limited(
+    tmp_path: Path,
+) -> None:
+    shape = (18, 24)
+    source = np.full((*shape, 3), 180, np.uint8)
+    target = np.zeros(shape, np.uint8)
+    target[5:9, 6:12] = 255
+    ownership = np.full(shape, 255, np.uint8)
+    zero = np.zeros(shape, np.uint8)
+    source_path = _write_image(tmp_path / "source.png", source)
+    target_path = _write_image(tmp_path / "target.png", target)
+    ownership_path = _write_image(tmp_path / "ownership.png", ownership)
+    zero_path = _write_image(tmp_path / "zero.png", zero)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-detector-bakeoff-manifest-v3",
+                "pages": [
+                    {
+                        "page_id": "p1",
+                        "path": source_path,
+                        "target_mask_provenance": "current_ctd_raw_components",
+                        "target_extent_independent": False,
+                        "target_text_mask": target_path,
+                        "target_instances": [
+                            {"instance_id": "i1", "mask_path": target_path}
+                        ],
+                        "bubble_route_class": "clean_flat",
+                        "bubble_interior_mask": ownership_path,
+                        "protected_structure_mask": zero_path,
+                        "ambiguous_structure_mask": zero_path,
+                        "ownership_mask": ownership_path,
+                        "corner_protect_mask": zero_path,
+                        "existing_source_edit_mask": zero_path,
+                        "expected_edit": "required",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-detector-fusion-spec-v4",
+                "candidates": {
+                    "detector": {
+                        "templates": {"raw": target_path, "refined": target_path}
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_fusion_matrix(manifest_path, spec_path)
+
+    run = result["runs"][0]
+    assert run["status"] == "information_limited"
+    assert run["closure_reason"] == "target_extent_not_independent"
+    assert run["metrics"]["target_extent_independent"] is False
+    assert run["metrics"]["target_mask_provenance"] == [
+        "current_ctd_raw_components"
+    ]
+
+
 def test_stage1_reads_unicode_source_and_mask_paths(tmp_path: Path) -> None:
     unicode_dir = tmp_path / "日本語_경로"
     unicode_dir.mkdir()

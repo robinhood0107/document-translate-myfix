@@ -224,6 +224,8 @@ def _hard_gate_passes(summary: dict[str, object]) -> bool:
         "false_edit_pixel_count",
     )
     return (
+        summary.get("target_extent_independent") is True
+        and
         all(int(summary[name]) == 0 for name in zero)
         and float(summary.get("aggregate_target_coverage") or 0.0) >= 0.98
         and float(summary.get("minimum_target_instance_coverage") or 0.0) >= 0.98
@@ -255,6 +257,12 @@ def run_fusion_matrix(
     runs = _logical_runs(tuple(candidates), roi_candidates)
     totals = {row["run_id"]: _Totals() for row in runs}
     pages = load_stage1_manifest(manifest_path)
+    target_extent_independent = all(
+        page.target_extent_independent for page in pages
+    )
+    target_mask_provenance = sorted(
+        {page.target_mask_provenance for page in pages}
+    )
     existing_edit_paths = _existing_edit_paths(manifest_path)
     for page in pages:
         source = cv2.imdecode(
@@ -333,6 +341,8 @@ def run_fusion_matrix(
     closure: list[dict[str, object]] = []
     for run in runs:
         summary = totals[run["run_id"]].summary()
+        summary["target_extent_independent"] = target_extent_independent
+        summary["target_mask_provenance"] = target_mask_provenance
         content_sha = str(summary["output_mask_set_sha256"])
         reused_from = content_owner.get(content_sha, "")
         state = "reused_by_sha" if reused_from else "executed"
@@ -351,8 +361,24 @@ def run_fusion_matrix(
         output_runs.append(
             {
                 **run,
-                "status": "family_complete" if _hard_gate_passes(summary) else "dominated",
-                "closure_reason": "" if _hard_gate_passes(summary) else "hard_gate_failed",
+                "status": (
+                    "family_complete"
+                    if _hard_gate_passes(summary)
+                    else (
+                        "information_limited"
+                        if not target_extent_independent
+                        else "dominated"
+                    )
+                ),
+                "closure_reason": (
+                    ""
+                    if _hard_gate_passes(summary)
+                    else (
+                        "target_extent_not_independent"
+                        if not target_extent_independent
+                        else "hard_gate_failed"
+                    )
+                ),
                 "metrics": summary,
             }
         )
