@@ -68,6 +68,9 @@ from scripts.build_inpaint_independent_target_review_v4 import (
 from scripts.build_inpaint_source_proposals_v4 import propose_semantic_contract
 from scripts.apply_inpaint_source_review_v4 import apply_source_review
 from scripts.record_inpaint_source_review_v4 import record_source_review
+from scripts.record_inpaint_independent_target_review_v4 import (
+    record_independent_target_review,
+)
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_fill_oracle_matrix_v3 import build_fill_matrix
@@ -226,6 +229,102 @@ def test_independent_target_review_keeps_unpaired_inventory_pending(
     assert payload["rows"][0]["selected_extent"] is None
     assert payload["full_page_inventory_pending_count"] == 1
     assert payload["full_page_inventory_pending"][0]["page_id"] == "unpaired"
+
+
+def test_independent_target_review_recorder_requires_every_row_and_page(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.json"
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "review_complete": False,
+                "rows": [{"review_id": "review-0000"}],
+                "full_page_inventory_pending": [{"page_id": "p2"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    incomplete = tmp_path / "incomplete.json"
+    incomplete.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "decisions": [],
+                "full_page_inventory": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="review decisions differ"):
+        record_independent_target_review(
+            ledger_path, incomplete, tmp_path / "not-written.json"
+        )
+
+    complete = tmp_path / "complete.json"
+    complete.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "decisions": [
+                    {
+                        "review_id": "review-0000",
+                        "extent": "balanced",
+                        "semantic": "required",
+                    }
+                ],
+                "full_page_inventory": [
+                    {"page_id": "p2", "status": "complete_no_missing_text"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = record_independent_target_review(
+        ledger_path, complete, tmp_path / "recorded.json"
+    )
+    assert payload["review_complete"] is True
+    assert len(payload["decisions"]) == 1
+    assert len(payload["full_page_inventory"]) == 1
+
+
+def test_independent_target_review_recorder_rejects_edit_extent_for_ambiguous(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "review_complete": False,
+                "rows": [{"review_id": "review-0000"}],
+                "full_page_inventory_pending": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "decisions.json"
+    decisions.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "decisions": [
+                    {
+                        "review_id": "review-0000",
+                        "extent": "strict",
+                        "semantic": "ambiguous",
+                    }
+                ],
+                "full_page_inventory": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="non-edit semantic"):
+        record_independent_target_review(
+            ledger, decisions, tmp_path / "not-written.json"
+        )
 
 
 def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:
