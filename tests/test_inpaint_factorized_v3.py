@@ -74,6 +74,9 @@ from scripts.record_inpaint_independent_target_review_v4 import (
 from scripts.apply_inpaint_independent_target_review_v4 import (
     apply_independent_target_review,
 )
+from scripts.build_inpaint_independent_review_decisions_v4 import (
+    build_review_decisions,
+)
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_fill_oracle_matrix_v3 import build_fill_matrix
@@ -576,6 +579,59 @@ def test_independent_target_review_applier_replaces_unpaired_page_with_instances
     target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
     assert np.array_equal(target, first_mask | second_mask)
     assert all(value["instance_id"] != "old-circular" for value in page["target_instances"])
+
+
+def test_independent_review_decision_builder_requires_unowned_rows_and_all_sheets(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "rows": [
+                    {
+                        "review_id": "review-0000",
+                        "inventory_source": "paired_location_with_human_semantic_region",
+                    },
+                    {
+                        "review_id": "review-0001",
+                        "inventory_source": "paired_location_outside_known_ownership",
+                    },
+                ],
+                "review_sheets": ["sheet-1.jpg"],
+                "full_page_inventory_pending": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    overrides = tmp_path / "overrides.json"
+    overrides.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-review-overrides-v4",
+                "candidate_seen": False,
+                "reviewed_sheets": [1],
+                "row_overrides": {},
+                "full_page_inventory": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unowned review row"):
+        build_review_decisions(ledger, overrides, tmp_path / "not-written.json")
+
+    value = json.loads(overrides.read_text(encoding="utf-8"))
+    value["row_overrides"]["review-0001"] = {
+        "extent": "reject",
+        "semantic": "not_text",
+    }
+    overrides.write_text(json.dumps(value), encoding="utf-8")
+    payload = build_review_decisions(ledger, overrides, tmp_path / "decisions.json")
+    assert payload["decisions"] == [
+        {"review_id": "review-0000", "extent": "balanced", "semantic": "required"},
+        {"review_id": "review-0001", "extent": "reject", "semantic": "not_text"},
+    ]
 
 
 def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:
