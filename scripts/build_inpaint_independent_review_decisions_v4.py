@@ -22,6 +22,7 @@ EXTENTS = frozenset(
         "location_dilate1",
         "location_dilate2",
         "location",
+        "manual",
         "reject",
     }
 )
@@ -94,9 +95,23 @@ def build_review_decisions(
             semantic = str(override.get("semantic") or "")
         if extent not in EXTENTS or semantic not in SEMANTICS:
             raise ValueError(f"invalid review decision: {review_id}={extent}/{semantic}")
-        decisions.append(
-            {"review_id": review_id, "extent": extent, "semantic": semantic}
+        manual_path = (
+            str(override.get("manual_extent_path") or "")
+            if isinstance(override, dict)
+            else ""
         )
+        if extent == "manual" and not manual_path:
+            raise ValueError(f"manual review extent missing: {review_id}")
+        if extent != "manual" and manual_path:
+            raise ValueError(f"non-manual extent must not provide a mask: {review_id}")
+        decision = {
+            "review_id": review_id,
+            "extent": extent,
+            "semantic": semantic,
+        }
+        if manual_path:
+            decision["manual_extent_path"] = manual_path
+        decisions.append(decision)
 
     inventory = overrides.get("full_page_inventory")
     if not isinstance(inventory, list):
