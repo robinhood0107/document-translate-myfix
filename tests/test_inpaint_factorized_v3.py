@@ -53,6 +53,10 @@ from scripts.benchmark_inpaint_factorized_v3 import (
 )
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
 from scripts.build_inpaint_factorized_manifest_v4 import build_manifest as build_manifest_v4
+from scripts.build_inpaint_development_source_index_v4 import build_source_index
+from scripts.build_inpaint_source_proposals_v4 import propose_semantic_contract
+from scripts.apply_inpaint_source_review_v4 import apply_source_review
+from scripts.record_inpaint_source_review_v4 import record_source_review
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
@@ -118,6 +122,206 @@ def test_manifest_v3_requires_instance_route_and_evidence_fields(tmp_path: Path)
     assert pages[0].bubble_route_class == "clean_flat"
     assert [value[0] for value in masks.target_instances] == ["glyph-1"]
     assert np.array_equal(masks.target_instances[0][1], target)
+
+
+def test_development_source_index_binds_proposal_only_pair_by_sha(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    paired_dir = tmp_path / "paired"
+    source_dir.mkdir()
+    paired_dir.mkdir()
+    source = np.full((12, 16, 3), 180, np.uint8)
+    paired = source.copy()
+    paired[3:7, 4:8] = 240
+    _write_image(source_dir / "001.png", source)
+    _write_image(paired_dir / "001.jpg", paired)
+
+    payload = build_source_index([f"elven::{source_dir}::{paired_dir}"])
+
+    page = payload["pages"][0]
+    assert payload["candidate_images_generated"] is False
+    assert payload["inpainting_invoked"] is False
+    assert page["page_id"] == "elven-001"
+    assert page["paired_reference"]["proposal_only"] is True
+    assert page["paired_reference"]["source_sha256"] == page["source_sha256"]
+    assert len(page["paired_reference"]["reference_sha256"]) == 64
+
+
+def test_development_source_index_rejects_incomplete_pair_set(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    paired_dir = tmp_path / "paired"
+    source_dir.mkdir()
+    paired_dir.mkdir()
+    _write_image(source_dir / "001.png", np.zeros((8, 8, 3), np.uint8))
+
+    with pytest.raises(ValueError, match="paired set mismatch"):
+        build_source_index([f"elven::{source_dir}::{paired_dir}"])
+
+
+def test_source_proposal_semantics_are_candidate_blind_and_fail_closed() -> None:
+    assert propose_semantic_contract(
+        "text_bubble", paired_change_contact=False
+    ) == ("dialogue_bubble", "translate_inpaint", "required")
+    assert propose_semantic_contract(
+        "text_free", paired_change_contact=True
+    ) == ("dialogue_free", "translate_inpaint", "required")
+    assert propose_semantic_contract(
+        "text_free", paired_change_contact=False
+    ) == ("ambiguous", "review", "ambiguous")
+
+
+def test_source_review_rebuilds_required_preserve_and_ambiguous_masks(
+    tmp_path: Path,
+) -> None:
+    shape = (16, 20)
+    zeros = np.zeros(shape, np.uint8)
+    full = np.full(shape, 255, np.uint8)
+    first = zeros.copy()
+    first[2:5, 2:5] = 255
+    second = zeros.copy()
+    second[8:11, 10:13] = 255
+    paths = {
+        "zeros": _write_image(tmp_path / "zeros.png", zeros),
+        "full": _write_image(tmp_path / "full.png", full),
+        "first": _write_image(tmp_path / "first.png", first),
+        "second": _write_image(tmp_path / "second.png", second),
+    }
+    proposals = {
+        "schema_version": "inpaint-factorized-source-decisions-v4",
+        "corpus_id": "fixture",
+        "candidate_seen": False,
+        "pages": [{
+            "page_id": "p1",
+            "target_text_mask": paths["first"],
+            "preserve_mask": paths["zeros"],
+            "protected_structure_mask": paths["zeros"],
+            "ambiguous_structure_mask": paths["second"],
+            "ownership_mask": paths["full"],
+            "claim_seed_mask": paths["full"],
+            "bubble_interior_mask": paths["full"],
+            "corner_protect_mask": paths["zeros"],
+            "expected_edit": "required",
+            "target_instances": [
+                {"instance_id": "i1", "region_id": "r1", "mask_path": paths["first"], "semantic_role": "dialogue_bubble", "processing_action": "translate_inpaint", "priority": "required"},
+                {"instance_id": "i2", "region_id": "r1", "mask_path": paths["second"], "semantic_role": "ambiguous", "processing_action": "review", "priority": "ambiguous"},
+            ],
+            "regions": [{
+                "region_id": "r1",
+                "bubble_route_class": "ambiguous",
+                "bubble_interior_mask": paths["full"],
+                "ownership_mask": paths["full"],
+                "protected_structure_mask": paths["zeros"],
+                "ambiguous_structure_mask": paths["second"],
+                "corner_protect_mask": paths["zeros"],
+            }],
+        }],
+    }
+    ledger = {
+        "candidate_seen": False,
+        "rows": [{"review_id": "review-1", "page_id": "p1", "instance_id": "i2"}],
+    }
+    review = {
+        "schema_version": "inpaint-source-review-decisions-v4",
+        "candidate_seen": False,
+        "decisions": [{"review_id": "review-1", "decision": "preserve", "semantic_role": "sfx"}],
+    }
+    proposal_path = tmp_path / "proposals.json"
+    ledger_path = tmp_path / "ledger.json"
+    review_path = tmp_path / "review.json"
+    proposal_path.write_text(json.dumps(proposals), encoding="utf-8")
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+
+    result = apply_source_review(
+        proposal_path, ledger_path, review_path, tmp_path / "reviewed"
+    )
+
+    page = result["pages"][0]
+    assert result["candidate_seen"] is False
+    assert result["review_complete"] is True
+    assert page["target_instances"][1]["priority"] == "optional"
+    assert np.array_equal(cv2.imread(page["target_text_mask"], 0), first)
+    assert np.array_equal(cv2.imread(page["preserve_mask"], 0), second)
+    assert not np.any(cv2.imread(page["ambiguous_structure_mask"], 0))
+
+
+def test_source_review_record_is_candidate_blind_and_complete(tmp_path: Path) -> None:
+    ledger = {
+        "candidate_seen": False,
+        "rows": [
+            {"review_id": "review-0000", "semantic_role_proposal": "ambiguous"},
+            {"review_id": "review-0001", "semantic_role_proposal": "dialogue_bubble"},
+            {"review_id": "review-0002", "semantic_role_proposal": "ambiguous"},
+        ],
+    }
+    ledger_path = tmp_path / "ledger.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+
+    payload = record_source_review(
+        ledger_path,
+        tmp_path / "decisions.json",
+        preserve_ids={"review-0000"},
+        ui_ids={"review-0002"},
+    )
+
+    assert payload["candidate_seen"] is False
+    assert payload["review_complete"] is True
+    assert [(row["decision"], row["semantic_role"]) for row in payload["decisions"]] == [
+        ("preserve", "sfx"),
+        ("required", "dialogue_bubble"),
+        ("required", "ui_or_sign"),
+    ]
+
+
+def test_source_review_records_empty_no_edit_page_as_fail_closed_region(
+    tmp_path: Path,
+) -> None:
+    shape = (8, 10)
+    zeros = _write_image(tmp_path / "zeros.png", np.zeros(shape, np.uint8))
+    proposals = {
+        "schema_version": "inpaint-factorized-source-decisions-v4",
+        "corpus_id": "fixture",
+        "candidate_seen": False,
+        "pages": [{
+            "page_id": "empty",
+            "target_text_mask": zeros,
+            "preserve_mask": zeros,
+            "protected_structure_mask": zeros,
+            "ambiguous_structure_mask": zeros,
+            "ownership_mask": zeros,
+            "claim_seed_mask": zeros,
+            "bubble_interior_mask": zeros,
+            "corner_protect_mask": zeros,
+            "expected_edit": "none",
+            "target_instances": [],
+            "regions": [],
+        }],
+    }
+    ledger = {"candidate_seen": False, "rows": []}
+    decisions = {
+        "schema_version": "inpaint-source-review-decisions-v4",
+        "candidate_seen": False,
+        "decisions": [],
+    }
+    proposal_path = tmp_path / "proposals.json"
+    ledger_path = tmp_path / "ledger.json"
+    review_path = tmp_path / "review.json"
+    proposal_path.write_text(json.dumps(proposals), encoding="utf-8")
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    review_path.write_text(json.dumps(decisions), encoding="utf-8")
+
+    payload = apply_source_review(
+        proposal_path, ledger_path, review_path, tmp_path / "reviewed"
+    )
+
+    page = payload["pages"][0]
+    assert page["expected_edit"] == "none"
+    assert page["target_text_mask"] is None
+    assert page["regions"][0]["region_id"] == "region-page-empty"
+    assert page["regions"][0]["proposal"]["empty_no_edit_page"] is True
 
 
 def test_manifest_v3_rejects_target_instance_union_mismatch(tmp_path: Path) -> None:
