@@ -11,6 +11,7 @@ from .contracts import CandidateMaskResult, DetectorBox
 
 
 TEXT_CLASS_ID = 1
+BALLOON_CLASS_ID = 2
 
 
 def _as_numpy(value: Any) -> np.ndarray:
@@ -27,13 +28,15 @@ def _as_numpy(value: Any) -> np.ndarray:
     return np.asarray(current)
 
 
-def text_ownership_from_result(
+def class_mask_from_result(
     result: Any,
     shape: tuple[int, int],
     *,
+    class_id: int,
+    label: str,
     provider: str,
 ) -> tuple[np.ndarray, tuple[DetectorBox, ...]]:
-    """Union only YOLO text instances without turning a box into claim pixels."""
+    """Union one YOLO instance class without turning boxes into mask pixels."""
 
     ownership = np.zeros(shape, dtype=np.uint8)
     boxes_object = getattr(result, "boxes", None)
@@ -50,7 +53,7 @@ def text_ownership_from_result(
     count = min(len(classes), len(confidences), len(coordinates), len(masks))
     records: list[DetectorBox] = []
     for index in range(count):
-        if int(classes[index]) != TEXT_CLASS_ID:
+        if int(classes[index]) != int(class_id):
             continue
         local = masks[index]
         if tuple(local.shape) != tuple(shape):
@@ -63,13 +66,47 @@ def text_ownership_from_result(
         x1, y1, x2, y2 = coordinates[index]
         record = DetectorBox(
             (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))),
-            "text",
+            str(label),
             float(confidences[index]),
             provider,
         ).clipped(shape)
         if record is not None:
             records.append(record)
     return np.ascontiguousarray(ownership), tuple(records)
+
+
+def text_ownership_from_result(
+    result: Any,
+    shape: tuple[int, int],
+    *,
+    provider: str,
+) -> tuple[np.ndarray, tuple[DetectorBox, ...]]:
+    """Union only YOLO text instances without turning a box into claim pixels."""
+
+    return class_mask_from_result(
+        result,
+        shape,
+        class_id=TEXT_CLASS_ID,
+        label="text",
+        provider=provider,
+    )
+
+
+def balloon_silhouette_from_result(
+    result: Any,
+    shape: tuple[int, int],
+    *,
+    provider: str,
+) -> tuple[np.ndarray, tuple[DetectorBox, ...]]:
+    """Union only the model's class-2 balloon instance pixels."""
+
+    return class_mask_from_result(
+        result,
+        shape,
+        class_id=BALLOON_CLASS_ID,
+        label="balloon",
+        provider=provider,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +132,13 @@ class Manga109YOLO26OwnershipReference:
         self.model = YOLO(str(self.model_path))
 
     def infer(self, image_bgr: np.ndarray) -> CandidateMaskResult:
+        text, _balloon = self.infer_evidence(image_bgr)
+        return text
+
+    def infer_evidence(
+        self,
+        image_bgr: np.ndarray,
+    ) -> tuple[CandidateMaskResult, CandidateMaskResult]:
         if image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
             raise ValueError("Manga109 YOLO26 expects a BGR image")
         result = self.model.predict(
@@ -112,18 +156,38 @@ class Manga109YOLO26OwnershipReference:
             image_bgr.shape[:2],
             provider=provider,
         )
-        return CandidateMaskResult(
+        balloon, balloon_boxes = balloon_silhouette_from_result(
+            result,
+            image_bgr.shape[:2],
+            provider=provider,
+        )
+        common_runtime = {
+            "provider": provider,
+            "image_size": int(self.settings.image_size),
+            "confidence": float(self.settings.confidence),
+            "iou": float(self.settings.iou),
+            "retina_masks": True,
+        }
+        text_result = CandidateMaskResult(
             "manga109-yolo26-text-ownership",
             ownership,
             ownership,
             ownership,
             boxes=boxes,
             runtime={
-                "provider": provider,
-                "image_size": int(self.settings.image_size),
-                "confidence": float(self.settings.confidence),
-                "iou": float(self.settings.iou),
-                "retina_masks": True,
+                **common_runtime,
                 "text_instance_count": len(boxes),
             },
         )
+        balloon_result = CandidateMaskResult(
+            "manga109-yolo26-balloon-silhouette",
+            balloon,
+            balloon,
+            balloon,
+            boxes=balloon_boxes,
+            runtime={
+                **common_runtime,
+                "balloon_instance_count": len(balloon_boxes),
+            },
+        )
+        return text_result, balloon_result

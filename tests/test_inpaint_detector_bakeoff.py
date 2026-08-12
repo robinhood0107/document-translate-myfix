@@ -78,6 +78,7 @@ from benchmarking.inpaint_detector_bakeoff.fixed_ctd_onnx import (
     _require_primary_provider,
 )
 from benchmarking.inpaint_detector_bakeoff.manga109_yolo26 import (
+    balloon_silhouette_from_result,
     text_ownership_from_result,
 )
 from scripts.check_inpaint_positive_mask_parity import _compare_kind
@@ -128,6 +129,17 @@ def test_manga109_yolo26_uses_only_text_instance_pixels_as_ownership() -> None:
     assert np.count_nonzero(ownership[0:4, 11:16]) == 0
     assert [box.label for box in boxes] == ["text"]
     assert boxes[0].xyxy == (9, 4, 14, 10)
+
+    balloon, balloon_boxes = balloon_silhouette_from_result(
+        result,
+        shape,
+        provider="python-reference",
+    )
+    assert np.count_nonzero(balloon) == 20
+    assert np.count_nonzero(balloon[0:4, 11:16]) == 20
+    assert np.count_nonzero(balloon[4:10, 9:14]) == 0
+    assert [box.label for box in balloon_boxes] == ["balloon"]
+    assert balloon_boxes[0].xyxy == (11, 0, 16, 4)
 
 
 def test_manga109_yolo26_empty_or_non_text_results_fail_closed() -> None:
