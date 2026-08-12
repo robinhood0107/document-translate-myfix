@@ -49,6 +49,7 @@ from benchmarking.inpaint_detector_bakeoff.silhouette import (
 )
 from benchmarking.inpaint_detector_bakeoff.paired_target import (
     paired_old_text_proposal,
+    source_extent_variants,
 )
 from scripts.benchmark_inpaint_factorized_v3 import (
     _annotation_masks,
@@ -61,6 +62,9 @@ from scripts.benchmark_inpaint_factorized_v3 import (
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
 from scripts.build_inpaint_factorized_manifest_v4 import build_manifest as build_manifest_v4
 from scripts.build_inpaint_development_source_index_v4 import build_source_index
+from scripts.build_inpaint_independent_target_review_v4 import (
+    build_independent_target_review,
+)
 from scripts.build_inpaint_source_proposals_v4 import propose_semantic_contract
 from scripts.apply_inpaint_source_review_v4 import apply_source_review
 from scripts.record_inpaint_source_review_v4 import record_source_review
@@ -110,6 +114,118 @@ def test_paired_target_proposal_rejects_global_compression_noise() -> None:
 
     assert np.count_nonzero(proposal.extent_mask) == 0
     assert proposal.instance_masks == ()
+
+
+def test_source_extent_variants_expand_only_source_local_seed_support() -> None:
+    source = np.full((88, 120, 3), 235, np.uint8)
+    text = np.zeros(source.shape[:2], np.uint8)
+    cv2.putText(text, "A", (18, 64), cv2.FONT_HERSHEY_SIMPLEX, 1.6, 255, 4, cv2.LINE_AA)
+    source[text > 0] = 20
+    line = np.zeros(source.shape[:2], np.uint8)
+    cv2.line(line, (86, 12), (86, 76), 255, 3, cv2.LINE_AA)
+    source[line > 0] = 25
+    seed = np.zeros(source.shape[:2], np.uint8)
+    seed[40:52, 30:38] = text[40:52, 30:38]
+
+    variants = source_extent_variants(source, seed)
+
+    assert set(variants) == {"strict", "balanced", "edge_supported"}
+    assert all(np.count_nonzero(value & text) >= np.count_nonzero(seed) for value in variants.values())
+    assert all(np.count_nonzero(value & line) == 0 for value in variants.values())
+
+
+def test_source_extent_variants_fail_closed_for_empty_or_wrong_shape() -> None:
+    source = np.full((20, 24, 3), 180, np.uint8)
+    empty = source_extent_variants(source, np.zeros((20, 24), np.uint8))
+    assert all(np.count_nonzero(value) == 0 for value in empty.values())
+    with pytest.raises(ValueError, match="shape mismatch"):
+        source_extent_variants(source, np.zeros((19, 24), np.uint8))
+
+
+def test_independent_target_review_keeps_unpaired_inventory_pending(
+    tmp_path: Path,
+) -> None:
+    shape = (48, 64)
+    source = np.full((*shape, 3), 235, np.uint8)
+    cv2.putText(source, "A", (12, 34), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (20, 20, 20), 2)
+    source_a = _write_image(tmp_path / "source-a.png", source)
+    source_b = _write_image(tmp_path / "source-b.png", source)
+    location = np.zeros(shape, np.uint8)
+    location[18:31, 14:28] = 255
+    location_path = _write_image(tmp_path / "location.png", location)
+    ownership = np.zeros(shape, np.uint8)
+    ownership[8:42, 6:40] = 255
+    ownership_path = _write_image(tmp_path / "ownership.png", ownership)
+    target = np.zeros(shape, np.uint8)
+    target[18:31, 14:28] = 255
+    target_path = _write_image(tmp_path / "semantic-target.png", target)
+
+    source_index = tmp_path / "source-index.json"
+    source_index.write_text(
+        json.dumps(
+            {
+                "pages": [
+                    {"page_id": "paired", "path": source_a},
+                    {"page_id": "unpaired", "path": source_b},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "pages": [
+                    {
+                        "page_id": "paired",
+                        "regions": [
+                            {"region_id": "r1", "ownership_mask": ownership_path}
+                        ],
+                        "target_instances": [
+                            {
+                                "instance_id": "i1",
+                                "region_id": "r1",
+                                "priority": "required",
+                                "semantic_role": "dialogue_bubble",
+                                "mask_path": target_path,
+                            }
+                        ],
+                    },
+                    {"page_id": "unpaired", "regions": [], "target_instances": []},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    paired = tmp_path / "paired.json"
+    paired.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "pages": [
+                    {"page_id": "paired", "target_text_mask": location_path},
+                    {"page_id": "unpaired", "target_text_mask": None},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_independent_target_review(
+        source_index,
+        semantic,
+        paired,
+        tmp_path / "review",
+    )
+
+    assert payload["review_complete"] is False
+    assert payload["target_inventory_independent"] is False
+    assert payload["review_row_count"] == 1
+    assert payload["rows"][0]["semantic_role_proposal"] == "dialogue_bubble"
+    assert payload["rows"][0]["selected_extent"] is None
+    assert payload["full_page_inventory_pending_count"] == 1
+    assert payload["full_page_inventory_pending"][0]["page_id"] == "unpaired"
 
 
 def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:

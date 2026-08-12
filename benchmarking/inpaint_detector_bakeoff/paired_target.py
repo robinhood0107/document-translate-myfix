@@ -16,6 +16,77 @@ class PairedTargetProposal:
     delta_mad: float
 
 
+@dataclass(frozen=True, slots=True)
+class SourceExtentFeatures:
+    contrast: np.ndarray
+    edge_support: np.ndarray
+
+
+def build_source_extent_features(source_bgr: np.ndarray) -> SourceExtentFeatures:
+    source = np.asarray(source_bgr)
+    if source.ndim != 3 or source.shape[2] != 3:
+        raise ValueError("source must be a BGR image")
+    gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+    local_background = cv2.medianBlur(gray, 15)
+    contrast = cv2.absdiff(gray, local_background)
+    edge_support = cv2.dilate(
+        cv2.Canny(gray, 40, 120), np.ones((3, 3), np.uint8), iterations=1
+    )
+    return SourceExtentFeatures(contrast=contrast, edge_support=edge_support)
+
+
+def source_extent_variants(
+    source_bgr: np.ndarray,
+    location_seed: np.ndarray,
+    *,
+    features: SourceExtentFeatures | None = None,
+) -> dict[str, np.ndarray]:
+    """Build candidate-blind annotation extents around an independent seed.
+
+    These masks are review aids, never detector outputs.  They use only the
+    source pixels and a bounded location seed.  Review must explicitly choose a
+    variant (or reject all variants) before it can become target annotation.
+    """
+
+    source = np.asarray(source_bgr)
+    if source.ndim != 3 or source.shape[2] != 3:
+        raise ValueError("source must be a BGR image")
+    seed = np.where(np.asarray(location_seed) > 0, 255, 0).astype(np.uint8)
+    if seed.shape != source.shape[:2]:
+        raise ValueError("location seed shape mismatch")
+    if not np.any(seed):
+        empty = np.zeros(seed.shape, np.uint8)
+        return {key: empty.copy() for key in ("strict", "balanced", "edge_supported")}
+
+    prepared = features or build_source_extent_features(source)
+    contrast = np.asarray(prepared.contrast)
+    edge_support = np.asarray(prepared.edge_support)
+    if contrast.shape != seed.shape or edge_support.shape != seed.shape:
+        raise ValueError("source extent feature shape mismatch")
+    neighborhood = cv2.dilate(seed, np.ones((9, 9), np.uint8), iterations=1)
+
+    def connected_support(support: np.ndarray) -> np.ndarray:
+        candidate = np.where(
+            (neighborhood > 0) & ((support > 0) | (seed > 0)), 255, 0
+        ).astype(np.uint8)
+        count, labels = cv2.connectedComponents((candidate > 0).astype(np.uint8), 8)
+        if count <= 1:
+            return candidate
+        selected = np.unique(labels[seed > 0])
+        selected = selected[selected > 0]
+        if selected.size == 0:
+            return np.zeros(seed.shape, np.uint8)
+        return np.where(np.isin(labels, selected), 255, 0).astype(np.uint8)
+
+    return {
+        "strict": connected_support(np.where(contrast >= 12, 255, 0).astype(np.uint8)),
+        "balanced": connected_support(np.where(contrast >= 7, 255, 0).astype(np.uint8)),
+        "edge_supported": connected_support(
+            np.where((contrast >= 4) & (edge_support > 0), 255, 0).astype(np.uint8)
+        ),
+    }
+
+
 def _binary_components(mask: np.ndarray, *, minimum_area: int) -> list[np.ndarray]:
     count, labels, stats, _ = cv2.connectedComponentsWithStats(
         (mask > 0).astype(np.uint8), 8, cv2.CV_32S

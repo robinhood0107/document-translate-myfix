@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from benchmarking.inpaint_detector_bakeoff.paired_target import (  # noqa: E402
     paired_old_text_proposal,
+    source_extent_variants,
 )
 from scripts.validation_artifact_harness import (  # noqa: E402
     default_archive_root,
@@ -101,6 +102,43 @@ def _contact_sheets(
     return paths
 
 
+def _variant_contact_sheets(
+    rows: list[tuple[str, Path, dict[str, Path]]],
+    output_dir: Path,
+    *,
+    rows_per_sheet: int = 8,
+) -> list[str]:
+    cell = (260, 380)
+    columns = ("SOURCE", "STRICT", "BALANCED", "EDGE SUPPORTED")
+    paths: list[str] = []
+    for sheet_index, start in enumerate(range(0, len(rows), rows_per_sheet), 1):
+        group = rows[start : start + rows_per_sheet]
+        canvas = Image.new(
+            "RGB", (cell[0] * len(columns), (cell[1] + 30) * len(group)), "white"
+        )
+        draw = ImageDraw.Draw(canvas)
+        for row_index, (page_id, source_path, variants) in enumerate(group):
+            image_paths = (
+                source_path,
+                variants["strict"],
+                variants["balanced"],
+                variants["edge_supported"],
+            )
+            for column_index, (label, path) in enumerate(zip(columns, image_paths)):
+                image = Image.open(path).convert("RGB")
+                image.thumbnail(cell, Image.Resampling.LANCZOS)
+                x = column_index * cell[0] + (cell[0] - image.width) // 2
+                y = row_index * (cell[1] + 30) + 24
+                canvas.paste(image, (x, y))
+                draw.text((column_index * cell[0] + 4, y - 18), label, fill="black")
+            draw.text((4, row_index * (cell[1] + 30) + 4), page_id, fill="black")
+        path = output_dir / "review" / f"source-extent-variants-{sheet_index:02d}.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(path, quality=94)
+        paths.append(str(path.resolve()))
+    return paths
+
+
 def build_paired_target_proposals(
     source_index_path: Path,
     output_dir: Path,
@@ -112,6 +150,7 @@ def build_paired_target_proposals(
         raise ValueError("unsupported development source index")
     pages: list[dict[str, Any]] = []
     review_rows: list[tuple[str, Path, Path, Path]] = []
+    variant_review_rows: list[tuple[str, Path, dict[str, Path]]] = []
     paired_page_count = 0
     unpaired_page_count = 0
     instance_count = 0
@@ -167,7 +206,21 @@ def build_paired_target_proposals(
         overlay_path = Path(
             _write_image(page_dir / "source-proposal-overlay.jpg", _overlay(source, proposal.extent_mask))
         )
+        variant_masks = source_extent_variants(source, proposal.extent_mask)
+        variant_paths: dict[str, Path] = {}
+        variant_mask_paths: dict[str, str] = {}
+        for variant_id, variant_mask in variant_masks.items():
+            variant_mask_paths[variant_id] = _write_image(
+                page_dir / "extent-variants" / f"{variant_id}.png", variant_mask
+            )
+            variant_paths[variant_id] = Path(
+                _write_image(
+                    page_dir / "extent-variants" / f"{variant_id}-overlay.jpg",
+                    _overlay(source, variant_mask),
+                )
+            )
         review_rows.append((page_id, source_path, paired_path, overlay_path))
+        variant_review_rows.append((page_id, source_path, variant_paths))
         paired_page_count += 1
         instance_count += len(instances)
         pages.append(
@@ -182,6 +235,8 @@ def build_paired_target_proposals(
                 "target_extent_independent": True,
                 "target_inventory_independent": True,
                 "target_review_complete": False,
+                "target_extent_selected": None,
+                "target_extent_variants": variant_mask_paths,
                 "core_mask": core_path,
                 "target_text_mask": extent_path,
                 "instances": instances,
@@ -196,6 +251,7 @@ def build_paired_target_proposals(
             }
         )
     sheets = _contact_sheets(review_rows, output_dir)
+    variant_sheets = _variant_contact_sheets(variant_review_rows, output_dir)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "source_index_sha256": _sha256(source_index_path),
@@ -207,6 +263,7 @@ def build_paired_target_proposals(
         "proposed_instance_count": instance_count,
         "pages": pages,
         "review_sheets": sheets,
+        "variant_review_sheets": variant_sheets,
     }
     path = output_dir / "paired-target-proposals.json"
     path.write_text(
