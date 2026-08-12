@@ -202,10 +202,12 @@ def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) 
             {
                 "schema_version": "inpaint-detector-bakeoff-manifest-v3",
                 "pages": [
-                    {
-                        "page_id": "p1",
-                        "path": source_path,
-                        "target_text_mask": target_path,
+                {
+                    "page_id": "p1",
+                    "path": source_path,
+                    "target_mask_provenance": "synthetic_ground_truth",
+                    "target_extent_independent": True,
+                    "target_text_mask": target_path,
                         "target_instances": [
                             {"instance_id": "i1", "mask_path": target_path}
                         ],
@@ -300,6 +302,8 @@ def test_manifest_v3_requires_instance_route_and_evidence_fields(tmp_path: Path)
             {
                 "page_id": "p1",
                 "path": source_path,
+                "target_mask_provenance": "synthetic_ground_truth",
+                "target_extent_independent": True,
                 "target_text_mask": target_path,
                 "target_instances": [
                     {"instance_id": "glyph-1", "mask_path": target_path}
@@ -1456,6 +1460,25 @@ def test_pareto_selection_excludes_oracle_and_hard_gate_failure() -> None:
     assert selected["unsafe"].closure_reason == "hard_gate_failed"
 
 
+def test_pareto_selection_marks_detector_derived_targets_information_limited() -> None:
+    metrics = {
+        "target_extent_independent": False,
+        "target_mask_provenance": ["current_ctd_raw_components"],
+        "aggregate_target_coverage": 1.0,
+        "minimum_target_instance_coverage": 1.0,
+        "target_instance_seed_recall": 1.0,
+        "residue_gate_applicable": False,
+    }
+    record = FactorizedRunRecord(
+        "circular", "d", "o", "s", "r", "e", "f", False, "active", metrics
+    )
+
+    selected = select_pareto_records([record])
+
+    assert selected[0].status == "information_limited"
+    assert selected[0].closure_reason == "target_extent_not_independent"
+
+
 def test_pareto_gate_rejects_missing_residue_and_ambiguous_changes() -> None:
     safe = {
         "aggregate_target_coverage": 1.0,
@@ -1562,6 +1585,8 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
                 "baseline": source_path,
                 "baseline_mask": zeros_path,
                 "known_background": truth_path,
+                "target_mask_provenance": "synthetic_ground_truth",
+                "target_extent_independent": True,
             }
         ],
     }

@@ -138,6 +138,8 @@ class Stage1Page:
     regions: tuple["RegionEvaluationSpec", ...] = ()
     preserve_mask: str | None = None
     paired_reference: "ProposalOnlyReference | None" = None
+    target_mask_provenance: str = "legacy_unknown"
+    target_extent_independent: bool = False
 
 
 @dataclass(frozen=True, slots=True)

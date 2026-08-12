@@ -456,6 +456,8 @@ def build_source_proposals(
                     "bubble_interior_mask", "corner_protect_mask",
                 }},
                 "target_instances": target_instances,
+                "target_mask_provenance": "current_ctd_raw_components",
+                "target_extent_independent": False,
                 "regions": regions,
                 "reviewed_source_only": False,
                 "candidate_seen": False,

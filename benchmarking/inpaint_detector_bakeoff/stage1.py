@@ -241,6 +241,12 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
                 regions=tuple(regions),
                 preserve_mask=_path_value(entry.get("preserve_mask")),
                 paired_reference=paired_reference,
+                target_mask_provenance=str(
+                    entry.get("target_mask_provenance") or "legacy_unknown"
+                ).strip(),
+                target_extent_independent=bool(
+                    entry.get("target_extent_independent", False)
+                ),
             )
         )
     if not all(record.page_id and record.source_image for record in records):
