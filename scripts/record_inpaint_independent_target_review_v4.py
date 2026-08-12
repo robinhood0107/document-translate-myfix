@@ -96,7 +96,11 @@ def record_independent_target_review(
     for row in sorted(inventory, key=lambda value: str(value.get("page_id") or "")):
         page_id = str(row.get("page_id") or "")
         status = str(row.get("status") or "").strip().lower()
-        if status not in {"complete_no_required_text", "complete_with_manual_inventory"}:
+        if status not in {
+            "complete_no_required_text",
+            "complete_with_manual_inventory",
+            "complete_with_reviewed_rows",
+        }:
             raise ValueError(f"invalid full-page inventory status: {page_id}={status}")
         manual_path = str(row.get("manual_inventory_path") or "").strip()
         if status == "complete_with_manual_inventory":
@@ -114,7 +118,7 @@ def record_independent_target_review(
             if not isinstance(manual_payload.get("instances"), list) or not manual_payload["instances"]:
                 raise ValueError(f"manual inventory has no instances: {page_id}")
         elif manual_path:
-            raise ValueError(f"no-required-text inventory must not provide a mask: {page_id}")
+            raise ValueError(f"row-reviewed inventory must not provide a mask: {page_id}")
         normalized_inventory.append(
             {
                 "page_id": page_id,

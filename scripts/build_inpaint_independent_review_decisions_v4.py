@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ KNOWN_INVENTORY_SOURCES = frozenset(
         "paired_location_with_human_semantic_region",
     }
 )
+SOURCE_PRIORITY_INVENTORY = "source_manifest_location_aid_only"
 EXTENTS = frozenset(
     {
         "strict",
@@ -42,6 +44,67 @@ def _sheet_number(review_id: str, rows_per_sheet: int) -> int:
     except (IndexError, ValueError) as exc:
         raise ValueError(f"invalid review id: {review_id}") from exc
     return value // rows_per_sheet + 1
+
+
+def extend_source_location_review_overrides(
+    ledger_path: Path,
+    base_overrides_path: Path,
+    output_path: Path,
+    *,
+    reviewed_sheet_through: int,
+    source_location_default_extent: str,
+    reject_review_ids: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    ledger = _read_json(ledger_path)
+    base = _read_json(base_overrides_path)
+    if ledger.get("candidate_seen") is not False or base.get("candidate_seen") is not False:
+        raise ValueError("independent target review must be candidate blind")
+    if base.get("schema_version") != OVERRIDES_SCHEMA_VERSION:
+        raise ValueError("unsupported independent review overrides")
+    sheets = ledger.get("review_sheets")
+    rows = ledger.get("rows")
+    if not isinstance(sheets, list) or not isinstance(rows, list):
+        raise ValueError("review ledger rows and sheets must be arrays")
+    if reviewed_sheet_through != len(sheets):
+        raise ValueError(
+            "source-only review must end at the final sheet: "
+            f"through={reviewed_sheet_through} total={len(sheets)}"
+        )
+    if source_location_default_extent not in EXTENTS - {"manual", "reject"}:
+        raise ValueError("invalid source location default extent")
+    known_rows = {str(row.get("review_id") or ""): row for row in rows}
+    if not all(known_rows):
+        raise ValueError("review ledger contains invalid review ids")
+    unknown_rejects = sorted(set(reject_review_ids).difference(known_rows))
+    if unknown_rejects:
+        raise ValueError(f"reject overrides reference unknown reviews: {unknown_rejects}")
+
+    effective = copy.deepcopy(base)
+    effective["reviewed_sheets"] = list(range(1, reviewed_sheet_through + 1))
+    effective["source_location_default_extent"] = source_location_default_extent
+    row_overrides = effective.setdefault("row_overrides", {})
+    if not isinstance(row_overrides, dict):
+        raise ValueError("row_overrides must be an object")
+    for review_id in reject_review_ids:
+        if (
+            str(known_rows[review_id].get("inventory_source") or "")
+            != SOURCE_PRIORITY_INVENTORY
+        ):
+            raise ValueError(f"only source-location rows can use this reject helper: {review_id}")
+        row_overrides[review_id] = {"extent": "reject", "semantic": "not_text"}
+    effective["full_page_inventory"] = [
+        {
+            "page_id": str(row.get("page_id") or ""),
+            "status": "complete_with_reviewed_rows",
+        }
+        for row in ledger.get("full_page_inventory_pending", [])
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(effective, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return effective
 
 
 def build_review_decisions(
@@ -84,10 +147,20 @@ def build_review_decisions(
             raise ValueError(f"review row is on an unreviewed sheet: {review_id}")
         override = raw_overrides.get(review_id)
         if override is None:
-            if str(raw.get("inventory_source") or "") not in KNOWN_INVENTORY_SOURCES:
+            inventory_source = str(raw.get("inventory_source") or "")
+            if inventory_source == SOURCE_PRIORITY_INVENTORY:
+                priority = str(raw.get("source_priority_proposal") or "")
+                if priority not in {"required", "optional"}:
+                    raise ValueError(
+                        f"source location row needs an explicit decision: {review_id}"
+                    )
+                extent = str(overrides.get("source_location_default_extent") or "balanced")
+                semantic = "required" if priority == "required" else "preserve"
+            elif inventory_source not in KNOWN_INVENTORY_SOURCES:
                 raise ValueError(f"unowned review row needs an explicit decision: {review_id}")
-            extent = str(overrides.get("known_default_extent") or "balanced")
-            semantic = "required"
+            else:
+                extent = str(overrides.get("known_default_extent") or "balanced")
+                semantic = "required"
         else:
             if not isinstance(override, dict):
                 raise ValueError(f"row override must be an object: {review_id}")
@@ -145,10 +218,41 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--review-ledger", type=Path, required=True)
     parser.add_argument("--overrides", type=Path, required=True)
+    parser.add_argument("--effective-overrides-output", type=Path)
+    parser.add_argument("--reviewed-sheet-through", type=int)
+    parser.add_argument("--source-location-default-extent")
+    parser.add_argument("--reject-review-id", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    overrides_path = args.overrides.resolve()
+    extension_requested = any(
+        (
+            args.effective_overrides_output,
+            args.reviewed_sheet_through,
+            args.source_location_default_extent,
+            args.reject_review_id,
+        )
+    )
+    if extension_requested:
+        if not all(
+            (
+                args.effective_overrides_output,
+                args.reviewed_sheet_through,
+                args.source_location_default_extent,
+            )
+        ):
+            parser.error("override extension requires output, final sheet, and default extent")
+        extend_source_location_review_overrides(
+            args.review_ledger.resolve(),
+            overrides_path,
+            args.effective_overrides_output.resolve(),
+            reviewed_sheet_through=args.reviewed_sheet_through,
+            source_location_default_extent=args.source_location_default_extent,
+            reject_review_ids=tuple(args.reject_review_id),
+        )
+        overrides_path = args.effective_overrides_output.resolve()
     payload = build_review_decisions(
-        args.review_ledger.resolve(), args.overrides.resolve(), args.output.resolve()
+        args.review_ledger.resolve(), overrides_path, args.output.resolve()
     )
     print(json.dumps({"decisions": len(payload["decisions"])}))
     return 0

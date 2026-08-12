@@ -101,6 +101,11 @@ def _region_role(page: dict[str, Any], region_id: str) -> str:
     return "review"
 
 
+def _instance_role(instance: dict[str, Any]) -> str:
+    role = str(instance.get("semantic_role") or "").strip()
+    return role or "review"
+
+
 def _write_review_item(
     output_dir: Path,
     source: np.ndarray,
@@ -112,6 +117,8 @@ def _write_review_item(
     role_proposal: str,
     inventory_source: str,
     extent_features: SourceExtentFeatures,
+    source_instance_id: str | None = None,
+    source_priority_proposal: str | None = None,
 ) -> dict[str, Any]:
     item_dir = output_dir / "pages" / page_id / review_id
     location_path = _write_image(item_dir / "location-seed.png", location)
@@ -120,7 +127,7 @@ def _write_review_item(
         variant_id: _write_image(item_dir / f"extent-{variant_id}.png", mask)
         for variant_id, mask in variants.items()
     }
-    return {
+    row = {
         "review_id": review_id,
         "page_id": page_id,
         "region_id": region_id,
@@ -132,6 +139,11 @@ def _write_review_item(
         "semantic_decision": None,
         "review_status": "pending",
     }
+    if source_instance_id:
+        row["source_instance_id"] = source_instance_id
+    if source_priority_proposal:
+        row["source_priority_proposal"] = source_priority_proposal
+    return row
 
 
 def _review_sheets(
@@ -266,6 +278,32 @@ def build_independent_target_review(
                     "review_status": "full_page_inventory_pending",
                 }
             )
+            semantic_page = semantics[page_id]
+            page_rows: list[dict[str, Any]] = []
+            for instance in semantic_page.get("target_instances", []):
+                instance_path = instance.get("mask_path")
+                if not instance_path:
+                    continue
+                location = _mask(instance_path, shape)
+                if not np.any(location):
+                    continue
+                review_id = f"review-{len(rows) + len(page_rows):04d}"
+                page_rows.append(
+                    _write_review_item(
+                        output_dir,
+                        source,
+                        page_id=page_id,
+                        review_id=review_id,
+                        location=location,
+                        region_id=str(instance.get("region_id") or "region-page-review"),
+                        role_proposal=_instance_role(instance),
+                        inventory_source="source_manifest_location_aid_only",
+                        extent_features=extent_features,
+                        source_instance_id=str(instance.get("instance_id") or ""),
+                        source_priority_proposal=str(instance.get("priority") or ""),
+                    )
+                )
+            rows.extend(page_rows)
             continue
         proposal = _mask(proposal_path, shape)
         assigned = np.zeros(shape, np.uint8)

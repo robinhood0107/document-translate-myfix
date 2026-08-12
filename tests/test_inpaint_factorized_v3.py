@@ -72,10 +72,14 @@ from scripts.record_inpaint_independent_target_review_v4 import (
     record_independent_target_review,
 )
 from scripts.apply_inpaint_independent_target_review_v4 import (
+    _empty_region,
+    _read_mask as read_independent_review_mask,
     apply_independent_target_review,
+    seal_independent_manifest,
 )
 from scripts.build_inpaint_independent_review_decisions_v4 import (
     build_review_decisions,
+    extend_source_location_review_overrides,
 )
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
@@ -207,7 +211,19 @@ def test_independent_target_review_keeps_unpaired_inventory_pending(
                             }
                         ],
                     },
-                    {"page_id": "unpaired", "regions": [], "target_instances": []},
+                    {
+                        "page_id": "unpaired",
+                        "regions": [],
+                        "target_instances": [
+                            {
+                                "instance_id": "i2",
+                                "region_id": "region-page-review",
+                                "priority": "required",
+                                "semantic_role": "dialogue_free",
+                                "mask_path": target_path,
+                            }
+                        ],
+                    },
                 ]
             }
         ),
@@ -236,9 +252,12 @@ def test_independent_target_review_keeps_unpaired_inventory_pending(
 
     assert payload["review_complete"] is False
     assert payload["target_inventory_independent"] is False
-    assert payload["review_row_count"] == 1
+    assert payload["review_row_count"] == 2
     assert payload["rows"][0]["semantic_role_proposal"] == "dialogue_bubble"
     assert payload["rows"][0]["selected_extent"] is None
+    assert payload["rows"][1]["semantic_role_proposal"] == "dialogue_free"
+    assert payload["rows"][1]["inventory_source"] == "source_manifest_location_aid_only"
+    assert payload["rows"][1]["source_priority_proposal"] == "required"
     assert payload["full_page_inventory_pending_count"] == 1
     assert payload["full_page_inventory_pending"][0]["page_id"] == "unpaired"
 
@@ -440,8 +459,11 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
     target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
     assert payload["target_inventory_independent"] is True
     assert payload["target_extent_independent"] is True
-    assert np.count_nonzero(target & protect_mask) == 0
-    assert np.count_nonzero(target) < np.count_nonzero(extent_mask)
+    normalized_protect = cv2.imread(
+        page["protected_structure_mask"], cv2.IMREAD_GRAYSCALE
+    )
+    assert np.array_equal(target, extent_mask)
+    assert np.count_nonzero(normalized_protect & target) == 0
 
 
 def test_independent_target_review_uses_source_only_manual_row_extent(
@@ -548,7 +570,6 @@ def test_independent_target_review_uses_source_only_manual_row_extent(
     target = cv2.imread(payload["pages"][0]["target_text_mask"], cv2.IMREAD_GRAYSCALE)
     expected = manual_mask.copy()
     expected[ownership_mask == 0] = 0
-    expected[protect_mask > 0] = 0
     assert np.array_equal(target, expected)
     assert np.count_nonzero(target) > np.count_nonzero(proposal_mask)
 
@@ -686,6 +707,11 @@ def test_independent_target_review_applier_replaces_unpaired_page_with_instances
         "manual-line-1",
         "manual-line-2",
     ]
+    assert payload["instance_counts"] == {
+        "required": 2,
+        "preserve": 0,
+        "ambiguous": 0,
+    }
     target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
     assert np.array_equal(target, first_mask | second_mask)
     assert all(value["instance_id"] != "old-circular" for value in page["target_instances"])
@@ -1417,6 +1443,359 @@ def test_manifest_v4_loads_region_semantics_and_proposal_only_reference(
     assert np.count_nonzero(edit & optional) == 0
     assert row["preserve_edit_overlap"] == 0
     assert np.count_nonzero(edit & required) == np.count_nonzero(required)
+
+
+def test_factorized_source_manifest_v4_uses_the_strict_region_contract(
+    tmp_path: Path,
+) -> None:
+    shape = (12, 16)
+    source = np.full((*shape, 3), 180, np.uint8)
+    target = np.zeros(shape, np.uint8)
+    target[4:8, 5:9] = 255
+    full = np.full(shape, 255, np.uint8)
+    zero = np.zeros(shape, np.uint8)
+    paths = {
+        "source": _write_image(tmp_path / "source.png", source),
+        "target": _write_image(tmp_path / "target.png", target),
+        "full": _write_image(tmp_path / "full.png", full),
+        "zero": _write_image(tmp_path / "zero.png", zero),
+    }
+    payload = {
+        "schema_version": "inpaint-factorized-source-manifest-v4",
+        "pages": [{
+            "page_id": "p",
+            "path": paths["source"],
+            "target_text_mask": paths["target"],
+            "preserve_mask": paths["zero"],
+            "target_instances": [{
+                "instance_id": "glyph",
+                "region_id": "unowned",
+                "mask_path": paths["target"],
+                "semantic_role": "dialogue_free",
+                "processing_action": "translate_inpaint",
+                "priority": "required",
+            }],
+            "regions": [{
+                "region_id": "unowned",
+                "bubble_route_class": "ambiguous",
+                "bubble_interior_mask": paths["zero"],
+                "ownership_mask": paths["zero"],
+                "protected_structure_mask": paths["zero"],
+                "ambiguous_structure_mask": paths["zero"],
+                "corner_protect_mask": paths["zero"],
+            }],
+            "expected_edit": "required",
+        }],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    page = load_stage1_manifest(path)[0]
+
+    assert page.target_instances[0].region_id == "unowned"
+    assert page.regions[0].region_id == "unowned"
+
+
+def test_independent_unowned_region_ownership_is_exact_target_union(
+    tmp_path: Path,
+) -> None:
+    shape = (10, 12)
+    page_dir = tmp_path / "page"
+    exact = np.zeros(shape, np.uint8)
+    exact[3:6, 4:8] = 255
+
+    region = _empty_region(
+        page_dir,
+        shape,
+        "region-unowned-review",
+        ownership=exact,
+    )
+    ownership = cv2.imread(region["ownership_mask"], cv2.IMREAD_GRAYSCALE)
+    interior = cv2.imread(region["bubble_interior_mask"], cv2.IMREAD_GRAYSCALE)
+
+    assert np.array_equal(ownership, exact)
+    assert np.count_nonzero(interior) == 0
+
+
+def test_independent_review_missing_optional_mask_is_exact_zero() -> None:
+    assert np.array_equal(
+        read_independent_review_mask(None, (7, 9)),
+        np.zeros((7, 9), np.uint8),
+    )
+    with pytest.raises(FileNotFoundError):
+        read_independent_review_mask(None)
+
+
+def test_independent_manifest_seal_binds_manifest_and_review_decisions(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    decisions = tmp_path / "decisions.json"
+    manifest.write_text(
+        json.dumps({
+            "schema_version": "inpaint-factorized-source-manifest-v4",
+            "corpus_id": "example",
+            "instance_counts": {"required": 1, "preserve": 2, "ambiguous": 0},
+            "annotation_frozen_before_candidate": True,
+            "candidate_seen": False,
+            "target_extent_independent": True,
+            "target_inventory_independent": True,
+            "target_review_complete": True,
+        }),
+        encoding="utf-8",
+    )
+    decisions.write_text(json.dumps({
+        "schema_version": "inpaint-independent-target-review-decisions-v4",
+        "candidate_seen": False,
+        "review_complete": True,
+    }), encoding="utf-8")
+
+    seal = seal_independent_manifest(manifest, decisions)
+
+    assert seal["manifest_sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert seal["review_decisions_sha256"] == hashlib.sha256(
+        decisions.read_bytes()
+    ).hexdigest()
+    assert seal["candidate_seen"] is False
+    assert json.loads(
+        manifest.with_suffix(".json.seal.json").read_text(encoding="utf-8")
+    ) == seal
+
+
+def test_independent_manifest_seal_rejects_candidate_seen_input(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    decisions = tmp_path / "decisions.json"
+    manifest.write_text(json.dumps({
+        "schema_version": "inpaint-factorized-source-manifest-v4",
+        "annotation_frozen_before_candidate": True,
+        "candidate_seen": True,
+        "target_extent_independent": True,
+        "target_inventory_independent": True,
+        "target_review_complete": True,
+    }), encoding="utf-8")
+    decisions.write_text(json.dumps({
+        "schema_version": "inpaint-independent-target-review-decisions-v4",
+        "candidate_seen": False,
+        "review_complete": True,
+    }), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not source-only review complete"):
+        seal_independent_manifest(manifest, decisions)
+
+
+def test_record_review_accepts_complete_inventory_from_reviewed_rows(
+    tmp_path: Path,
+) -> None:
+    ledger = {
+        "candidate_seen": False,
+        "review_complete": False,
+        "rows": [],
+        "full_page_inventory_pending": [{"page_id": "p"}],
+    }
+    decisions = {
+        "candidate_seen": False,
+        "decisions": [],
+        "full_page_inventory": [{
+            "page_id": "p",
+            "status": "complete_with_reviewed_rows",
+        }],
+    }
+    ledger_path = tmp_path / "ledger.json"
+    decisions_path = tmp_path / "decisions.json"
+    output_path = tmp_path / "output.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    decisions_path.write_text(json.dumps(decisions), encoding="utf-8")
+
+    result = record_independent_target_review(
+        ledger_path,
+        decisions_path,
+        output_path,
+    )
+
+    assert result["full_page_inventory"] == [{
+        "page_id": "p",
+        "status": "complete_with_reviewed_rows",
+        "manual_inventory_path": "",
+    }]
+
+
+def test_review_decisions_use_reviewed_source_priority_as_semantic_default(
+    tmp_path: Path,
+) -> None:
+    ledger = {
+        "candidate_seen": False,
+        "rows": [
+            {
+                "review_id": "review-0000",
+                "inventory_source": "source_manifest_location_aid_only",
+                "source_priority_proposal": "required",
+            },
+            {
+                "review_id": "review-0001",
+                "inventory_source": "source_manifest_location_aid_only",
+                "source_priority_proposal": "optional",
+            },
+        ],
+        "review_sheets": ["sheet.jpg"],
+        "full_page_inventory_pending": [],
+    }
+    overrides = {
+        "schema_version": "inpaint-independent-review-overrides-v4",
+        "candidate_seen": False,
+        "reviewed_sheets": [1],
+        "rows_per_sheet": 8,
+        "row_overrides": {},
+        "full_page_inventory": [],
+    }
+    ledger_path = tmp_path / "ledger.json"
+    overrides_path = tmp_path / "overrides.json"
+    output_path = tmp_path / "decisions.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    overrides_path.write_text(json.dumps(overrides), encoding="utf-8")
+
+    result = build_review_decisions(ledger_path, overrides_path, output_path)
+
+    assert result["decisions"] == [
+        {"review_id": "review-0000", "extent": "balanced", "semantic": "required"},
+        {"review_id": "review-0001", "extent": "balanced", "semantic": "preserve"},
+    ]
+
+
+def test_extend_source_location_review_overrides_preserves_prior_work(
+    tmp_path: Path,
+) -> None:
+    ledger = {
+        "candidate_seen": False,
+        "rows": [
+            {
+                "review_id": "review-0000",
+                "inventory_source": "paired_location_with_human_semantic_region",
+            },
+            {
+                "review_id": "review-0001",
+                "inventory_source": "source_manifest_location_aid_only",
+                "source_priority_proposal": "required",
+            },
+        ],
+        "review_sheets": ["one.jpg", "two.jpg"],
+        "full_page_inventory_pending": [{"page_id": "p"}],
+    }
+    base = {
+        "schema_version": "inpaint-independent-review-overrides-v4",
+        "candidate_seen": False,
+        "reviewed_sheets": [1],
+        "rows_per_sheet": 1,
+        "known_default_extent": "balanced",
+        "row_overrides": {
+            "review-0000": {"extent": "strict", "semantic": "required"}
+        },
+        "full_page_inventory": [
+            {"page_id": "p", "status": "complete_no_required_text"}
+        ],
+    }
+    ledger_path = tmp_path / "ledger.json"
+    base_path = tmp_path / "base.json"
+    output_path = tmp_path / "effective.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    base_path.write_text(json.dumps(base), encoding="utf-8")
+
+    result = extend_source_location_review_overrides(
+        ledger_path,
+        base_path,
+        output_path,
+        reviewed_sheet_through=2,
+        source_location_default_extent="strict",
+        reject_review_ids=("review-0001",),
+    )
+
+    assert result["reviewed_sheets"] == [1, 2]
+    assert result["source_location_default_extent"] == "strict"
+    assert result["row_overrides"]["review-0000"] == {
+        "extent": "strict",
+        "semantic": "required",
+    }
+    assert result["row_overrides"]["review-0001"] == {
+        "extent": "reject",
+        "semantic": "not_text",
+    }
+    assert result["full_page_inventory"] == [
+        {"page_id": "p", "status": "complete_with_reviewed_rows"}
+    ]
+
+
+def test_independent_ambiguous_review_becomes_hard_preserve_mask(
+    tmp_path: Path,
+) -> None:
+    shape = (16, 20)
+    source = _write_image(tmp_path / "source.png", np.full((*shape, 3), 180, np.uint8))
+    empty = _write_image(tmp_path / "empty.png", np.zeros(shape, np.uint8))
+    ownership = _write_image(tmp_path / "ownership.png", np.full(shape, 255, np.uint8))
+    location_mask = np.zeros(shape, np.uint8)
+    location_mask[5:9, 7:12] = 255
+    location = _write_image(tmp_path / "location.png", location_mask)
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(json.dumps({
+        "schema_version": "inpaint-factorized-source-manifest-v4",
+        "corpus_id": "example",
+        "pages": [{
+            "page_id": "p",
+            "path": source,
+            "height": shape[0],
+            "width": shape[1],
+            "target_text_mask": None,
+            "preserve_mask": empty,
+            "protected_structure_mask": empty,
+            "ambiguous_structure_mask": empty,
+            "ownership_mask": ownership,
+            "expected_edit": "none",
+            "target_instances": [],
+            "regions": [{
+                "region_id": "r",
+                "bubble_route_class": "ambiguous",
+                "bubble_interior_mask": empty,
+                "ownership_mask": ownership,
+                "protected_structure_mask": empty,
+                "ambiguous_structure_mask": empty,
+                "corner_protect_mask": empty,
+            }],
+        }],
+    }), encoding="utf-8")
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({
+        "schema_version": "inpaint-independent-target-review-ledger-v4",
+        "candidate_seen": False,
+        "rows": [{
+            "review_id": "review-0000",
+            "page_id": "p",
+            "region_id": "r",
+            "location_seed": location,
+            "extent_variants": {},
+        }],
+        "full_page_inventory_pending": [],
+    }), encoding="utf-8")
+    decisions = tmp_path / "decisions.json"
+    decisions.write_text(json.dumps({
+        "schema_version": "inpaint-independent-target-review-decisions-v4",
+        "candidate_seen": False,
+        "review_complete": True,
+        "decisions": [{
+            "review_id": "review-0000",
+            "extent": "reject",
+            "semantic": "ambiguous",
+        }],
+        "full_page_inventory": [],
+    }), encoding="utf-8")
+
+    payload = apply_independent_target_review(
+        semantic, ledger, decisions, tmp_path / "output"
+    )
+
+    page = payload["pages"][0]
+    ambiguous = cv2.imread(page["ambiguous_structure_mask"], cv2.IMREAD_GRAYSCALE)
+    assert np.array_equal(ambiguous, location_mask)
+    assert page["target_instances"][0]["priority"] == "ambiguous"
 
 
 def test_manifest_v4_rejects_optional_text_as_edit_target(tmp_path: Path) -> None:
