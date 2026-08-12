@@ -38,6 +38,7 @@ from benchmarking.inpaint_detector_bakeoff.stage2 import (
     composite_positive_result,
     composite_replacement_result,
     residue_score,
+    restrict_candidate_to_final_mask,
     score_stage2_page,
 )
 from benchmarking.inpaint_detector_bakeoff.sickzil import (
@@ -47,8 +48,19 @@ from benchmarking.inpaint_detector_bakeoff.sickzil import (
 )
 from benchmarking.inpaint_detector_bakeoff.ownership import build_existing_ownership_mask
 from benchmarking.inpaint_detector_bakeoff.provenance_fusion import (
+    build_detector_verified_structure_protect,
+    build_source_owned_expansion_cap,
+    build_post_expansion_protection_reentry,
     build_provenance_fusion,
+    build_source_protected_detector_candidate,
+    detector_recovery_route,
+    reapply_exact_protection_after_expansion,
+    reapply_source_protection_after_expansion,
+    reconcile_structure_guarded_source_edit,
     reconcile_source_edit,
+    replace_guarded_regions_with_narrow_claim,
+    replace_guarded_expansion_halo_with_narrow_claim,
+    add_guarded_narrow_claim,
 )
 from benchmarking.inpaint_detector_bakeoff.fixed_ctd_onnx import (
     _letterboxed_rgb_to_nchw,
@@ -59,6 +71,14 @@ from benchmarking.inpaint_detector_bakeoff.manga109_yolo26 import (
     text_ownership_from_result,
 )
 from scripts.check_inpaint_positive_mask_parity import _compare_kind
+from scripts.benchmark_inpaint_source_protection_reapply import (
+    _validate_source_evidence_contract,
+    _write_source_evidence_contract,
+)
+from scripts.benchmark_inpaint_final_protection_composite import (
+    _page_gate_failures,
+    _validate_stage1_manifest,
+)
 
 
 def _tensor_sha256(*arrays: np.ndarray) -> str:
@@ -813,3 +833,494 @@ def test_sickzil_preprocess_padding_and_class_mapping_match_reference() -> None:
     assert padded.shape == (16, 16, 3)
     assert np.all(mask[1:4, 2:6] == 255)
     assert np.count_nonzero(mask) == 12
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("microtexture_intrusion", "narrow"),
+        ("line_art_intrusion", "narrow"),
+        ("microtexture_source_seed_unavailable", "narrow"),
+        ("bubble_residual_source_seed_unavailable", "broad"),
+        ("", "skip"),
+        ("bubble_flat_fill", "skip"),
+    ],
+)
+def test_detector_recovery_route_separates_narrow_claim_from_broad_expansion(
+    reason: str,
+    expected: str,
+) -> None:
+    assert detector_recovery_route(reason) == expected
+
+
+def test_structure_guarded_reconciliation_removes_only_exact_protection() -> None:
+    shape = (28, 36)
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[8:20, 6:28] = 255
+    structure = np.zeros(shape, dtype=np.uint8)
+    structure[13:15, 4:32] = 255
+    claim = np.zeros(shape, dtype=np.uint8)
+    claim[9:19, 9:13] = 255
+    claim[10:18, 22:26] = 255
+    ownership = np.zeros(shape, dtype=np.uint8)
+    ownership[6:22, 5:30] = 255
+
+    result = reconcile_structure_guarded_source_edit(
+        claim,
+        existing,
+        ownership=ownership,
+        structure_protect=structure,
+        ownership_protect=np.zeros(shape, dtype=np.uint8),
+        ambiguous_protect=np.zeros(shape, dtype=np.uint8),
+        allow_narrow_recovery=True,
+    )
+
+    expected_existing = np.where(
+        (existing > 0) & (structure <= 0), 255, 0
+    ).astype(np.uint8)
+    assert np.array_equal(result.verified_source_edit, expected_existing)
+    assert np.count_nonzero(result.replacement_edit & structure) == 0
+    assert np.count_nonzero(result.replacement_edit[8:20, 6:28]) > 0
+    assert np.count_nonzero(result.replacement_edit) < np.count_nonzero(existing)
+
+
+def test_structure_guarded_reconciliation_never_uses_geometry_as_claim() -> None:
+    shape = (24, 32)
+    claim = np.zeros(shape, dtype=np.uint8)
+    claim[8:12, 8:12] = 255
+    claim[8:12, 22:26] = 255
+    ownership = np.zeros(shape, dtype=np.uint8)
+    ownership[5:18, 5:18] = 255
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[7:14, 7:15] = 255
+
+    result = reconcile_structure_guarded_source_edit(
+        claim,
+        existing,
+        ownership=ownership,
+        structure_protect=np.zeros(shape, dtype=np.uint8),
+        ownership_protect=np.zeros(shape, dtype=np.uint8),
+        ambiguous_protect=np.zeros(shape, dtype=np.uint8),
+        allow_narrow_recovery=True,
+    )
+
+    assert np.count_nonzero(result.positive_claim[8:12, 8:12]) == 16
+    assert np.count_nonzero(result.positive_claim[8:12, 22:26]) == 0
+    assert np.count_nonzero(result.positive_edit & cv2.bitwise_not(claim)) == 0
+
+
+def test_structure_guarded_reconciliation_can_fail_closed_without_detector_addition() -> None:
+    shape = (20, 24)
+    claim = np.zeros(shape, dtype=np.uint8)
+    claim[5:10, 5:10] = 255
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[4:11, 4:11] = 255
+    structure = np.zeros(shape, dtype=np.uint8)
+    structure[8:11, 4:14] = 255
+
+    result = reconcile_structure_guarded_source_edit(
+        claim,
+        existing,
+        ownership=np.full(shape, 255, dtype=np.uint8),
+        structure_protect=structure,
+        ownership_protect=np.zeros(shape, dtype=np.uint8),
+        ambiguous_protect=np.zeros(shape, dtype=np.uint8),
+        allow_narrow_recovery=False,
+    )
+
+    assert np.count_nonzero(result.positive_edit) == 0
+    assert np.count_nonzero(result.replacement_edit & structure) == 0
+
+
+def test_exact_protection_is_reapplied_after_detector_mask_expansion() -> None:
+    seed = np.zeros((32, 40), dtype=np.uint8)
+    seed[13:19, 11:17] = 255
+    structure = np.zeros_like(seed)
+    structure[18:21, 7:31] = 255
+    expanded = cv2.dilate(seed, np.ones((9, 9), np.uint8))
+
+    assert np.count_nonzero(expanded & structure) > 0
+
+    safe = reapply_exact_protection_after_expansion(
+        expanded,
+        structure_protect=structure,
+    )
+
+    assert np.count_nonzero(safe & structure) == 0
+    assert np.count_nonzero(safe) > 0
+
+
+def test_post_expansion_protection_unions_all_exact_owners() -> None:
+    expanded = np.full((20, 24), 255, dtype=np.uint8)
+    structure = np.zeros_like(expanded)
+    ownership = np.zeros_like(expanded)
+    ambiguous = np.zeros_like(expanded)
+    corner = np.zeros_like(expanded)
+    structure[2:5, 2:5] = 255
+    ownership[6:9, 6:9] = 255
+    ambiguous[10:13, 10:13] = 255
+    corner[14:17, 14:17] = 255
+
+    safe = reapply_exact_protection_after_expansion(
+        expanded,
+        structure_protect=structure,
+        ownership_protect=ownership,
+        ambiguous_protect=ambiguous,
+        corner_protect=corner,
+    )
+
+    for protected in (structure, ownership, ambiguous, corner):
+        assert np.count_nonzero(safe & protected) == 0
+
+
+def test_source_protection_api_has_no_annotation_input() -> None:
+    expanded = np.full((18, 24), 255, dtype=np.uint8)
+    derived = np.zeros_like(expanded)
+    ownership = np.zeros_like(expanded)
+    corner = np.zeros_like(expanded)
+    derived[2:5, 2:5] = 255
+    ownership[7:10, 7:10] = 255
+    corner[12:15, 12:15] = 255
+
+    safe = reapply_source_protection_after_expansion(
+        expanded,
+        derived_structure_protect=derived,
+        ownership_protect=ownership,
+        corner_protect=corner,
+    )
+
+    assert np.count_nonzero(safe & derived) == 0
+    assert np.count_nonzero(safe & ownership) == 0
+    assert np.count_nonzero(safe & corner) == 0
+
+
+def test_source_protected_candidate_recovers_only_owned_detector_pixels() -> None:
+    shape = (24, 30)
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[8:16, 6:24] = 255
+    structure = np.zeros(shape, dtype=np.uint8)
+    structure[14:17, 3:27] = 255
+    claim = np.zeros(shape, dtype=np.uint8)
+    claim[9:15, 8:12] = 255
+    claim[9:15, 20:24] = 255
+    ownership = np.zeros(shape, dtype=np.uint8)
+    ownership[6:18, 5:16] = 255
+
+    result = build_source_protected_detector_candidate(
+        existing,
+        claim,
+        claim_ownership=ownership,
+        derived_structure_protect=structure,
+    )
+
+    assert np.count_nonzero(result.replacement_edit & structure) == 0
+    assert np.count_nonzero(result.positive_claim[9:15, 8:12]) == 24
+    assert np.count_nonzero(result.positive_claim[9:15, 20:24]) == 0
+
+
+def test_detector_verified_structure_requires_pixel_claim_and_ownership() -> None:
+    shape = (22, 30)
+    proposal = np.zeros(shape, dtype=np.uint8)
+    proposal[8:15, 4:26] = 255
+    claim = np.zeros(shape, dtype=np.uint8)
+    claim[9:14, 7:11] = 255
+    claim[9:14, 20:24] = 255
+    ownership = np.zeros(shape, dtype=np.uint8)
+    ownership[6:17, 5:15] = 255
+
+    protected = build_detector_verified_structure_protect(
+        proposal,
+        claim,
+        claim_ownership=ownership,
+    )
+
+    assert np.count_nonzero(protected[9:14, 7:11]) == 0
+    assert np.count_nonzero(protected[9:14, 20:24]) == 20
+    assert np.count_nonzero(protected & cv2.bitwise_not(proposal)) == 0
+
+
+def test_detector_verified_structure_keeps_corner_protection_absolute() -> None:
+    shape = (18, 24)
+    proposal = np.zeros(shape, dtype=np.uint8)
+    claim = np.zeros(shape, dtype=np.uint8)
+    ownership = np.full(shape, 255, dtype=np.uint8)
+    corner = np.zeros(shape, dtype=np.uint8)
+    corner[3:8, 4:10] = 255
+    claim[3:8, 4:10] = 255
+
+    protected = build_detector_verified_structure_protect(
+        proposal,
+        claim,
+        claim_ownership=ownership,
+        corner_protect=corner,
+    )
+
+    assert np.array_equal(protected, corner)
+
+
+def test_detector_verified_structure_api_has_no_annotation_input() -> None:
+    import inspect
+
+    parameters = inspect.signature(
+        build_detector_verified_structure_protect
+    ).parameters
+
+    assert "target" not in parameters
+    assert "protected_annotation" not in parameters
+    assert "ambiguous_annotation" not in parameters
+
+
+def test_source_owned_expansion_cap_matches_product_ellipse_footprint() -> None:
+    source = np.zeros((24, 30), dtype=np.uint8)
+    source[10:14, 12:16] = 255
+    expected = cv2.dilate(
+        source,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8, 8)),
+        iterations=1,
+    )
+
+    cap = build_source_owned_expansion_cap(source, final_dilate_size=8)
+
+    assert np.array_equal(cap, np.where(expected > 0, 255, 0).astype(np.uint8))
+
+
+def test_post_expansion_reentry_never_claims_unexpanded_protection() -> None:
+    expanded = np.zeros((20, 28), dtype=np.uint8)
+    expanded[7:14, 8:20] = 255
+    protect = np.zeros_like(expanded)
+    protect[12:16, 4:24] = 255
+    corner = np.zeros_like(expanded)
+    corner[5:9, 18:23] = 255
+
+    reentry = build_post_expansion_protection_reentry(
+        expanded,
+        protect,
+        corner_protect=corner,
+    )
+
+    expected = (expanded > 0) & ((protect > 0) | (corner > 0))
+    assert np.array_equal(reentry > 0, expected)
+    assert np.count_nonzero(reentry & cv2.bitwise_not(expanded)) == 0
+
+
+def test_guarded_region_replacement_keeps_ordinary_blocks_unchanged() -> None:
+    shape = (26, 38)
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[5:20, 4:34] = 255
+    guarded = np.zeros(shape, dtype=np.uint8)
+    guarded[7:18, 6:18] = 255
+    narrow = np.zeros(shape, dtype=np.uint8)
+    narrow[9:15, 9:13] = 255
+    protect = np.zeros(shape, dtype=np.uint8)
+    protect[13:16, 7:17] = 255
+
+    result = replace_guarded_regions_with_narrow_claim(
+        existing,
+        narrow,
+        guarded,
+        structure_protect=protect,
+    )
+
+    assert np.array_equal(result[guarded == 0], existing[guarded == 0])
+    assert np.count_nonzero(result & protect) == 0
+    assert np.count_nonzero(result[9:13, 9:13]) > 0
+    assert np.count_nonzero(result & guarded) < np.count_nonzero(existing & guarded)
+
+
+def test_guarded_halo_replacement_preserves_seed_and_non_halo_fill() -> None:
+    shape = (28, 40)
+    before = np.zeros(shape, dtype=np.uint8)
+    before[10:16, 12:18] = 255
+    after = cv2.dilate(before, np.ones((7, 7), np.uint8))
+    existing = after.copy()
+    existing[4:8, 25:31] = 255  # unrelated bubble fill in same guarded ROI
+    guarded = np.zeros(shape, dtype=np.uint8)
+    guarded[3:22, 7:34] = 255
+    narrow = before.copy()
+    narrow[9:17, 13:17] = 255
+
+    result = replace_guarded_expansion_halo_with_narrow_claim(
+        existing,
+        before,
+        after,
+        narrow,
+        guarded,
+        structure_protect=np.zeros(shape, dtype=np.uint8),
+    )
+
+    assert np.all(result[before > 0] == 255)
+    assert np.all(result[4:8, 25:31] == 255)
+    unsupported_halo = (after > 0) & (before <= 0) & (narrow <= 0)
+    assert np.count_nonzero(result & unsupported_halo) == 0
+
+
+def test_guarded_narrow_addition_never_removes_existing_edit() -> None:
+    shape = (24, 34)
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[5:12, 5:12] = 255
+    narrow = np.zeros(shape, dtype=np.uint8)
+    narrow[14:18, 14:20] = 255
+    narrow[14:18, 25:29] = 255
+    guarded = np.zeros(shape, dtype=np.uint8)
+    guarded[12:21, 12:23] = 255
+    protect = np.zeros(shape, dtype=np.uint8)
+    protect[16:20, 17:22] = 255
+
+    result = add_guarded_narrow_claim(
+        existing,
+        narrow,
+        guarded,
+        structure_protect=protect,
+    )
+
+    assert np.all(result[existing > 0] == 255)
+    assert np.count_nonzero(result[14:18, 14:17]) > 0
+    assert np.count_nonzero(result & protect) == 0
+    assert np.count_nonzero(result[14:18, 25:29]) == 0
+
+
+@pytest.mark.parametrize("risk_kind", ["microtexture", "line_art"])
+def test_guarded_narrow_addition_recovers_only_detector_text_in_structure_risk(
+    risk_kind: str,
+) -> None:
+    shape = (52, 68)
+    existing = np.zeros(shape, dtype=np.uint8)
+    existing[21:27, 28:34] = 255
+    claim = np.zeros(shape, dtype=np.uint8)
+    claim[31:37, 40:46] = 255
+    guarded = np.zeros(shape, dtype=np.uint8)
+    guarded[8:45, 8:60] = 255
+    protect = np.zeros(shape, dtype=np.uint8)
+    if risk_kind == "microtexture":
+        protect[10:42:4, 12:58:4] = 255
+    else:
+        protect[25:28, 10:58] = 255
+    claim[protect > 0] = 255
+
+    result = add_guarded_narrow_claim(
+        existing,
+        claim,
+        guarded,
+        structure_protect=protect,
+    )
+
+    assert np.all(result[existing > 0] == 255)
+    assert np.count_nonzero(result[31:37, 40:46]) > 0
+    assert np.array_equal(
+        (result > 0) & (protect > 0),
+        (existing > 0) & (protect > 0),
+    )
+    added = (result > 0) & (existing <= 0)
+    assert np.count_nonzero(added & (protect > 0)) == 0
+    assert np.count_nonzero(result & cv2.bitwise_not(guarded)) == 0
+
+
+def test_restricted_final_composite_restores_only_removed_mask_pixels() -> None:
+    source = np.full((12, 16, 3), 150, dtype=np.uint8)
+    candidate = source.copy()
+    old = np.zeros((12, 16), dtype=np.uint8)
+    old[3:9, 4:12] = 255
+    candidate[old > 0] = 230
+    restricted = old.copy()
+    restricted[6:9, 4:12] = 0
+
+    result = restrict_candidate_to_final_mask(
+        source,
+        candidate,
+        old,
+        restricted,
+    )
+
+    assert np.all(result[3:6, 4:12] == 230)
+    assert np.all(result[6:9, 4:12] == 150)
+    assert np.array_equal(result[old == 0], source[old == 0])
+
+
+def test_restricted_final_composite_rejects_new_edit_pixels() -> None:
+    source = np.zeros((8, 10, 3), dtype=np.uint8)
+    old = np.zeros((8, 10), dtype=np.uint8)
+    restricted = old.copy()
+    restricted[2, 3] = 255
+
+    with pytest.raises(ValueError, match="cannot add pixels"):
+        restrict_candidate_to_final_mask(source, source, old, restricted)
+
+
+def test_source_evidence_cache_contract_rejects_manifest_drift(tmp_path) -> None:
+    page_ids = ["p-001", "p-002"]
+    mask_kinds = ("raw", "pre_expand", "post_expand", "final", "protect", "corner")
+    for page_index, page_id in enumerate(page_ids):
+        for kind_index, mask_kind in enumerate(mask_kinds):
+            mask = np.zeros((8, 10), dtype=np.uint8)
+            mask[page_index + 1, kind_index + 1] = 255
+            assert cv2.imwrite(str(tmp_path / f"{page_id}_{mask_kind}.png"), mask)
+    _write_source_evidence_contract(
+        tmp_path,
+        manifest_sha256="a" * 64,
+        page_ids=page_ids,
+    )
+
+    _validate_source_evidence_contract(
+        tmp_path,
+        manifest_sha256="a" * 64,
+        page_ids=page_ids,
+    )
+    with pytest.raises(ValueError, match="manifest SHA mismatch"):
+        _validate_source_evidence_contract(
+            tmp_path,
+            manifest_sha256="b" * 64,
+            page_ids=page_ids,
+        )
+    with pytest.raises(ValueError, match="page order mismatch"):
+        _validate_source_evidence_contract(
+            tmp_path,
+            manifest_sha256="a" * 64,
+            page_ids=["p-002", "p-001"],
+        )
+    changed = np.full((8, 10), 255, dtype=np.uint8)
+    assert cv2.imwrite(str(tmp_path / "p-001_raw.png"), changed)
+    with pytest.raises(ValueError, match="mask SHA mismatch"):
+        _validate_source_evidence_contract(
+            tmp_path,
+            manifest_sha256="a" * 64,
+            page_ids=page_ids,
+        )
+
+
+def test_final_protection_composite_rejects_stage1_manifest_drift() -> None:
+    stage1_result = {
+        "schema_version": "inpaint-source-protection-reapply-v3",
+        "manifest_sha256": "a" * 64,
+    }
+
+    _validate_stage1_manifest(stage1_result, "a" * 64)
+    with pytest.raises(ValueError, match="manifest SHA mismatch"):
+        _validate_stage1_manifest(stage1_result, "b" * 64)
+    with pytest.raises(ValueError, match="unsupported"):
+        _validate_stage1_manifest(
+            {**stage1_result, "schema_version": "unknown"},
+            "a" * 64,
+        )
+
+
+def test_final_protection_composite_gates_each_page_residue_regression() -> None:
+    metrics = {
+        "protected_changed_pixel_count": 0,
+        "ambiguous_changed_pixel_count": 0,
+        "changed_outside_detector_mask_pixel_count": 0,
+        "target_detector_coverage": 1.0,
+        "minimum_target_component_coverage": 1.0,
+    }
+
+    assert _page_gate_failures(
+        "p-001",
+        metrics,
+        residue=0.25,
+        baseline_residue=0.25,
+    ) == []
+    assert _page_gate_failures(
+        "p-001",
+        metrics,
+        residue=0.2501,
+        baseline_residue=0.25,
+    ) == ["p-001:residue_worse_than_product_baseline"]
