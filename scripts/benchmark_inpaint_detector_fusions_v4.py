@@ -197,6 +197,7 @@ def _logical_runs(
             if primary == secondary:
                 continue
             for trigger in (
+                "always",
                 "seed_missing",
                 "raw_refined_disagreement",
                 "source_seed_unavailable",

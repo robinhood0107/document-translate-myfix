@@ -92,11 +92,582 @@ from scripts.benchmark_inpaint_detector_fusions_v4 import (
     _logical_runs as detector_fusion_runs,
     run_fusion_matrix,
 )
+from scripts.benchmark_inpaint_semantic_policies_v4 import score_semantic_policies
+from scripts.audit_inpaint_detector_ceiling_v4 import audit_detector_ceiling
+from scripts.build_inpaint_method_closure_v4 import build_closure
+from scripts.build_inpaint_generalization_synthetic_v4 import (
+    build_synthetic_manifest as build_generalization_synthetic_manifest,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_image(path: Path, image: np.ndarray) -> str:
     assert cv2.imwrite(str(path), image)
     return str(path)
+
+
+def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "regions": [
+                            {"region_id": "dialogue", "proposal": {"text_class": "text_bubble"}},
+                            {"region_id": "sfx", "proposal": {"text_class": "text_free"}},
+                        ],
+                        "target_instances": [
+                            {
+                                "instance_id": "required",
+                                "region_id": "dialogue",
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                            {
+                                "instance_id": "preserve",
+                                "region_id": "sfx",
+                                "semantic_role": "sfx",
+                                "processing_action": "preserve",
+                                "priority": "optional",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = score_semantic_policies(manifest)
+    policies = {row["policy_id"]: row for row in result["policies"]}
+
+    assert result["unaccounted_policy_count"] == 0
+    assert policies["current_default"]["status"] == "dominated"
+    assert policies["current_default"]["metrics"]["required_translate_recall"] == 1.0
+    assert policies["current_default"]["metrics"]["preserve_destructive_count"] == 1
+    assert policies["detector_explicit_role"]["status"] == "blocked_asset"
+    assert policies["ocr_semantic_hint"]["status"] == "blocked_asset"
+    assert policies["explicit_role_consensus"]["status"] == "blocked_asset"
+    assert policies["human_oracle"]["status"] == "family_complete"
+    assert policies["human_oracle"]["oracle_only"] is True
+
+
+def test_semantic_policy_blocks_partially_missing_provider_evidence(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "regions": [
+                            {
+                                "region_id": "present",
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                            },
+                            {"region_id": "missing"},
+                        ],
+                        "target_instances": [
+                            {
+                                "instance_id": "present",
+                                "region_id": "present",
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                            {
+                                "instance_id": "missing",
+                                "region_id": "missing",
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    policies = {
+        row["policy_id"]: row for row in score_semantic_policies(manifest)["policies"]
+    }
+    explicit = policies["detector_explicit_role"]
+    assert explicit["metrics"]["unavailable_instance_count"] == 1
+    assert explicit["status"] == "blocked_asset"
+    assert explicit["closure_reason"] == "semantic_evidence_missing"
+
+
+def test_detector_ceiling_reports_instances_missed_by_every_provider(
+    tmp_path: Path,
+) -> None:
+    source = np.full((24, 32, 3), 180, np.uint8)
+    target_a = np.zeros(source.shape[:2], np.uint8)
+    target_a[4:8, 4:8] = 255
+    target_b = np.zeros(source.shape[:2], np.uint8)
+    target_b[14:18, 22:26] = 255
+    target_union = cv2.bitwise_or(target_a, target_b)
+    claim_a = target_a.copy()
+    empty = np.zeros(source.shape[:2], np.uint8)
+    source_path = _write_image(tmp_path / "source.png", source)
+    target_a_path = _write_image(tmp_path / "target-a.png", target_a)
+    target_b_path = _write_image(tmp_path / "target-b.png", target_b)
+    target_union_path = _write_image(tmp_path / "target-union.png", target_union)
+    claim_a_path = _write_image(tmp_path / "claim-a.png", claim_a)
+    empty_path = _write_image(tmp_path / "empty.png", empty)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "path": source_path,
+                        "source_sha256": hashlib.sha256(Path(source_path).read_bytes()).hexdigest(),
+                        "width": 32,
+                        "height": 24,
+                        "expected_edit": "required",
+                        "target_inventory_independent": True,
+                        "target_review_complete": True,
+                        "target_mask_provenance": "human_source_review",
+                        "target_instances": [
+                            {
+                                "instance_id": "a",
+                                "region_id": "r",
+                                "mask_path": target_a_path,
+                                "semantic_role": "dialogue_free",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                                "source_reviewed": True,
+                            },
+                            {
+                                "instance_id": "b",
+                                "region_id": "r",
+                                "mask_path": target_b_path,
+                                "semantic_role": "dialogue_free",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                                "source_reviewed": True,
+                            },
+                        ],
+                        "regions": [
+                            {
+                                "region_id": "r",
+                                "bubble_route_class": "ambiguous",
+                                "bubble_interior_mask": empty_path,
+                                "ownership_mask": empty_path,
+                                "protected_structure_mask": empty_path,
+                                "ambiguous_structure_mask": empty_path,
+                                "corner_protect_mask": empty_path,
+                            }
+                        ],
+                        "target_text_mask": target_union_path,
+                        "protected_structure_mask": empty_path,
+                        "ambiguous_structure_mask": empty_path,
+                        "ownership_mask": empty_path,
+                        "claim_seed_mask": empty_path,
+                        "bubble_interior_mask": empty_path,
+                        "corner_protect_mask": empty_path,
+                        "preserve_mask": empty_path,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    spec = tmp_path / "spec.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "candidates": {
+                    "a": {"templates": {"raw": claim_a_path}},
+                    "empty": {"templates": {"raw": empty_path}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_detector_ceiling(manifest, spec)
+
+    assert result["candidate_count"] == 2
+    assert result["required_instance_count"] == 2
+    assert result["all_candidate_union_seeded_instance_count"] == 1
+    assert result["all_candidate_union_missed_instance_count"] == 1
+    assert result["missing_by_page"] == {"p": 1}
+    assert result["missing_instances"][0]["instance_id"] == "b"
+
+
+def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> None:
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-method-family-registry-v4",
+                "families": [
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "evaluation_scopes": ["e1"],
+                        "variants": ["raw", "refined", "dilated"],
+                    },
+                    {
+                        "family_id": "exact-protection",
+                        "role": "protection",
+                        "evaluation_scopes": ["e1"],
+                        "variants": ["structure", "ownership"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "evidence": [
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "variant_id": "raw",
+                        "evaluation_scope": "e1",
+                        "closure_state": "executed",
+                        "disposition": "dominated",
+                        "artifact_sha256": "a" * 64,
+                    },
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "variant_id": "refined",
+                        "evaluation_scope": "e1",
+                        "closure_state": "reused_by_sha",
+                        "disposition": "dominated",
+                        "artifact_sha256": "a" * 64,
+                        "reused_from": "detector-a/seed/raw/e1",
+                    },
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "variant_id": "dilated",
+                        "evaluation_scope": "e1",
+                        "closure_state": "invalid_with_reason",
+                        "disposition": "dominated",
+                        "reason": "not_supported_by_reference",
+                    },
+                    {
+                        "family_id": "exact-protection",
+                        "role": "protection",
+                        "variant_id": "structure",
+                        "evaluation_scope": "e1",
+                        "closure_state": "executed",
+                        "disposition": "pareto",
+                        "artifact_sha256": "b" * 64,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = build_closure(registry, evidence)
+    families = {row["family_id"]: row for row in result["families"]}
+
+    assert result["unaccounted_variant_count"] == 1
+    assert result["all_families_complete"] is False
+    assert families["detector-a"]["family_complete"] is True
+    assert families["detector-a"]["status"] == "family_complete"
+    assert families["exact-protection"]["status"] == "active"
+    assert families["exact-protection"]["missing_variants"] == ["ownership"]
+
+
+def test_method_family_closure_rejects_unproven_sha_reuse(tmp_path: Path) -> None:
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-method-family-registry-v4",
+                "families": [
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "evaluation_scopes": ["e1"],
+                        "variants": ["raw"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "evidence": [
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "variant_id": "raw",
+                        "evaluation_scope": "e1",
+                        "closure_state": "reused_by_sha",
+                        "disposition": "dominated",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="artifact SHA"):
+        build_closure(registry, evidence)
+
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    payload["evidence"][0]["artifact_sha256"] = "a" * 64
+    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="source evidence key"):
+        build_closure(registry, evidence)
+
+    payload["evidence"][0]["artifact_sha256"] = "A" * 64
+    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="lowercase"):
+        build_closure(registry, evidence)
+
+
+def test_method_family_closure_requires_reused_sha_to_match_executed_source(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-method-family-registry-v4",
+                "families": [
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "evaluation_scopes": ["e1"],
+                        "variants": ["raw", "refined"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "evidence": [
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "variant_id": "raw",
+                        "evaluation_scope": "e1",
+                        "closure_state": "executed",
+                        "disposition": "dominated",
+                        "artifact_sha256": "a" * 64,
+                    },
+                    {
+                        "family_id": "detector-a",
+                        "role": "seed",
+                        "variant_id": "refined",
+                        "evaluation_scope": "e1",
+                        "closure_state": "reused_by_sha",
+                        "disposition": "dominated",
+                        "artifact_sha256": "b" * 64,
+                        "reused_from": "detector-a/seed/raw/e1",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="differs"):
+        build_closure(registry, evidence)
+
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    payload["evidence"][1]["artifact_sha256"] = "a" * 64
+    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    result = build_closure(registry, evidence)
+    assert result["all_families_complete"] is True
+
+
+def test_v4_method_registry_covers_every_role_and_required_variant() -> None:
+    registry = json.loads(
+        (
+            ROOT
+            / "benchmarking"
+            / "inpaint_detector_bakeoff"
+            / "method_registry_v4.json"
+        ).read_text(encoding="utf-8")
+    )
+    families = {row["family_id"]: row for row in registry["families"]}
+    roles = {row["role"] for row in registry["families"]}
+
+    assert roles == {
+        "seed",
+        "semantic",
+        "ownership",
+        "silhouette",
+        "router",
+        "expansion",
+        "protection",
+        "fill",
+        "composite",
+    }
+    assert set(families["roi-trigger"]["variants"]) == {
+        "none",
+        "always",
+        "seed_missing",
+        "raw_refined_disagreement",
+        "source_seed_unavailable",
+        "union",
+    }
+    assert set(families["exact-protection"]["variants"]) == {
+        "pr4_exact",
+        "C14",
+        "C15",
+        "C17",
+        "C18",
+        "C19",
+        "C21",
+        "C22",
+        "C23",
+    }
+    assert set(families["fill-backend"]["variants"]) == {
+        "current_lama",
+        "ballons_lama",
+        "robust_flat_median",
+        "planar_gradient",
+        "telea",
+        "conditional_hybrid",
+        "skip",
+    }
+
+
+def test_generalization_synthetic_v4_covers_required_failure_families(
+    tmp_path: Path,
+) -> None:
+    payload = build_generalization_synthetic_manifest(tmp_path)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    pages = load_stage1_manifest(manifest)
+    by_id = {page.page_id: page for page in pages}
+
+    assert len(pages) == 18
+    assert "synthetic-small-cjk-bright" in by_id
+    assert "synthetic-vertical-outline" in by_id
+    assert "synthetic-crop-edge" in by_id
+    assert "synthetic-paper-noise" in by_id
+    assert "synthetic-halftone" in by_id
+    assert "synthetic-hatching" in by_id
+    assert "synthetic-line-art" in by_id
+    assert "synthetic-partial-detection" in by_id
+    assert "synthetic-complete-miss" in by_id
+    assert "synthetic-silhouette-under" in by_id
+    assert "synthetic-silhouette-over" in by_id
+    assert "synthetic-silhouette-empty" in by_id
+    assert "synthetic-ownership-conflict" in by_id
+    assert by_id["synthetic-unowned-meaningful"].target_instances[0].semantic_role == "dialogue_free"
+    assert by_id["synthetic-preserve-sfx"].no_edit is True
+    assert by_id["synthetic-preserve-sfx"].target_instances[0].processing_action == "preserve"
+
+
+def test_manifest_rejects_instance_owned_only_by_a_different_region(
+    tmp_path: Path,
+) -> None:
+    shape = (24, 32)
+    source = np.full((*shape, 3), 180, np.uint8)
+    target = np.zeros(shape, np.uint8)
+    target[6:10, 18:22] = 255
+    left = np.zeros(shape, np.uint8)
+    left[:, :16] = 255
+    right = np.zeros(shape, np.uint8)
+    right[:, 16:] = 255
+    zero = np.zeros(shape, np.uint8)
+    paths = {
+        "source": _write_image(tmp_path / "source.png", source),
+        "target": _write_image(tmp_path / "target.png", target),
+        "left": _write_image(tmp_path / "left.png", left),
+        "right": _write_image(tmp_path / "right.png", right),
+        "zero": _write_image(tmp_path / "zero.png", zero),
+    }
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "path": paths["source"],
+                        "expected_edit": "required",
+                        "target_text_mask": paths["target"],
+                        "preserve_mask": paths["zero"],
+                        "protected_structure_mask": paths["zero"],
+                        "ambiguous_structure_mask": paths["zero"],
+                        "ownership_mask": paths["right"],
+                        "claim_seed_mask": paths["target"],
+                        "bubble_interior_mask": paths["right"],
+                        "corner_protect_mask": paths["zero"],
+                        "target_instances": [
+                            {
+                                "instance_id": "misowned",
+                                "region_id": "left",
+                                "mask_path": paths["target"],
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            }
+                        ],
+                        "regions": [
+                            {
+                                "region_id": "left",
+                                "bubble_route_class": "ambiguous",
+                                "bubble_interior_mask": paths["left"],
+                                "ownership_mask": paths["left"],
+                                "protected_structure_mask": paths["zero"],
+                                "ambiguous_structure_mask": paths["zero"],
+                                "corner_protect_mask": paths["zero"],
+                            },
+                            {
+                                "region_id": "right",
+                                "bubble_route_class": "ambiguous",
+                                "bubble_interior_mask": paths["right"],
+                                "ownership_mask": paths["right"],
+                                "protected_structure_mask": paths["zero"],
+                                "ambiguous_structure_mask": paths["zero"],
+                                "corner_protect_mask": paths["zero"],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    page = load_stage1_manifest(manifest)[0]
+    with pytest.raises(ValueError, match="referenced region ownership"):
+        load_page_masks(page, shape)
 
 
 def test_paired_target_proposal_extracts_removed_source_strokes_only() -> None:
@@ -867,10 +1438,11 @@ def test_detector_fusion_matrix_covers_singles_pairs_and_roi_triggers() -> None:
     )
     run_ids = {row["run_id"] for row in runs}
 
-    assert len(runs) == 17
+    assert len(runs) == 19
     assert {"primary", "secondary", "roi"}.issubset(run_ids)
     assert "primary__or__secondary" in run_ids
     assert "primary__and__roi" in run_ids
+    assert "primary__gated_always__roi" in run_ids
     assert "primary__gated_seed_missing__roi" in run_ids
     assert "secondary__gated_union__roi" in run_ids
 

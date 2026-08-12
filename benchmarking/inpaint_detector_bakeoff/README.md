@@ -70,12 +70,15 @@ Detector output is cached once under a provenance key containing the source,
 code, model, runtime/provider, preprocessing contract, and output-variant SHAs.
 A partial cache entry or any provenance/mask SHA mismatch fails closed.
 
-The role matrix evaluates a control, all single-factor substitutions, and all
-compatible pairwise interactions. It deliberately does not run the full
-Cartesian product. Oracle-mask fill results are marked `oracle_only` and cannot
-become product finalists. Safe non-oracle results are Pareto-ranked only after
-the instance, structure, ownership, no-edit, broad-route, and outside-final hard
-gates pass.
+The role matrix evaluates every registered method-family output variant. Logical
+combinations are accounted as executed, content-SHA reused, invalid with a fixed
+reason, or blocked by a missing asset. Intermediate detector, fusion, route,
+expansion, protection, and fill masks form a DAG: identical content is computed
+once rather than by a wasteful GPU Cartesian product. A family stays `active`
+while even one registered output variant is unaccounted. Oracle-mask fill
+results are marked `oracle_only` and cannot become product finalists. Safe
+non-oracle results are Pareto-ranked only after the instance, structure,
+ownership, no-edit, broad-route, and outside-final hard gates pass.
 
 Broad masks are permitted only when a detector seed exists inside authoritative
 ownership and a validated bubble interior, the selected router reports a clean
