@@ -295,10 +295,22 @@ def expand_detector_claim(
     raise KeyError(f"unknown mask expansion: {expansion_id}")
 
 
-def _subtract_exact_protection(claim: np.ndarray, masks: PageMasks) -> np.ndarray:
+def _subtract_exact_protection(
+    claim: np.ndarray,
+    masks: PageMasks,
+    *,
+    detector_seed: np.ndarray | None = None,
+) -> np.ndarray:
+    existing = binary_mask(masks.existing_edit, masks.target.shape)
+    if detector_seed is not None:
+        # The baseline mask may already claim a detector-positive pixel even
+        # when its prior fill left residue. Reopen only explicit detector
+        # evidence; target annotations remain scoring-only.
+        seed = binary_mask(detector_seed, masks.target.shape)
+        existing = np.where((existing > 0) & (seed <= 0), 255, 0).astype(np.uint8)
     edit = np.where(
         (binary_mask(claim, masks.target.shape) > 0)
-        & (masks.existing_edit == 0)
+        & (existing == 0)
         & (masks.protected == 0)
         & (masks.ambiguous == 0),
         255,
@@ -454,7 +466,7 @@ def decide_bubble_route(
         if allow_broad
         else owned_narrow
     )
-    edit = _subtract_exact_protection(chosen, masks)
+    edit = _subtract_exact_protection(chosen, masks, detector_seed=seed_mask)
     decision = "broad" if allow_broad else ("narrow" if np.any(edit) else "skip")
     if not allow_broad and not reasons and not np.any(broad):
         reasons.append("broad_candidate_empty")

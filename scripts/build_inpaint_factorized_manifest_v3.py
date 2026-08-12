@@ -169,6 +169,10 @@ def build_manifest(
                 raise ValueError(f"baseline artifacts are missing: {page_id}")
             page["baseline"] = baseline_image
             page["baseline_mask"] = baseline_mask
+            # Candidate routing must use the exact runtime baseline mask.
+            # Source-only target annotations are evaluation-only and may not
+            # reopen baseline pixels while the manifest is built.
+            page["existing_source_edit_mask"] = baseline_mask
         pages.append(page)
     return {
         "schema_version": "inpaint-detector-bakeoff-manifest-v3",
