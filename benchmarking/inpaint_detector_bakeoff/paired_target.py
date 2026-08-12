@@ -69,20 +69,31 @@ def paired_old_text_proposal(
     )
     source_local_i16 = source_local.astype(np.int16)
     paired_local_i16 = paired_local.astype(np.int16)
+    source_edges = cv2.Canny(source_gray, 40, 120) > 0
+    paired_edges = cv2.Canny(paired_gray, 40, 120) > 0
+    paired_edge_distance = cv2.distanceTransform(
+        np.where(paired_edges, 0, 1).astype(np.uint8), cv2.DIST_L2, 3
+    )
+    source_only_edges = source_edges & (paired_edge_distance >= 1.5)
     core = (
         (delta >= delta_threshold)
+        & source_only_edges
         & (source_local_i16 >= 8)
-        & (source_local_i16 >= paired_local_i16 + 4)
+        & (source_local_i16 >= paired_local_i16 + 2)
     )
 
     neighborhood = cv2.dilate(
-        core.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2
+        core.astype(np.uint8), np.ones((5, 5), np.uint8), iterations=1
+    )
+    source_stroke_support = cv2.dilate(
+        source_edges.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1
     )
     extent = (
         (neighborhood > 0)
+        & (source_stroke_support > 0)
         & (delta >= max(6, delta_threshold // 3))
         & (source_local_i16 >= 3)
-        & (source_local_i16 + 2 >= paired_local_i16)
+        & (source_local_i16 + 3 >= paired_local_i16)
     ).astype(np.uint8)
     extent = cv2.morphologyEx(
         extent, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)
@@ -92,13 +103,24 @@ def paired_old_text_proposal(
         kept[component > 0] = 255
 
     grouped = cv2.dilate(
-        (kept > 0).astype(np.uint8), np.ones((9, 9), np.uint8), iterations=1
+        (kept > 0).astype(np.uint8), np.ones((11, 11), np.uint8), iterations=1
     )
     instances: list[np.ndarray] = []
     for group in _binary_components(grouped, minimum_area=16):
         instance = np.where((group > 0) & (kept > 0), 255, 0).astype(np.uint8)
-        if np.count_nonzero(instance) >= 4:
-            instances.append(instance)
+        pixels = int(np.count_nonzero(instance))
+        if pixels < 8:
+            continue
+        x, y, width, height = cv2.boundingRect((instance > 0).astype(np.uint8))
+        if width > source.shape[1] // 2 or height > source.shape[0] // 2:
+            continue
+        aspect = float(max(width, height)) / float(max(1, min(width, height)))
+        if aspect > 14.0 and pixels < 64:
+            continue
+        instances.append(instance)
+    kept = np.zeros(extent.shape, np.uint8)
+    for instance in instances:
+        kept[instance > 0] = 255
     instances.sort(
         key=lambda value: tuple(
             int(item)
