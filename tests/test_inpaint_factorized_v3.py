@@ -1924,6 +1924,86 @@ def test_isolated_factorized_results_merge_and_recompute_pareto(
     assert set(merged["pages"]) == {"fast", "slow"}
 
 
+def test_isolated_factorized_results_require_every_executed_closure_row(
+    tmp_path: Path,
+) -> None:
+    ledger = [
+        {
+            "logical_id": run_id,
+            "selection": {"detector": run_id},
+            "closure_state": "executed",
+            "reason": "",
+            "content_sha256": run_id,
+            "reused_from": "",
+        }
+        for run_id in ("one", "two")
+    ]
+
+    def write_result(name: str, run_id: str) -> Path:
+        path = tmp_path / name / "factorized-results.json"
+        path.parent.mkdir()
+        metrics = {
+            "aggregate_target_coverage": 1.0,
+            "minimum_target_instance_coverage": 1.0,
+            "target_instance_seed_recall": 1.0,
+            "protected_structure_overlap": 0,
+            "protected_structure_changed": 0,
+            "ambiguous_structure_overlap": 0,
+            "ambiguous_structure_changed": 0,
+            "outside_final_changed": 0,
+            "broad_route_false_positive": 0,
+            "no_edit_false_edit": 0,
+            "required_skip_count": 0,
+            "missed_target_instance_count": 0,
+            "page_residue_worsened_count": 0,
+            "runtime_seconds": 1.0,
+            "residue_gate_applicable": False,
+        }
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "inpaint-factorized-results-v3",
+                    "manifest_sha256": "manifest",
+                    "matrix_sha256": "matrix",
+                    "logical_combination_count": 2,
+                    "physical_combination_count": 2,
+                    "closure_ledger": ledger,
+                    "positive_lama_inference_count": 0,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "detector_id": run_id,
+                            "ownership_id": "o",
+                            "silhouette_id": "s",
+                            "router_id": "r",
+                            "expansion_id": "raw",
+                            "fill_id": "mask_only",
+                            "oracle_only": False,
+                            "status": "active",
+                            "metrics": metrics,
+                            "closure_reason": "",
+                        }
+                    ],
+                    "pages": {run_id: [{"page_id": "p1"}]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    one = write_result("one", "one")
+    two = write_result("two", "two")
+
+    with pytest.raises(ValueError, match="missing=\\['two'\\]"):
+        merge_results([one])
+
+    merged = merge_results([one, two])
+    assert merged["logical_combination_count"] == 2
+    assert merged["physical_combination_count"] == 2
+    assert merged["unaccounted_combination_count"] == 0
+    assert merged["closure_ledger"] == ledger
+
+
 def test_known_background_synthetic_manifest_covers_all_fill_routes(
     tmp_path: Path,
 ) -> None:

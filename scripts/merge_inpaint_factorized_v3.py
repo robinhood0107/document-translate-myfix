@@ -68,6 +68,9 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
     pages: dict[str, list[dict[str, object]]] = {}
     inference_count = 0
     source_paths: list[str] = []
+    closure_ledger: list[dict[str, object]] | None = None
+    logical_combination_count: int | None = None
+    physical_combination_count: int | None = None
     for path in result_paths:
         payload = _read_json(path)
         if payload.get("schema_version") != SCHEMA_VERSION:
@@ -81,6 +84,37 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             matrix_sha = current_matrix
         elif current_manifest != manifest_sha or current_matrix != matrix_sha:
             raise ValueError("factorized results have different manifest or matrix SHAs")
+        raw_ledger = payload.get("closure_ledger")
+        if raw_ledger is not None:
+            if not isinstance(raw_ledger, list) or not all(
+                isinstance(row, dict) for row in raw_ledger
+            ):
+                raise ValueError(f"result has invalid closure ledger: {path}")
+            normalized_ledger = [dict(row) for row in raw_ledger]
+            current_logical_count = int(
+                payload.get("logical_combination_count", len(normalized_ledger))
+            )
+            current_physical_count = int(
+                payload.get(
+                    "physical_combination_count",
+                    sum(
+                        row.get("closure_state") == "executed"
+                        for row in normalized_ledger
+                    ),
+                )
+            )
+            if closure_ledger is None:
+                closure_ledger = normalized_ledger
+                logical_combination_count = current_logical_count
+                physical_combination_count = current_physical_count
+            elif (
+                normalized_ledger != closure_ledger
+                or current_logical_count != logical_combination_count
+                or current_physical_count != physical_combination_count
+            ):
+                raise ValueError("factorized results have different closure ledgers")
+        elif closure_ledger is not None:
+            raise ValueError("factorized result is missing the shared closure ledger")
         raw_runs = payload.get("runs")
         raw_pages = payload.get("pages")
         if not isinstance(raw_runs, list) or not isinstance(raw_pages, dict):
@@ -98,8 +132,24 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             pages[record.run_id] = rows
         inference_count += int(payload.get("positive_lama_inference_count", 0) or 0)
         source_paths.append(str(path.resolve()))
+    if closure_ledger is not None:
+        expected_run_ids = {
+            str(row.get("logical_id") or "")
+            for row in closure_ledger
+            if row.get("closure_state") == "executed"
+        }
+        if "" in expected_run_ids:
+            raise ValueError("closure ledger contains an empty executed logical id")
+        actual_run_ids = {record.run_id for record in records}
+        missing = sorted(expected_run_ids.difference(actual_run_ids))
+        extra = sorted(actual_run_ids.difference(expected_run_ids))
+        if missing or extra:
+            raise ValueError(
+                "merged factorized results do not account for every executed "
+                f"combination: missing={missing}, extra={extra}"
+            )
     ranked = select_pareto_records(records)
-    return {
+    merged = {
         "schema_version": SCHEMA_VERSION,
         "manifest_sha256": manifest_sha,
         "matrix_sha256": matrix_sha,
@@ -110,20 +160,36 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
         "runs": [record.as_record() for record in ranked],
         "pages": pages,
     }
+    if closure_ledger is not None:
+        merged.update(
+            {
+                "logical_combination_count": logical_combination_count,
+                "physical_combination_count": physical_combination_count,
+                "closure_ledger": closure_ledger,
+                "unaccounted_combination_count": 0,
+            }
+        )
+    return merged
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Merge bounded v3 factorized runs and recompute Pareto status."
     )
-    parser.add_argument("--input-root", type=Path, required=True)
+    sources = parser.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--input-root", type=Path)
+    sources.add_argument("--input", type=Path, action="append")
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    result_paths = sorted(args.input_root.resolve().glob("*/factorized-results.json"))
+    result_paths = (
+        [path.resolve() for path in args.input]
+        if args.input
+        else sorted(args.input_root.resolve().glob("*/factorized-results.json"))
+    )
     payload = merge_results(result_paths)
     _write_json(args.output.resolve(), payload)
     print(args.output.resolve())

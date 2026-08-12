@@ -27,7 +27,7 @@ from scripts.validation_artifact_harness import (  # noqa: E402
 )
 
 
-FAMILY = "inpaint-manga109-yolo26-ownership-v2"
+FAMILY = "inpaint-manga109-yolo26-evidence-v3"
 CATEGORY = "40-inpaint-mask-render"
 
 
@@ -80,10 +80,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             if image is None or image.size == 0:
                 raise FileNotFoundError(page.source_image)
-            result = reference.infer(image)
+            result, balloon = reference.infer_evidence(image)
             path = output_root / f"{page.page_id}_ownership.png"
+            balloon_path = output_root / f"{page.page_id}_balloon.png"
             if not cv2.imwrite(str(path), result.raw_mask):
                 raise OSError(f"failed to write ownership mask: {path}")
+            if not cv2.imwrite(str(balloon_path), balloon.raw_mask):
+                raise OSError(f"failed to write balloon mask: {balloon_path}")
             rows.append(
                 {
                     "page_id": page.page_id,
@@ -92,11 +95,18 @@ def main(argv: list[str] | None = None) -> int:
                         result.raw_mask.tobytes(order="C")
                     ).hexdigest(),
                     "path": str(path),
+                    "balloon_pixel_count": int(
+                        cv2.countNonZero(balloon.raw_mask)
+                    ),
+                    "balloon_mask_sha256": hashlib.sha256(
+                        balloon.raw_mask.tobytes(order="C")
+                    ).hexdigest(),
+                    "balloon_path": str(balloon_path),
                     "runtime": dict(result.runtime),
                 }
             )
         payload = {
-            "schema_version": "inpaint-manga109-yolo26-ownership-v1",
+            "schema_version": "inpaint-manga109-yolo26-evidence-v2",
             "manifest_sha256": _sha256(manifest_path),
             "model_sha256": _sha256(model_path),
             "model_size_bytes": model_path.stat().st_size,
@@ -107,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
                 "iou": float(args.iou),
                 "retina_masks": True,
                 "text_class_id": 1,
+                "balloon_class_id": 2,
             },
             "pages": rows,
         }
