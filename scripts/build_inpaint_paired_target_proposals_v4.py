@@ -104,6 +104,8 @@ def _contact_sheets(
 def build_paired_target_proposals(
     source_index_path: Path,
     output_dir: Path,
+    *,
+    page_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     source_index = _read_json(source_index_path)
     if source_index.get("schema_version") != "inpaint-development-source-index-v4":
@@ -117,6 +119,8 @@ def build_paired_target_proposals(
         if not isinstance(raw_page, dict):
             raise ValueError("source index page must be an object")
         page_id = str(raw_page.get("page_id") or "").strip()
+        if page_ids and page_id not in page_ids:
+            continue
         source_path = Path(str(raw_page.get("path") or ""))
         source_sha = str(raw_page.get("source_sha256") or "").lower()
         if _sha256(source_path) != source_sha:
@@ -218,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--source-index", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--page-id", action="append", default=[])
     args = parser.parse_args(argv)
     output_dir, managed = select_managed_output_directory(
         family=FAMILY,
@@ -234,7 +239,9 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         payload = build_paired_target_proposals(
-            args.source_index.resolve(), output_dir.resolve()
+            args.source_index.resolve(),
+            output_dir.resolve(),
+            page_ids=frozenset(str(value) for value in args.page_id),
         )
         if managed is not None:
             managed.complete(
