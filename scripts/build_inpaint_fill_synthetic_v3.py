@@ -187,6 +187,7 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
                 "annotation_basis": "synthetic_known_background_v3",
                 "target_mask_provenance": "synthetic_ground_truth",
                 "target_extent_independent": True,
+                "target_inventory_independent": True,
             }
         )
     payload: dict[str, object] = {

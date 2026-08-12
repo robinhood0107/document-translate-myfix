@@ -327,7 +327,10 @@ def assert_complete_closure_ledger(
 
 
 def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
-    if metrics.get("target_extent_independent") is False:
+    if (
+        metrics.get("target_extent_independent") is False
+        or metrics.get("target_inventory_independent") is False
+    ):
         return False
     zero_metrics = (
         "protected_structure_overlap",
@@ -406,13 +409,21 @@ def select_pareto_records(
     for row in rows:
         if row.oracle_only:
             output.append(replace(row, status="family_complete"))
-        elif row.metrics.get("target_extent_independent") is False:
+        elif (
+            row.metrics.get("target_extent_independent") is False
+            or row.metrics.get("target_inventory_independent") is False
+        ):
             output.append(
                 replace(
                     row,
                     status="information_limited",
                     closure_reason=(
-                        row.closure_reason or "target_extent_not_independent"
+                        row.closure_reason
+                        or (
+                            "target_extent_not_independent"
+                            if row.metrics.get("target_extent_independent") is False
+                            else "target_inventory_not_independent"
+                        )
                     ),
                 )
             )
