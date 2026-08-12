@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -25,6 +26,7 @@ from scripts.validation_artifact_harness import default_archive_root  # noqa: E4
 SCHEMA_VERSION = "inpaint-factorized-source-manifest-v4"
 LEDGER_SCHEMA_VERSION = "inpaint-independent-target-review-ledger-v4"
 DECISIONS_SCHEMA_VERSION = "inpaint-independent-target-review-decisions-v4"
+MANUAL_INVENTORY_SCHEMA_VERSION = "inpaint-independent-manual-inventory-v4"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -41,6 +43,100 @@ def _read_mask(path: object, shape: tuple[int, int] | None = None) -> np.ndarray
     if shape is not None and value.shape != shape:
         raise ValueError("independent target mask shape mismatch")
     return np.where(value > 0, 255, 0).astype(np.uint8)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manual_inventory_instances(
+    inventory_path: Path,
+    *,
+    page_id: str,
+    source_path: Path,
+    shape: tuple[int, int],
+    page_dir: Path,
+    regions: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], np.ndarray, np.ndarray, np.ndarray]:
+    payload = _read_json(inventory_path)
+    if payload.get("schema_version") != MANUAL_INVENTORY_SCHEMA_VERSION:
+        raise ValueError(f"unsupported manual inventory: {inventory_path}")
+    if payload.get("candidate_seen") is not False or payload.get("source_reviewed") is not True:
+        raise ValueError(f"manual inventory must be source-only reviewed: {page_id}")
+    if str(payload.get("page_id") or "") != page_id:
+        raise ValueError(f"manual inventory page mismatch: {page_id}")
+    expected_sha = str(payload.get("source_sha256") or "").lower()
+    if not expected_sha or expected_sha != _sha256(source_path).lower():
+        raise ValueError(f"manual inventory source SHA mismatch: {page_id}")
+    raw_instances = payload.get("instances")
+    if not isinstance(raw_instances, list) or not raw_instances:
+        raise ValueError(f"manual inventory needs reviewed instances: {page_id}")
+
+    occupied = np.zeros(shape, np.uint8)
+    required = np.zeros(shape, np.uint8)
+    preserve = np.zeros(shape, np.uint8)
+    ambiguous = np.zeros(shape, np.uint8)
+    output: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for raw in raw_instances:
+        if not isinstance(raw, dict):
+            raise ValueError(f"manual inventory instance must be an object: {page_id}")
+        instance_id = str(raw.get("instance_id") or "")
+        if not instance_id or instance_id in seen_ids:
+            raise ValueError(f"invalid manual inventory instance id: {page_id}={instance_id}")
+        seen_ids.add(instance_id)
+        region_id = str(raw.get("region_id") or "")
+        region = regions.get(region_id)
+        if region is None:
+            raise ValueError(f"manual inventory needs authoritative ownership: {page_id}={region_id}")
+        priority = str(raw.get("priority") or "")
+        if priority not in {"required", "optional", "ambiguous"}:
+            raise ValueError(f"invalid manual inventory priority: {page_id}={priority}")
+        mask = _read_mask(raw.get("mask_path"), shape)
+        ownership = _read_mask(region["ownership_mask"], shape)
+        mask[ownership == 0] = 0
+        for field in (
+            "protected_structure_mask",
+            "ambiguous_structure_mask",
+            "corner_protect_mask",
+        ):
+            mask[_read_mask(region[field], shape) > 0] = 0
+        mask[occupied > 0] = 0
+        if not np.any(mask):
+            raise ValueError(f"manual inventory instance became empty: {page_id}={instance_id}")
+        occupied[mask > 0] = 255
+        if priority == "required":
+            bucket = required
+            default_role = "dialogue_bubble"
+            action = "translate_inpaint"
+        elif priority == "optional":
+            bucket = preserve
+            default_role = "sfx"
+            action = "preserve"
+        else:
+            bucket = ambiguous
+            default_role = "ambiguous"
+            action = "review"
+        bucket[mask > 0] = 255
+        destination = page_dir / "instances" / f"manual-{instance_id}.png"
+        output.append(
+            {
+                "instance_id": f"manual-{instance_id}",
+                "region_id": region_id,
+                "mask_path": _write_mask(destination, mask),
+                "semantic_role": str(raw.get("semantic_role") or default_role),
+                "processing_action": action,
+                "priority": priority,
+                "source_reviewed": True,
+            }
+        )
+    if not np.any(required):
+        raise ValueError(f"manual inventory has no required text: {page_id}")
+    return output, required, preserve, ambiguous
 
 
 def _write_mask(path: Path, value: np.ndarray) -> str:
@@ -129,37 +225,35 @@ def apply_independent_target_review(
         page_rows = rows_by_page.get(page_id, [])
 
         if page_id in inventory:
-            # A source-only full-page review accepted the existing semantic
-            # inventory or supplied a replacement union.  Existing instance
-            # masks remain individual human-reviewed records.
             entry = inventory[page_id]
             manual = str(entry.get("manual_inventory_path") or "")
             if manual:
-                manual_mask = _read_mask(manual, shape)
-                required_instances = [
-                    dict(value)
-                    for value in page.get("target_instances", [])
-                    if str(value.get("priority") or "") == "required"
-                ]
-                if len(required_instances) != 1:
-                    raise ValueError(
-                        f"manual inventory needs exactly one required instance: {page_id}"
-                    )
-                mask_path = _write_mask(page_dir / "instances" / "manual-required.png", manual_mask)
-                required_instances[0]["mask_path"] = mask_path
-                page["target_instances"] = required_instances + [
-                    dict(value)
-                    for value in page.get("target_instances", [])
-                    if str(value.get("priority") or "") != "required"
-                ]
-                page["target_text_mask"] = mask_path
-            elif any(
-                str(value.get("priority") or "") == "required"
-                for value in page.get("target_instances", [])
-            ):
-                raise ValueError(
-                    f"unpaired page with required text needs a source-only manual inventory: {page_id}"
+                region_map = {
+                    str(value.get("region_id") or ""): dict(value)
+                    for value in page.get("regions", [])
+                }
+                instances, required, preserve, ambiguous = _manual_inventory_instances(
+                    Path(manual),
+                    page_id=page_id,
+                    source_path=Path(str(page["path"])),
+                    shape=shape,
+                    page_dir=page_dir,
+                    regions=region_map,
                 )
+                page["target_instances"] = instances
+                page["target_text_mask"] = _write_mask(
+                    page_dir / "target-text.png", required
+                )
+                page["preserve_mask"] = _write_mask(page_dir / "preserve.png", preserve)
+                page["ambiguous_structure_mask"] = _write_mask(
+                    page_dir / "ambiguous-structure.png", ambiguous
+                )
+            else:
+                # The independent full-page inventory supersedes the old
+                # detector-derived semantic proposal.  A reviewed no-target
+                # page must not retain circular target instances.
+                page["target_instances"] = []
+                page["target_text_mask"] = None
             page["target_mask_provenance"] = "source_only_full_page_inventory_review"
         else:
             instances: list[dict[str, Any]] = []

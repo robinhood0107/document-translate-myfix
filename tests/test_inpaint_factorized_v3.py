@@ -440,6 +440,144 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
     assert np.count_nonzero(target) < np.count_nonzero(extent_mask)
 
 
+def test_independent_target_review_applier_replaces_unpaired_page_with_instances(
+    tmp_path: Path,
+) -> None:
+    shape = (36, 48)
+    source_path = tmp_path / "source.png"
+    source = np.full((*shape, 3), 230, np.uint8)
+    source[7:13, 8:16] = 20
+    source[21:27, 28:37] = 20
+    _write_image(source_path, source)
+    empty = _write_image(tmp_path / "empty.png", np.zeros(shape, np.uint8))
+    ownership_mask = np.zeros(shape, np.uint8)
+    ownership_mask[3:32, 4:44] = 255
+    ownership = _write_image(tmp_path / "ownership.png", ownership_mask)
+    first_mask = np.zeros(shape, np.uint8)
+    first_mask[7:13, 8:16] = 255
+    second_mask = np.zeros(shape, np.uint8)
+    second_mask[21:27, 28:37] = 255
+    first = _write_image(tmp_path / "first.png", first_mask)
+    second = _write_image(tmp_path / "second.png", second_mask)
+    old_target = _write_image(tmp_path / "old-target.png", first_mask | second_mask)
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "corpus_id": "example",
+                "pages": [
+                    {
+                        "page_id": "p1",
+                        "path": str(source_path),
+                        "height": shape[0],
+                        "width": shape[1],
+                        "target_text_mask": old_target,
+                        "preserve_mask": empty,
+                        "protected_structure_mask": empty,
+                        "ambiguous_structure_mask": empty,
+                        "ownership_mask": ownership,
+                        "expected_edit": "required",
+                        "target_instances": [
+                            {
+                                "instance_id": "old-circular",
+                                "region_id": "r1",
+                                "mask_path": old_target,
+                                "priority": "required",
+                            }
+                        ],
+                        "regions": [
+                            {
+                                "region_id": "r1",
+                                "bubble_route_class": "clean_flat",
+                                "bubble_interior_mask": ownership,
+                                "ownership_mask": ownership,
+                                "protected_structure_mask": empty,
+                                "ambiguous_structure_mask": empty,
+                                "corner_protect_mask": empty,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    inventory = tmp_path / "manual-inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-manual-inventory-v4",
+                "candidate_seen": False,
+                "source_reviewed": True,
+                "page_id": "p1",
+                "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                "instances": [
+                    {
+                        "instance_id": "line-1",
+                        "region_id": "r1",
+                        "mask_path": first,
+                        "semantic_role": "dialogue_bubble",
+                        "priority": "required",
+                    },
+                    {
+                        "instance_id": "line-2",
+                        "region_id": "r1",
+                        "mask_path": second,
+                        "semantic_role": "dialogue_bubble",
+                        "priority": "required",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-ledger-v4",
+                "candidate_seen": False,
+                "rows": [],
+                "full_page_inventory_pending": [{"page_id": "p1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "decisions.json"
+    decisions.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-decisions-v4",
+                "candidate_seen": False,
+                "review_complete": True,
+                "decisions": [],
+                "full_page_inventory": [
+                    {
+                        "page_id": "p1",
+                        "status": "complete_with_manual_inventory",
+                        "manual_inventory_path": str(inventory),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = apply_independent_target_review(
+        semantic, ledger, decisions, tmp_path / "output"
+    )
+
+    page = payload["pages"][0]
+    assert [value["instance_id"] for value in page["target_instances"]] == [
+        "manual-line-1",
+        "manual-line-2",
+    ]
+    target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
+    assert np.array_equal(target, first_mask | second_mask)
+    assert all(value["instance_id"] != "old-circular" for value in page["target_instances"])
+
+
 def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:
     source = np.array([[0, 1], [255, -1]], dtype=np.int16)
 

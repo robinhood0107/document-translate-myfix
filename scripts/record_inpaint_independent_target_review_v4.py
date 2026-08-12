@@ -90,6 +90,17 @@ def record_independent_target_review(
         if status == "complete_with_manual_inventory":
             if not manual_path or not Path(manual_path).is_file():
                 raise ValueError(f"manual inventory artifact missing: {page_id}")
+            manual_payload = _read_json(Path(manual_path))
+            if (
+                manual_payload.get("schema_version")
+                != "inpaint-independent-manual-inventory-v4"
+                or manual_payload.get("candidate_seen") is not False
+                or manual_payload.get("source_reviewed") is not True
+                or str(manual_payload.get("page_id") or "") != page_id
+            ):
+                raise ValueError(f"invalid source-only manual inventory: {page_id}")
+            if not isinstance(manual_payload.get("instances"), list) or not manual_payload["instances"]:
+                raise ValueError(f"manual inventory has no instances: {page_id}")
         elif manual_path:
             raise ValueError(f"no-required-text inventory must not provide a mask: {page_id}")
         normalized_inventory.append(
