@@ -51,11 +51,6 @@ def _bubble_truth(kind: str, shape: tuple[int, int]) -> tuple[np.ndarray, np.nda
     truth = np.full((height, width, 3), 150, np.uint8)
     interior = np.zeros(shape, np.uint8)
     cv2.ellipse(interior, (width // 2, height // 2), (104, 82), 0, 0, 360, 255, -1)
-    if kind == "halftone":
-        for y in range(8, height - 8, 8):
-            for x in range(8, width - 8, 8):
-                if interior[y, x] == 0:
-                    cv2.circle(truth, (x, y), 2, (65, 65, 65), -1)
     if kind == "clean_gradient":
         rows = np.linspace(228, 248, height, dtype=np.uint8)
         gradient = np.repeat(rows[:, None], width, axis=1)
@@ -63,8 +58,48 @@ def _bubble_truth(kind: str, shape: tuple[int, int]) -> tuple[np.ndarray, np.nda
             truth[:, :, channel][interior > 0] = gradient[interior > 0]
     else:
         truth[interior > 0] = (244, 244, 244)
+    if kind in {"halftone", "bright_on_halftone"}:
+        for y in range(8, height - 8, 8):
+            for x in range(8, width - 8, 8):
+                if interior[y, x] > 0:
+                    cv2.circle(truth, (x, y), 2, (65, 65, 65), -1)
+    if kind == "hatching":
+        pattern = np.zeros(shape, np.uint8)
+        for offset in range(-height, width, 9):
+            cv2.line(pattern, (offset, 0), (offset + height, height), 255, 2)
+        truth[(interior > 0) & (pattern > 0)] = (75, 75, 75)
     cv2.ellipse(truth, (width // 2, height // 2), (106, 84), 0, 0, 360, (25, 25, 25), 3)
     return truth, interior
+
+
+def _synthetic_text(
+    kind: str,
+    shape: tuple[int, int],
+    protected: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    target = np.zeros(shape, np.uint8)
+    ink = np.zeros(shape, np.uint8)
+    origin = (104, 142)
+    if kind == "crop_edge":
+        origin = (-4, 142)
+    cv2.putText(
+        ink,
+        "TXT",
+        origin,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.25,
+        255,
+        4,
+        cv2.LINE_AA,
+    )
+    if kind in {"outline", "shadow"}:
+        halo = cv2.dilate(ink, np.ones((5, 5), np.uint8), iterations=1)
+        target[halo > 0] = 255
+    else:
+        target[ink > 0] = 255
+    target[protected > 0] = 0
+    ink[protected > 0] = 0
+    return target, ink
 
 
 def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
@@ -73,32 +108,43 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
     for kind, route_class in (
         ("clean_flat", "clean_flat"),
         ("clean_gradient", "clean_gradient"),
+        ("outline", "clean_flat"),
+        ("shadow", "clean_gradient"),
+        ("crop_edge", "clean_flat"),
         ("halftone", "texture"),
+        ("bright_on_halftone", "texture"),
+        ("hatching", "texture"),
         ("line_art", "line_art"),
+        ("bubble_corner", "ambiguous"),
     ):
         truth, interior = _bubble_truth(kind, shape)
         protected = np.zeros(shape, np.uint8)
         if kind == "line_art":
             cv2.line(truth, (92, 168), (228, 168), (25, 25, 25), 4)
             cv2.line(protected, (92, 168), (228, 168), 255, 6)
-        text = np.zeros(shape, np.uint8)
-        cv2.putText(
-            text,
-            "SFX",
-            (104, 142),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.25,
-            255,
-            4,
-            cv2.LINE_AA,
-        )
-        text[protected > 0] = 0
+        if kind == "bubble_corner":
+            protected = np.where(interior == 0, 255, 0).astype(np.uint8)
+        text, ink = _synthetic_text(kind, shape, protected)
         source = truth.copy()
-        alpha = text.astype(np.float32) / 255.0
+        if kind == "bubble_corner":
+            shifted = np.zeros_like(text)
+            shifted[32:96, 224:319] = text[96:160, 96:191]
+            text = shifted
+            ink = shifted.copy()
+            text[protected > 0] = 0
+            ink[protected > 0] = 0
+        alpha = ink.astype(np.float32) / 255.0
+        ink_value = 238.0 if kind == "bright_on_halftone" else 25.0
         source = np.rint(
             source.astype(np.float32) * (1.0 - alpha[:, :, None])
-            + 25.0 * alpha[:, :, None]
+            + ink_value * alpha[:, :, None]
         ).astype(np.uint8)
+        if kind == "outline":
+            outline = (text > 0) & (ink == 0)
+            source[outline] = 245
+        elif kind == "shadow":
+            shadow = (text > 0) & (ink == 0)
+            source[shadow] = 80
         zero = np.zeros(shape, np.uint8)
         page_root = output_root / kind
         source_path = _write_image(page_root / "source.png", source)
