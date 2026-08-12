@@ -49,15 +49,17 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 def _bubble_truth(kind: str, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
     height, width = shape
     truth = np.full((height, width, 3), 150, np.uint8)
+    bubble_fill = np.zeros(shape, np.uint8)
+    cv2.ellipse(bubble_fill, (width // 2, height // 2), (104, 82), 0, 0, 360, 255, -1)
     interior = np.zeros(shape, np.uint8)
-    cv2.ellipse(interior, (width // 2, height // 2), (104, 82), 0, 0, 360, 255, -1)
+    cv2.ellipse(interior, (width // 2, height // 2), (98, 76), 0, 0, 360, 255, -1)
     if kind == "clean_gradient":
         rows = np.linspace(228, 248, height, dtype=np.uint8)
         gradient = np.repeat(rows[:, None], width, axis=1)
         for channel in range(3):
-            truth[:, :, channel][interior > 0] = gradient[interior > 0]
+            truth[:, :, channel][bubble_fill > 0] = gradient[bubble_fill > 0]
     else:
-        truth[interior > 0] = (244, 244, 244)
+        truth[bubble_fill > 0] = (244, 244, 244)
     if kind in {"halftone", "bright_on_halftone"}:
         for y in range(8, height - 8, 8):
             for x in range(8, width - 8, 8):
@@ -81,7 +83,7 @@ def _synthetic_text(
     ink = np.zeros(shape, np.uint8)
     origin = (104, 142)
     if kind == "crop_edge":
-        origin = (-4, 142)
+        origin = (64, 142)
     cv2.putText(
         ink,
         "TXT",
@@ -122,13 +124,20 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
         if kind == "line_art":
             cv2.line(truth, (92, 168), (228, 168), (25, 25, 25), 4)
             cv2.line(protected, (92, 168), (228, 168), 255, 6)
+        corner = cv2.subtract(
+            cv2.dilate(interior, np.ones((9, 9), np.uint8), iterations=1),
+            interior,
+        )
         if kind == "bubble_corner":
-            protected = np.where(interior == 0, 255, 0).astype(np.uint8)
+            protected = cv2.bitwise_or(
+                protected,
+                np.where(interior == 0, 255, 0).astype(np.uint8),
+            )
         text, ink = _synthetic_text(kind, shape, protected)
         source = truth.copy()
         if kind == "bubble_corner":
             shifted = np.zeros_like(text)
-            shifted[32:96, 224:319] = text[96:160, 96:191]
+            shifted[70:134, 210:305] = text[96:160, 96:191]
             text = shifted
             ink = shifted.copy()
             text[protected > 0] = 0
@@ -141,7 +150,8 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
         ).astype(np.uint8)
         if kind == "outline":
             outline = (text > 0) & (ink == 0)
-            source[outline] = 245
+            source[outline] = 25
+            source[ink > 0] = 245
         elif kind == "shadow":
             shadow = (text > 0) & (ink == 0)
             source[shadow] = 80
@@ -153,6 +163,7 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
         interior_path = _write_image(page_root / "interior.png", interior)
         protected_path = _write_image(page_root / "protected.png", protected)
         zero_path = _write_image(page_root / "zero.png", zero)
+        corner_path = _write_image(page_root / "corner.png", corner)
         pages.append(
             {
                 "page_id": f"synthetic-{kind}",
@@ -167,7 +178,7 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
                 "ambiguous_structure_mask": zero_path,
                 "ownership_mask": interior_path,
                 "claim_seed_mask": interior_path,
-                "corner_protect_mask": zero_path,
+                "corner_protect_mask": corner_path,
                 "existing_source_edit_mask": zero_path,
                 "baseline": source_path,
                 "baseline_mask": zero_path,

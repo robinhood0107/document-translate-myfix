@@ -63,6 +63,7 @@ from scripts.apply_inpaint_source_review_v4 import apply_source_review
 from scripts.record_inpaint_source_review_v4 import record_source_review
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
+from scripts.build_inpaint_fill_oracle_matrix_v3 import build_fill_matrix
 from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
 from scripts.export_inpaint_silhouette_router_v3 import export_candidates
 from scripts.merge_inpaint_factorized_v3 import merge_results
@@ -1253,6 +1254,46 @@ def test_page_union_uses_one_lama_call_and_exact_composite() -> None:
     assert np.array_equal(candidate[edit == 0], source[edit == 0])
 
 
+def test_broad_fill_samples_clean_interior_but_excludes_detector_seed() -> None:
+    source = np.full((48, 64, 3), 230, np.uint8)
+    interior = np.zeros(source.shape[:2], np.uint8)
+    interior[8:40, 10:54] = 255
+    seed = np.zeros_like(interior)
+    seed[20:28, 28:36] = 255
+    source[seed > 0] = 20
+
+    candidate, diagnostics = fill_factorized_mask(
+        source,
+        interior,
+        backend="robust_flat_median",
+        interior_mask=interior,
+        background_sample_edit_mask=seed,
+    )
+
+    assert diagnostics["applied"] is True
+    assert diagnostics["sample_pixel_count"] == int(
+        np.count_nonzero((interior > 0) & (seed == 0))
+    )
+    assert np.all(candidate[interior > 0] == 230)
+    assert np.array_equal(candidate[interior == 0], source[interior == 0])
+
+
+def test_broad_fill_rejects_sample_exclusion_outside_edit() -> None:
+    source = np.full((16, 20, 3), 180, np.uint8)
+    edit = np.zeros(source.shape[:2], np.uint8)
+    edit[4:12, 6:14] = 255
+    invalid = edit.copy()
+    invalid[0, 0] = 255
+
+    with pytest.raises(ValueError, match="inside the edit mask"):
+        fill_factorized_mask(
+            source,
+            edit,
+            backend="robust_flat_median",
+            background_sample_edit_mask=invalid,
+        )
+
+
 def test_route_hybrid_uses_lama_only_for_narrow_and_flat_for_broad() -> None:
     assert _route_fill_backend("narrow_lama_broad_flat", "narrow") == "current_lama"
     assert (
@@ -2272,3 +2313,37 @@ def test_known_background_synthetic_manifest_covers_all_fill_routes(
         assert np.count_nonzero(target) > 0
         assert np.count_nonzero((target > 0) & (protected > 0)) == 0
         assert np.count_nonzero(np.any(source != truth, axis=2) & (target > 0)) > 0
+
+
+def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
+    manifest = build_synthetic_manifest(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    matrix = build_fill_matrix(manifest_path)
+
+    assert matrix["oracle_experiment"] is True
+    assert len(matrix["explicit_combinations"]) == 11
+    assert {
+        row["fill"] for row in matrix["explicit_combinations"]
+    } == {
+        "robust_flat_median",
+        "planar_gradient",
+        "telea",
+        "current_lama",
+        "ballons_lama",
+        "conditional_hybrid",
+    }
+    pages = matrix["families"]["router"]["clean_route_oracle"]["pages"]
+    clean = pages["synthetic-clean_flat"]
+    unsafe = pages["synthetic-halftone"]
+    assert clean["ballons_clean_mask"].endswith("interior.png")
+    assert unsafe["ballons_clean_mask"].endswith("zero.png")
+
+    ledger, physical = _prepare_closure_ledger(
+        matrix["explicit_combinations"],
+        matrix=matrix,
+        manifest_sha256="f" * 64,
+    )
+    assert len(physical) == 11
+    assert {row.closure_state for row in ledger} == {"executed"}
