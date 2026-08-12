@@ -14,6 +14,28 @@ from .stage1 import PageMasks
 FillCallable = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
 
+def restrict_candidate_to_final_mask(
+    source: np.ndarray,
+    candidate: np.ndarray,
+    original_final_mask: np.ndarray,
+    restricted_final_mask: np.ndarray,
+) -> np.ndarray:
+    """Restore immutable source pixels removed by a final protection pass."""
+
+    original = np.ascontiguousarray(np.asarray(source)[:, :, :3])
+    result = np.ascontiguousarray(np.asarray(candidate)[:, :, :3]).copy()
+    if result.shape != original.shape:
+        raise ValueError("candidate shape mismatch")
+    shape = original.shape[:2]
+    old = binary_mask(original_final_mask, shape)
+    new = binary_mask(restricted_final_mask, shape)
+    if np.any((new > 0) & (old <= 0)):
+        raise ValueError("restricted final mask cannot add pixels")
+    restore = (old > 0) & (new <= 0)
+    result[restore] = original[restore]
+    return np.ascontiguousarray(result)
+
+
 def _local_fill_domain(
     shape: tuple[int, int],
     edit: np.ndarray,
