@@ -188,6 +188,7 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
                 "target_mask_provenance": "synthetic_ground_truth",
                 "target_extent_independent": True,
                 "target_inventory_independent": True,
+                "target_review_complete": True,
             }
         )
     payload: dict[str, object] = {

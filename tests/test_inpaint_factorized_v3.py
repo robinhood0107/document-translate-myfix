@@ -47,6 +47,9 @@ from benchmarking.inpaint_detector_bakeoff.silhouette import (
     extract_ballons_native_interior,
     extract_pr2_validated_interior,
 )
+from benchmarking.inpaint_detector_bakeoff.paired_target import (
+    paired_old_text_proposal,
+)
 from scripts.benchmark_inpaint_factorized_v3 import (
     _annotation_masks,
     _prepare_closure_ledger,
@@ -77,6 +80,36 @@ from scripts.benchmark_inpaint_detector_fusions_v4 import (
 def _write_image(path: Path, image: np.ndarray) -> str:
     assert cv2.imwrite(str(path), image)
     return str(path)
+
+
+def test_paired_target_proposal_extracts_removed_source_strokes_only() -> None:
+    source = np.full((80, 96, 3), 235, np.uint8)
+    paired = source.copy()
+    cv2.putText(source, "A", (18, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 3)
+    cv2.putText(paired, "B", (58, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 3)
+    source_text = np.zeros(source.shape[:2], np.uint8)
+    cv2.putText(source_text, "A", (18, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 3)
+    paired_text = np.zeros(source.shape[:2], np.uint8)
+    cv2.putText(paired_text, "B", (58, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 3)
+
+    proposal = paired_old_text_proposal(source, paired)
+
+    assert np.count_nonzero(proposal.extent_mask & source_text) > 0
+    assert np.count_nonzero(proposal.extent_mask & paired_text) == 0
+    assert proposal.instance_masks
+
+
+def test_paired_target_proposal_rejects_global_compression_noise() -> None:
+    source = np.full((64, 72, 3), 190, np.uint8)
+    noise = np.indices(source.shape[:2]).sum(axis=0) % 5
+    paired = np.clip(source.astype(np.int16) + noise[..., None] - 2, 0, 255).astype(
+        np.uint8
+    )
+
+    proposal = paired_old_text_proposal(source, paired)
+
+    assert np.count_nonzero(proposal.extent_mask) == 0
+    assert proposal.instance_masks == ()
 
 
 def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:
@@ -209,6 +242,7 @@ def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) 
                     "target_mask_provenance": "synthetic_ground_truth",
                         "target_extent_independent": True,
                         "target_inventory_independent": True,
+                        "target_review_complete": True,
                     "target_text_mask": target_path,
                         "target_instances": [
                             {"instance_id": "i1", "mask_path": target_path}
@@ -375,6 +409,7 @@ def test_manifest_v3_requires_instance_route_and_evidence_fields(tmp_path: Path)
                 "target_mask_provenance": "synthetic_ground_truth",
                 "target_extent_independent": True,
                 "target_inventory_independent": True,
+                "target_review_complete": True,
                 "target_text_mask": target_path,
                 "target_instances": [
                     {"instance_id": "glyph-1", "mask_path": target_path}
@@ -1626,6 +1661,26 @@ def test_pareto_selection_requires_independent_target_inventory() -> None:
     assert selected[0].closure_reason == "target_inventory_not_independent"
 
 
+def test_pareto_selection_requires_completed_source_review() -> None:
+    metrics = {
+        "target_extent_independent": True,
+        "target_inventory_independent": True,
+        "target_review_complete": False,
+        "aggregate_target_coverage": 1.0,
+        "minimum_target_instance_coverage": 1.0,
+        "target_instance_seed_recall": 1.0,
+        "residue_gate_applicable": False,
+    }
+    record = FactorizedRunRecord(
+        "unreviewed", "d", "o", "s", "r", "e", "f", False, "active", metrics
+    )
+
+    selected = select_pareto_records([record])
+
+    assert selected[0].status == "information_limited"
+    assert selected[0].closure_reason == "target_review_incomplete"
+
+
 def test_pareto_gate_rejects_missing_residue_and_ambiguous_changes() -> None:
     safe = {
         "aggregate_target_coverage": 1.0,
@@ -1735,6 +1790,7 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
                 "target_mask_provenance": "synthetic_ground_truth",
                 "target_extent_independent": True,
                 "target_inventory_independent": True,
+                "target_review_complete": True,
             }
         ],
     }

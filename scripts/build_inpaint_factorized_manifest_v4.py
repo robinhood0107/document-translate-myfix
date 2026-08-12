@@ -187,6 +187,7 @@ def build_manifest(
             "target_mask_provenance",
             "target_extent_independent",
             "target_inventory_independent",
+            "target_review_complete",
         ):
             if field in decision:
                 page[field] = decision[field]
@@ -202,6 +203,9 @@ def build_manifest(
                 ),
                 "target_inventory_independent": bool(
                     page.get("target_inventory_independent", False)
+                ),
+                "target_review_complete": bool(
+                    page.get("target_review_complete", False)
                 ),
             }
         )

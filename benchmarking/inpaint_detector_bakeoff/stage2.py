@@ -330,6 +330,7 @@ def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
     if (
         metrics.get("target_extent_independent") is False
         or metrics.get("target_inventory_independent") is False
+        or metrics.get("target_review_complete") is False
     ):
         return False
     zero_metrics = (
@@ -412,6 +413,7 @@ def select_pareto_records(
         elif (
             row.metrics.get("target_extent_independent") is False
             or row.metrics.get("target_inventory_independent") is False
+            or row.metrics.get("target_review_complete") is False
         ):
             output.append(
                 replace(
@@ -422,7 +424,11 @@ def select_pareto_records(
                         or (
                             "target_extent_not_independent"
                             if row.metrics.get("target_extent_independent") is False
-                            else "target_inventory_not_independent"
+                            else (
+                                "target_inventory_not_independent"
+                                if row.metrics.get("target_inventory_independent") is False
+                                else "target_review_incomplete"
+                            )
                         )
                     ),
                 )

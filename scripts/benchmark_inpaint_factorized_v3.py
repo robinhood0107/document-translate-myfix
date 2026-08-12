@@ -718,6 +718,9 @@ def _run_combination(
         "target_inventory_independent": all(
             page.target_inventory_independent for page in pages
         ),
+        "target_review_complete": all(
+            page.target_review_complete for page in pages
+        ),
         "target_mask_provenance": sorted(
             {page.target_mask_provenance for page in pages}
         ),
