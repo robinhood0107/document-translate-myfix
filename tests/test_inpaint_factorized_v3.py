@@ -13,11 +13,14 @@ from benchmarking.inpaint_detector_bakeoff.contracts import (
     CandidateMaskResult,
     DetectorBox,
     FactorizedRunRecord,
+    RegionEvaluationSpec,
     RoleCandidateSpec,
     Stage1Page,
 )
 from benchmarking.inpaint_detector_bakeoff.stage1 import (
     PageMasks,
+    RegionMasks,
+    broad_route_false_positive_pixels,
     decide_bubble_route,
     expand_detector_claim,
     load_page_masks,
@@ -41,9 +44,11 @@ from benchmarking.inpaint_detector_bakeoff.silhouette import (
     extract_pr2_validated_interior,
 )
 from scripts.benchmark_inpaint_factorized_v3 import (
+    _annotation_masks,
     _prepare_closure_ledger,
     _declared_combinations,
     _route_fill_backend,
+    _with_candidate_ownership,
     main as factorized_main,
 )
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
@@ -395,6 +400,92 @@ def test_manifest_v4_builder_rejects_non_proposal_paired_reference(
         build_manifest_v4(source_manifest, decisions)
 
 
+def test_mixed_page_scores_broad_edit_only_outside_clean_regions() -> None:
+    shape = (24, 48)
+    zeros = np.zeros(shape, np.uint8)
+    left = np.zeros(shape, np.uint8)
+    left[:, :24] = 255
+    right = np.zeros(shape, np.uint8)
+    right[:, 24:] = 255
+    masks = PageMasks(
+        target=zeros.copy(),
+        protected=zeros.copy(),
+        ambiguous=zeros.copy(),
+        ownership=np.full(shape, 255, np.uint8),
+        claim_seed=np.full(shape, 255, np.uint8),
+        existing_edit=zeros.copy(),
+        regions=(
+            RegionMasks("clean", "clean_flat", left, left, zeros, zeros, zeros),
+            RegionMasks("texture", "texture", right, right, zeros, zeros, zeros),
+        ),
+    )
+    broad = np.zeros(shape, np.uint8)
+    broad[4:20, 4:20] = 255
+    broad[4:20, 28:44] = 255
+
+    assert broad_route_false_positive_pixels(broad & left, masks) == 0
+    assert broad_route_false_positive_pixels(broad, masks) == 256
+
+
+def test_runner_cache_path_preserves_v4_region_and_preserve_masks(
+    tmp_path: Path,
+) -> None:
+    shape = (16, 24)
+    source = np.full((*shape, 3), 180, np.uint8)
+    zeros = np.zeros(shape, np.uint8)
+    preserve = np.zeros(shape, np.uint8)
+    preserve[3:7, 4:8] = 255
+    ownership = np.full(shape, 255, np.uint8)
+    interior = np.zeros(shape, np.uint8)
+    interior[1:15, 1:23] = 255
+    source_path = _write_image(tmp_path / "source.png", source)
+    zeros_path = _write_image(tmp_path / "zeros.png", zeros)
+    preserve_path = _write_image(tmp_path / "preserve.png", preserve)
+    ownership_path = _write_image(tmp_path / "ownership.png", ownership)
+    interior_path = _write_image(tmp_path / "interior.png", interior)
+    page = Stage1Page(
+        page_id="page",
+        source_image=source_path,
+        target_text_mask=zeros_path,
+        protected_structure_mask=zeros_path,
+        ambiguous_structure_mask=zeros_path,
+        ownership_mask=ownership_path,
+        claim_seed_mask=ownership_path,
+        bubble_interior_mask=interior_path,
+        corner_protect_mask=zeros_path,
+        preserve_mask=preserve_path,
+        regions=(
+            RegionEvaluationSpec(
+                "region",
+                "clean_flat",
+                interior_path,
+                ownership_path,
+                zeros_path,
+                zeros_path,
+                zeros_path,
+            ),
+        ),
+    )
+
+    masks = _annotation_masks(
+        page,
+        {"existing_source_edit_mask": zeros_path},
+        shape,
+        {},
+    )
+    replaced = _with_candidate_ownership(
+        masks,
+        ownership,
+        ownership,
+        interior,
+    )
+
+    assert np.array_equal(masks.preserve, preserve)
+    assert masks.regions[0].region_id == "region"
+    assert np.array_equal(replaced.preserve, preserve)
+    assert replaced.regions == masks.regions
+
+
 def test_instance_seed_recall_is_separate_from_final_edit_coverage() -> None:
     shape = (20, 28)
     first = np.zeros(shape, np.uint8)
@@ -521,6 +612,25 @@ def test_expansion_requires_seed_and_component_contact() -> None:
     assert np.count_nonzero(no_seed) == 0
     assert np.count_nonzero(selected[6:15, 6:15]) == 81
     assert np.count_nonzero(selected[20:28, 28:36]) == 0
+
+
+@pytest.mark.parametrize("radius", [1, 2, 3, 4])
+def test_lab_dilation_expands_only_from_detector_seed(radius: int) -> None:
+    shape = (24, 24)
+    seed = np.zeros(shape, np.uint8)
+    seed[12, 12] = 255
+
+    expanded = expand_detector_claim(
+        f"lab_dilate{radius}",
+        seed=seed,
+        raw=seed,
+        refined=seed,
+        dilated=seed,
+    )
+
+    assert np.count_nonzero(expanded) == (radius * 2 + 1) ** 2
+    assert expanded[12 - radius, 12 - radius] == 255
+    assert expanded[11 - radius, 12] == 0
 
 
 def test_broad_route_requires_every_clean_bubble_condition() -> None:

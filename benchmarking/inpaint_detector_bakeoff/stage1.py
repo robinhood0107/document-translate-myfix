@@ -445,6 +445,16 @@ def expand_detector_claim(
         return binary_mask(refined, shape)
     if expansion in {"native3px", "dilated", "dilate3"}:
         return binary_mask(dilated, shape)
+    if expansion.startswith("lab_dilate") and expansion[10:].isdigit():
+        radius = int(expansion[10:])
+        if radius not in {1, 2, 3, 4}:
+            raise KeyError(f"unsupported lab dilation radius: {radius}")
+        kernel_size = radius * 2 + 1
+        return cv2.dilate(
+            normalized_seed,
+            np.ones((kernel_size, kernel_size), np.uint8),
+            iterations=1,
+        )
     if expansion == "content_component":
         if content_components is None:
             return np.zeros(shape, dtype=np.uint8)
@@ -661,6 +671,31 @@ def _target_instances(masks: PageMasks) -> tuple[tuple[str, np.ndarray], ...]:
         )
         for index in range(1, count)
     )
+
+
+def clean_route_region_mask(masks: PageMasks) -> np.ndarray:
+    """Return source-only clean regions for scoring, never for route decisions."""
+
+    result = np.zeros(masks.target.shape, dtype=np.uint8)
+    for region in masks.regions:
+        if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
+            result[region.ownership > 0] = 255
+    return result
+
+
+def broad_route_false_positive_pixels(
+    broad_edit: np.ndarray,
+    masks: PageMasks,
+) -> int:
+    """Score broad pixels outside clean source-only regions on mixed pages."""
+
+    normalized = binary_mask(broad_edit, masks.target.shape)
+    if not np.any(normalized):
+        return 0
+    if not masks.regions:
+        return 0
+    clean = clean_route_region_mask(masks)
+    return int(np.count_nonzero((normalized > 0) & (clean == 0)))
 
 
 def _instance_scores(

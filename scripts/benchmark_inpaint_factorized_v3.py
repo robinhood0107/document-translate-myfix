@@ -25,6 +25,8 @@ from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
 )
 from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     PageMasks,
+    RegionMasks,
+    broad_route_false_positive_pixels,
     decide_bubble_route,
     expand_detector_claim,
     load_page_masks,
@@ -172,6 +174,8 @@ def _with_candidate_ownership(
         interior,
         masks.corner,
         broad_ownership,
+        masks.preserve,
+        masks.regions,
     )
 
 
@@ -204,6 +208,19 @@ def _annotation_masks(
     )
     interior = _read_mask(page.bubble_interior_mask, shape, cache)
     corner = _read_mask(page.corner_protect_mask, shape, cache)
+    preserve = _read_mask(page.preserve_mask, shape, cache)
+    regions = tuple(
+        RegionMasks(
+            region.region_id,
+            region.bubble_route_class,
+            _read_mask(region.bubble_interior_mask, shape, cache),
+            _read_mask(region.ownership_mask, shape, cache),
+            _read_mask(region.protected_structure_mask, shape, cache),
+            _read_mask(region.ambiguous_structure_mask, shape, cache),
+            _read_mask(region.corner_protect_mask, shape, cache),
+        )
+        for region in page.regions
+    )
     return PageMasks(
         target,
         protected,
@@ -215,6 +232,8 @@ def _annotation_masks(
         interior,
         corner,
         ownership,
+        preserve,
+        regions,
     )
 
 
@@ -462,8 +481,18 @@ def _run_combination(
             **route_masks,
         )
         clean_annotation = page.bubble_route_class in {"clean_flat", "clean_gradient"}
-        broad_route_false = decision.decision == "broad" and not clean_annotation
-        broad_false += int(broad_route_false)
+        broad_only = np.where(
+            (decision.edit_mask > 0) & (detector_seed == 0), 255, 0
+        ).astype(np.uint8)
+        if masks.regions:
+            broad_false_pixels = broad_route_false_positive_pixels(broad_only, masks)
+            broad_route_false = broad_false_pixels > 0
+        else:
+            broad_route_false_pixels = int(np.count_nonzero(broad_only)) if (
+                decision.decision == "broad" and not clean_annotation
+            ) else 0
+            broad_route_false = broad_route_false_pixels > 0
+        broad_false += broad_route_false_pixels
         if decision.decision == "skip" and not page.no_edit:
             required_skips += 1
 
@@ -591,6 +620,7 @@ def _run_combination(
             "route_decision": decision.decision,
             "route_reasons": list(decision.reasons),
             "broad_route_false_positive": broad_route_false,
+            "broad_route_false_positive_pixel_count": broad_route_false_pixels,
             "target_instance_seed_scores": seed_scores,
             "target_instance_edit_scores": edit_scores,
             "edit_pixel_count": int(np.count_nonzero(decision.edit_mask)),
