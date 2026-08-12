@@ -396,6 +396,7 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
             {
                 "schema_version": "inpaint-independent-target-review-ledger-v4",
                 "candidate_seen": False,
+                "review_complete": False,
                 "rows": [
                     {
                         "review_id": "review-0000",
@@ -441,6 +442,115 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
     assert payload["target_extent_independent"] is True
     assert np.count_nonzero(target & protect_mask) == 0
     assert np.count_nonzero(target) < np.count_nonzero(extent_mask)
+
+
+def test_independent_target_review_uses_source_only_manual_row_extent(
+    tmp_path: Path,
+) -> None:
+    shape = (32, 40)
+    source = _write_image(tmp_path / "source.png", np.full((*shape, 3), 230, np.uint8))
+    empty = _write_image(tmp_path / "empty.png", np.zeros(shape, np.uint8))
+    ownership_mask = np.zeros(shape, np.uint8)
+    ownership_mask[3:29, 3:37] = 255
+    ownership = _write_image(tmp_path / "ownership.png", ownership_mask)
+    protect_mask = np.zeros(shape, np.uint8)
+    protect_mask[14:16, 5:35] = 255
+    protect = _write_image(tmp_path / "protect.png", protect_mask)
+    proposal_mask = np.zeros(shape, np.uint8)
+    proposal_mask[8:10, 12:14] = 255
+    proposal = _write_image(tmp_path / "proposal.png", proposal_mask)
+    manual_mask = np.zeros(shape, np.uint8)
+    manual_mask[7:20, 10:24] = 255
+    manual = _write_image(tmp_path / "manual.png", manual_mask)
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "corpus_id": "example",
+                "pages": [
+                    {
+                        "page_id": "p1",
+                        "path": source,
+                        "height": shape[0],
+                        "width": shape[1],
+                        "target_text_mask": None,
+                        "preserve_mask": empty,
+                        "protected_structure_mask": protect,
+                        "ambiguous_structure_mask": empty,
+                        "ownership_mask": ownership,
+                        "expected_edit": "none",
+                        "target_instances": [],
+                        "regions": [
+                            {
+                                "region_id": "r1",
+                                "bubble_route_class": "line_art",
+                                "bubble_interior_mask": empty,
+                                "ownership_mask": ownership,
+                                "protected_structure_mask": protect,
+                                "ambiguous_structure_mask": empty,
+                                "corner_protect_mask": empty,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-ledger-v4",
+                "candidate_seen": False,
+                "review_complete": False,
+                "rows": [
+                    {
+                        "review_id": "review-0000",
+                        "page_id": "p1",
+                        "region_id": "r1",
+                        "semantic_role_proposal": "dialogue_bubble",
+                        "location_seed": proposal,
+                        "extent_variants": {"balanced": proposal},
+                    }
+                ],
+                "full_page_inventory_pending": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    raw_decisions = tmp_path / "raw-decisions.json"
+    raw_decisions.write_text(
+        json.dumps(
+            {
+                "candidate_seen": False,
+                "decisions": [
+                    {
+                        "review_id": "review-0000",
+                        "extent": "manual",
+                        "semantic": "required",
+                        "manual_extent_path": manual,
+                    }
+                ],
+                "full_page_inventory": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "decisions.json"
+    record_independent_target_review(ledger, raw_decisions, decisions)
+
+    payload = apply_independent_target_review(
+        semantic, ledger, decisions, tmp_path / "output"
+    )
+
+    target = cv2.imread(payload["pages"][0]["target_text_mask"], cv2.IMREAD_GRAYSCALE)
+    expected = manual_mask.copy()
+    expected[ownership_mask == 0] = 0
+    expected[protect_mask > 0] = 0
+    assert np.array_equal(target, expected)
+    assert np.count_nonzero(target) > np.count_nonzero(proposal_mask)
 
 
 def test_independent_target_review_applier_replaces_unpaired_page_with_instances(

@@ -16,6 +16,7 @@ EXTENT_CHOICES = frozenset(
         "location_dilate1",
         "location_dilate2",
         "location",
+        "manual",
         "reject",
     }
 )
@@ -77,9 +78,20 @@ def record_independent_target_review(
             raise ValueError(f"non-edit semantic must reject extent: {review_id}")
         if semantic in {"required", "preserve"} and extent == "reject":
             raise ValueError(f"text semantic requires an extent: {review_id}")
-        normalized.append(
-            {"review_id": review_id, "extent": extent, "semantic": semantic}
-        )
+        manual_path = str(row.get("manual_extent_path") or "").strip()
+        if extent == "manual":
+            if not manual_path or not Path(manual_path).is_file():
+                raise ValueError(f"manual review extent missing: {review_id}")
+        elif manual_path:
+            raise ValueError(f"non-manual extent must not provide a mask: {review_id}")
+        normalized_row = {
+            "review_id": review_id,
+            "extent": extent,
+            "semantic": semantic,
+        }
+        if manual_path:
+            normalized_row["manual_extent_path"] = manual_path
+        normalized.append(normalized_row)
     normalized_inventory: list[dict[str, str]] = []
     for row in sorted(inventory, key=lambda value: str(value.get("page_id") or "")):
         page_id = str(row.get("page_id") or "")

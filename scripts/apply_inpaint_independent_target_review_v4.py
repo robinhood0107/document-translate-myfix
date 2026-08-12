@@ -269,7 +269,13 @@ def apply_independent_target_review(
                 if semantic_decision == "not_text":
                     continue
                 extent = str(decision.get("extent") or "")
-                if extent == "location":
+                if extent == "manual":
+                    extent_path = decision.get("manual_extent_path")
+                    if not extent_path:
+                        raise ValueError(
+                            f"manual review extent missing: {row['review_id']}"
+                        )
+                elif extent == "location":
                     extent_path = row.get("location_seed")
                 else:
                     variants = row.get("extent_variants")
