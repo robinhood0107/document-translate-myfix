@@ -84,14 +84,14 @@ def record_independent_target_review(
     for row in sorted(inventory, key=lambda value: str(value.get("page_id") or "")):
         page_id = str(row.get("page_id") or "")
         status = str(row.get("status") or "").strip().lower()
-        if status not in {"complete_no_missing_text", "complete_with_manual_inventory"}:
+        if status not in {"complete_no_required_text", "complete_with_manual_inventory"}:
             raise ValueError(f"invalid full-page inventory status: {page_id}={status}")
         manual_path = str(row.get("manual_inventory_path") or "").strip()
         if status == "complete_with_manual_inventory":
             if not manual_path or not Path(manual_path).is_file():
                 raise ValueError(f"manual inventory artifact missing: {page_id}")
         elif manual_path:
-            raise ValueError(f"no-missing inventory must not provide a mask: {page_id}")
+            raise ValueError(f"no-required-text inventory must not provide a mask: {page_id}")
         normalized_inventory.append(
             {
                 "page_id": page_id,
