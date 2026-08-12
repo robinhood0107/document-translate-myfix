@@ -56,7 +56,16 @@ def source_extent_variants(
         raise ValueError("location seed shape mismatch")
     if not np.any(seed):
         empty = np.zeros(seed.shape, np.uint8)
-        return {key: empty.copy() for key in ("strict", "balanced", "edge_supported")}
+        return {
+            key: empty.copy()
+            for key in (
+                "strict",
+                "balanced",
+                "edge_supported",
+                "location_dilate1",
+                "location_dilate2",
+            )
+        }
 
     prepared = features or build_source_extent_features(source)
     contrast = np.asarray(prepared.contrast)
@@ -83,6 +92,14 @@ def source_extent_variants(
         "balanced": connected_support(np.where(contrast >= 7, 255, 0).astype(np.uint8)),
         "edge_supported": connected_support(
             np.where((contrast >= 4) & (edge_support > 0), 255, 0).astype(np.uint8)
+        ),
+        # Annotation-only extents. They do not inspect any remote source pixel,
+        # so they cannot bridge from a paired location cue into unrelated art.
+        "location_dilate1": cv2.dilate(
+            seed, np.ones((3, 3), np.uint8), iterations=1
+        ),
+        "location_dilate2": cv2.dilate(
+            seed, np.ones((5, 5), np.uint8), iterations=1
         ),
     }
 

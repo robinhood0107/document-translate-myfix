@@ -142,7 +142,7 @@ def _review_sheets(
     rows_per_sheet: int = 8,
 ) -> list[str]:
     cell = (260, 210)
-    columns = ("SOURCE", "LOCATION", "STRICT", "BALANCED", "EDGE")
+    columns = ("SOURCE", "LOCATION", "STRICT", "BALANCED", "EDGE", "DILATE1", "DILATE2")
     paths: list[str] = []
     for sheet_index, start in enumerate(range(0, len(rows), rows_per_sheet), 1):
         group = rows[start : start + rows_per_sheet]
@@ -158,7 +158,13 @@ def _review_sheets(
                 location,
                 *(
                     _read_image(Path(row["extent_variants"][key]), cv2.IMREAD_GRAYSCALE)
-                    for key in ("strict", "balanced", "edge_supported")
+                    for key in (
+                        "strict",
+                        "balanced",
+                        "edge_supported",
+                        "location_dilate1",
+                        "location_dilate2",
+                    )
                 ),
             ]
             images = [source[y1:y2, x1:x2]] + [
