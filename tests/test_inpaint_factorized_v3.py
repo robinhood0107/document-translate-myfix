@@ -71,6 +71,9 @@ from scripts.record_inpaint_source_review_v4 import record_source_review
 from scripts.record_inpaint_independent_target_review_v4 import (
     record_independent_target_review,
 )
+from scripts.apply_inpaint_independent_target_review_v4 import (
+    apply_independent_target_review,
+)
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_fill_oracle_matrix_v3 import build_fill_matrix
@@ -281,7 +284,7 @@ def test_independent_target_review_recorder_requires_every_row_and_page(
                     }
                 ],
                 "full_page_inventory": [
-                    {"page_id": "p2", "status": "complete_no_missing_text"}
+                    {"page_id": "p2", "status": "complete_no_required_text"}
                 ],
             }
         ),
@@ -331,6 +334,110 @@ def test_independent_target_review_recorder_rejects_edit_extent_for_ambiguous(
         record_independent_target_review(
             ledger, decisions, tmp_path / "not-written.json"
         )
+
+
+def test_independent_target_review_applier_seals_only_selected_safe_extent(
+    tmp_path: Path,
+) -> None:
+    shape = (32, 40)
+    source = _write_image(tmp_path / "source.png", np.full((*shape, 3), 230, np.uint8))
+    empty = _write_image(tmp_path / "empty.png", np.zeros(shape, np.uint8))
+    ownership_mask = np.zeros(shape, np.uint8)
+    ownership_mask[4:28, 4:36] = 255
+    ownership = _write_image(tmp_path / "ownership.png", ownership_mask)
+    protect_mask = np.zeros(shape, np.uint8)
+    protect_mask[10:12, 6:34] = 255
+    protect = _write_image(tmp_path / "protect.png", protect_mask)
+    extent_mask = np.zeros(shape, np.uint8)
+    extent_mask[8:16, 12:22] = 255
+    extent = _write_image(tmp_path / "extent.png", extent_mask)
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "corpus_id": "example",
+                "pages": [
+                    {
+                        "page_id": "p1",
+                        "path": source,
+                        "height": shape[0],
+                        "width": shape[1],
+                        "target_text_mask": None,
+                        "preserve_mask": empty,
+                        "protected_structure_mask": protect,
+                        "ambiguous_structure_mask": empty,
+                        "ownership_mask": ownership,
+                        "expected_edit": "none",
+                        "target_instances": [],
+                        "regions": [
+                            {
+                                "region_id": "r1",
+                                "bubble_route_class": "line_art",
+                                "bubble_interior_mask": empty,
+                                "ownership_mask": ownership,
+                                "protected_structure_mask": protect,
+                                "ambiguous_structure_mask": empty,
+                                "corner_protect_mask": empty,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-ledger-v4",
+                "candidate_seen": False,
+                "rows": [
+                    {
+                        "review_id": "review-0000",
+                        "page_id": "p1",
+                        "region_id": "r1",
+                        "semantic_role_proposal": "dialogue_bubble",
+                        "location_seed": extent,
+                        "extent_variants": {"location_dilate1": extent},
+                    }
+                ],
+                "full_page_inventory_pending": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "decisions.json"
+    decisions.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-decisions-v4",
+                "candidate_seen": False,
+                "review_complete": True,
+                "decisions": [
+                    {
+                        "review_id": "review-0000",
+                        "extent": "location_dilate1",
+                        "semantic": "required",
+                    }
+                ],
+                "full_page_inventory": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = apply_independent_target_review(
+        semantic, ledger, decisions, tmp_path / "output"
+    )
+
+    page = payload["pages"][0]
+    target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
+    assert payload["target_inventory_independent"] is True
+    assert payload["target_extent_independent"] is True
+    assert np.count_nonzero(target & protect_mask) == 0
+    assert np.count_nonzero(target) < np.count_nonzero(extent_mask)
 
 
 def test_binary_mask_does_not_allocate_int64_where_temporary(monkeypatch) -> None:
