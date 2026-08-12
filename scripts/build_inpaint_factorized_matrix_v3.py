@@ -97,6 +97,7 @@ def _manifest_control_families(
     detector_pages: dict[str, dict[str, Any]] = {}
     annotation_target_pages: dict[str, dict[str, Any]] = {}
     ownership_pages: dict[str, dict[str, Any]] = {}
+    dual_ownership_pages: dict[str, dict[str, Any]] = {}
     silhouette_pages: dict[str, dict[str, Any]] = {}
     annotation_silhouette_pages: dict[str, dict[str, Any]] = {}
     for page in pages:
@@ -125,6 +126,11 @@ def _manifest_control_families(
             "broad_mask": page.ownership_mask,
             "content_components": page.claim_seed_mask or page.ownership_mask,
         }
+        dual_ownership_pages[page.page_id] = {
+            "mask": page.ownership_mask,
+            "broad_mask": page.bubble_interior_mask,
+            "content_components": page.claim_seed_mask or page.ownership_mask,
+        }
         silhouette_pages[page.page_id] = {"interior": None}
         annotation_silhouette_pages[page.page_id] = {
             "interior": page.bubble_interior_mask
@@ -146,6 +152,10 @@ def _manifest_control_families(
             "control_text_prior": {
                 "provider": "manifest_v3",
                 "pages": ownership_pages,
+            },
+            "control_dual_ownership": {
+                "provider": "manifest_v4_text_prior_plus_validated_interior",
+                "pages": dual_ownership_pages,
             }
         },
         "silhouette": {
