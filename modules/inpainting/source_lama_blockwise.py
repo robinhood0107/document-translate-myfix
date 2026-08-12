@@ -960,6 +960,7 @@ def _apply_detector_positive_text_evidence(
         image_shape=original_image.shape,
         existing_edit_mask=combined_mask,
         protected_corner_mask=protected_corner_mask,
+        source_image=original_image,
     )
     evidence_by_index = {
         item.block_index: item
@@ -993,20 +994,71 @@ def _apply_detector_positive_text_evidence(
             block_index,
             (),
         )
+        item.route_decision = positive.block_route_decisions.get(
+            block_index,
+            "narrow",
+        )
+        item.route_reasons = positive.block_route_reasons.get(block_index, ())
 
     if not np.any(positive.positive_edit):
         return current_image, combined_mask, evidence
     if not positive_backend_supported:
         return current_image, combined_mask, evidence
 
-    generated, positive_diagnostics = _run_lama_or_fallback(
-        original_image,
-        positive.positive_edit,
-        [],
-        inpainter,
-        config,
-        check_need_inpaint=False,
-    )
+    broad_applied = np.zeros(original_image.shape[:2], dtype=np.uint8)
+    for block_index, broad_patch in positive.block_broad_edit_patches.items():
+        item = evidence_by_index.get(block_index)
+        interior_patch = positive.block_bubble_interior_patches.get(block_index)
+        if item is None or interior_patch is None:
+            continue
+        bx1, by1, bx2, by2 = broad_patch.xyxy
+        ix1, iy1, ix2, iy2 = interior_patch.xyxy
+        broad_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+        interior_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+        broad_mask[by1:by2, bx1:bx2] = broad_patch.mask
+        interior_mask[iy1:iy2, ix1:ix2] = interior_patch.mask
+        sample_mask = (interior_mask > 0) & (broad_mask <= 0)
+        samples = np.asarray(original_image)[sample_mask, :3]
+        if samples.shape[0] < 32:
+            item.route_decision = "narrow"
+            item.route_reasons = tuple(
+                dict.fromkeys((*item.route_reasons, "insufficient_roi_background_samples"))
+            )
+            continue
+        fill_color = np.clip(
+            np.rint(np.median(samples.astype(np.float32), axis=0)),
+            0,
+            255,
+        ).astype(np.uint8)
+        generated_broad = np.asarray(original_image).copy()
+        generated_broad[broad_mask > 0, :3] = fill_color
+        current_image = composite_with_edit_mask(
+            current_image,
+            generated_broad,
+            broad_mask,
+        )
+        broad_applied[broad_mask > 0] = 255
+
+    narrow_edit = np.where(
+        (positive.narrow_edit > 0) & (broad_applied <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    positive_diagnostics: list[dict] = []
+    if np.any(narrow_edit):
+        generated, positive_diagnostics = _run_lama_or_fallback(
+            original_image,
+            narrow_edit,
+            [],
+            inpainter,
+            config,
+            check_need_inpaint=False,
+        )
+        current_image = composite_with_edit_mask(
+            current_image,
+            generated,
+            narrow_edit,
+        )
     positive_indices = sorted(positive.block_edit_patches)
     for diagnostic in positive_diagnostics:
         diagnostic["phase"] = "positive_evidence"
@@ -1019,13 +1071,32 @@ def _apply_detector_positive_text_evidence(
             np.count_nonzero(positive.positive_edit)
         )
     diagnostics.extend(positive_diagnostics)
-    current_image = composite_with_edit_mask(
-        current_image,
-        generated,
-        positive.positive_edit,
-    )
+    if np.any(broad_applied):
+        diagnostics.append(
+            {
+                "phase": "positive_evidence",
+                "is_inference": False,
+                "status": "completed",
+                "backend": "robust_flat_median",
+                "positive_text_evidence": True,
+                "positive_block_indices": sorted(
+                    positive.block_broad_edit_patches
+                ),
+                "positive_claim_pixel_count": int(
+                    np.count_nonzero(positive.positive_claim)
+                ),
+                "positive_edit_pixel_count": int(
+                    np.count_nonzero(broad_applied)
+                ),
+            }
+        )
+    applied_positive = np.where(
+        (narrow_edit > 0) | (broad_applied > 0),
+        255,
+        0,
+    ).astype(np.uint8)
     combined_mask = np.where(
-        (combined_mask > 0) | (positive.positive_edit > 0),
+        (combined_mask > 0) | (applied_positive > 0),
         255,
         0,
     ).astype(np.uint8)
