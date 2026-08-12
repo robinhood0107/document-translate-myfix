@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
@@ -8,8 +9,15 @@ import numpy as np
 import pytest
 
 import benchmarking.inpaint_detector_bakeoff.ballons_e2e as ballons_e2e
+from modules.masking.ctd_refiner import CTDRefinerSettings
 from benchmarking.inpaint_detector_bakeoff.ballons_e2e import (
     BallonsEndToEndReference,
+)
+from benchmarking.inpaint_detector_bakeoff.ballons_ctd import (
+    BallonsCTDFullPageReference,
+)
+from scripts.benchmark_inpaint_detector_bakeoff import (
+    _source_and_ownership_sha256,
 )
 
 from benchmarking.inpaint_detector_bakeoff.ballons_ctbd import (
@@ -177,6 +185,103 @@ def test_ballons_ctbd_preprocess_golden_is_bgr_to_rgb_resize() -> None:
     assert _tensor_sha256(tensor, original_size) == (
         "74ffd39889da3109108eab1d290965f9fb5365bc0586aa98f83946d8098c1926"
     )
+
+
+def test_ctd_ownership_roi_recovers_small_claim_without_bbox_fill() -> None:
+    reference = BallonsCTDFullPageReference.__new__(BallonsCTDFullPageReference)
+    reference.dilate_size = 3
+    reference.settings = SimpleNamespace(device="cpu", detect_size=1280)
+    calls: list[tuple[int, int]] = []
+
+    class FakeRefiner:
+        backend = "test"
+
+        @staticmethod
+        def _infer_raw_mask(image: np.ndarray) -> np.ndarray:
+            calls.append(image.shape[:2])
+            mask = np.zeros(image.shape[:2], dtype=np.uint8)
+            if image.shape[0] < 80:
+                mask[12:16, 12:18] = 255
+            return mask
+
+    reference.refiner = FakeRefiner()
+    image = np.full((120, 160, 3), 240, dtype=np.uint8)
+    ownership = np.zeros((120, 160), dtype=np.uint8)
+    ownership[50:70, 60:90] = 255
+
+    result = reference.infer_with_ownership_rois(image, ownership)
+
+    assert calls[0] == (120, 160)
+    assert len(calls) == 2
+    assert np.count_nonzero(result.raw_mask) > 0
+    assert np.count_nonzero(result.raw_mask[ownership == 0]) == 0
+    assert np.count_nonzero(result.dilated_mask[ownership == 0]) == 0
+    assert np.count_nonzero(result.raw_mask) < np.count_nonzero(ownership)
+
+
+def test_ctd_ownership_roi_skips_inference_without_authoritative_ownership() -> None:
+    reference = BallonsCTDFullPageReference.__new__(BallonsCTDFullPageReference)
+    reference.dilate_size = 3
+    reference.settings = SimpleNamespace(device="cpu", detect_size=1280)
+
+    class FailOnInference:
+        backend = "test"
+
+        @staticmethod
+        def _infer_raw_mask(_image: np.ndarray) -> np.ndarray:
+            raise AssertionError("empty ownership must not run CTD")
+
+    reference.refiner = FailOnInference()
+    image = np.full((120, 160, 3), 240, dtype=np.uint8)
+
+    result = reference.infer_with_ownership_rois(
+        image,
+        np.zeros((120, 160), dtype=np.uint8),
+    )
+
+    assert np.count_nonzero(result.raw_mask) == 0
+    assert result.runtime["full_page_inference_call_count"] == 0
+    assert result.runtime["roi_inference_call_count"] == 0
+
+
+def test_ctd_ownership_roi_cache_input_changes_with_sparse_evidence(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    ownership_root = tmp_path / "ownership"
+    ownership_root.mkdir()
+    ownership = ownership_root / "page-1_ownership.png"
+    assert cv2.imwrite(str(source), np.full((16, 20, 3), 150, np.uint8))
+    first = np.zeros((16, 20), np.uint8)
+    first[4:8, 5:9] = 255
+    assert cv2.imwrite(str(ownership), first)
+    args = SimpleNamespace(ownership_root=ownership_root)
+    page = SimpleNamespace(page_id="page-1", source_image=str(source))
+
+    first_sha = _source_and_ownership_sha256(args, page)
+    second = first.copy()
+    second[10:12, 12:15] = 255
+    assert cv2.imwrite(str(ownership), second)
+    second_sha = _source_and_ownership_sha256(args, page)
+
+    assert first_sha != second_sha
+
+
+def test_ctd_reference_pins_the_recorded_model_asset(tmp_path: Path) -> None:
+    model = tmp_path / "candidate.pt"
+    model.write_bytes(b"test-model")
+
+    reference = BallonsCTDFullPageReference(
+        CTDRefinerSettings(
+            detect_size=1280,
+            det_rearrange_max_batches=4,
+            device="cpu",
+            mask_dilate_size=0,
+        ),
+        model_path=model,
+    )
+
+    assert Path(reference.refiner._choose_model_path()) == model.resolve()
 
 
 def test_ballons_ctbd_output_filter_keeps_only_supported_confident_classes() -> None:

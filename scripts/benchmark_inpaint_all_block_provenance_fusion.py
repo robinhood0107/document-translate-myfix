@@ -19,6 +19,9 @@ from benchmarking.inpaint_detector_bakeoff.ballons_ctbd import (  # noqa: E402
     BallonsCTBDReference,
     CTBDSettings,
 )
+from benchmarking.inpaint_detector_bakeoff.ballons_ctd import (  # noqa: E402
+    BallonsCTDFullPageReference,
+)
 from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
     CandidateMaskResult,
     binary_mask,
@@ -26,6 +29,7 @@ from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
 from benchmarking.inpaint_detector_bakeoff.fixed_ctd_onnx import (  # noqa: E402
     FixedSizeCTDONNXReference,
 )
+from modules.masking.ctd_refiner import CTDRefinerSettings  # noqa: E402
 from benchmarking.inpaint_detector_bakeoff.provenance_fusion import (  # noqa: E402
     build_provenance_fusion,
     reconcile_source_edit,
@@ -78,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ctd-model", type=Path, required=True)
     parser.add_argument("--rtdetr-model", type=Path, required=True)
     parser.add_argument("--ctd-provider", default="CUDAExecutionProvider")
+    parser.add_argument(
+        "--ctd-runtime",
+        choices=("onnxruntime", "torch-full-plus-required-roi"),
+        default="onnxruntime",
+    )
+    parser.add_argument("--ctd-device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument("--rtdetr-provider", default="CPUExecutionProvider")
     parser.add_argument("--detect-size", type=int, default=1280)
     parser.add_argument("--output-dir", type=Path)
@@ -98,14 +108,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_root.mkdir(parents=True, exist_ok=True)
     try:
-        ctd_providers = [args.ctd_provider]
-        if args.ctd_provider != "CPUExecutionProvider":
-            ctd_providers.append("CPUExecutionProvider")
-        ctd = FixedSizeCTDONNXReference(
-            ctd_model,
-            providers=ctd_providers,
-            detect_size=int(args.detect_size),
-        )
+        if args.ctd_runtime == "torch-full-plus-required-roi":
+            ctd = BallonsCTDFullPageReference(
+                CTDRefinerSettings(
+                    detect_size=int(args.detect_size),
+                    det_rearrange_max_batches=4,
+                    device=args.ctd_device,
+                    mask_dilate_size=0,
+                ),
+                dilate_size=3,
+                model_path=ctd_model,
+            )
+        else:
+            ctd_providers = [args.ctd_provider]
+            if args.ctd_provider != "CPUExecutionProvider":
+                ctd_providers.append("CPUExecutionProvider")
+            ctd = FixedSizeCTDONNXReference(
+                ctd_model,
+                providers=ctd_providers,
+                detect_size=int(args.detect_size),
+            )
         rtdetr_providers = [args.rtdetr_provider]
         if args.rtdetr_provider != "CPUExecutionProvider":
             rtdetr_providers.append("CPUExecutionProvider")
@@ -146,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
                 content_root / f"{page.page_id}_ownership.png",
                 shape,
             )
-            ctd_result = ctd.infer(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            ctd_result = (
+                ctd.infer_with_ownership_rois(image_rgb, prior)
+                if args.ctd_runtime == "torch-full-plus-required-roi"
+                else ctd.infer(image_rgb)
+            )
             rtdetr_result = rtdetr.infer(image)
             fusion = build_provenance_fusion(
                 ctd_result.raw_mask,
@@ -286,7 +313,12 @@ def main(argv: list[str] | None = None) -> int:
             "models": {
                 "ctd": {
                     "sha256": _sha256(ctd_model),
-                    "providers": list(ctd.providers),
+                    "runtime": args.ctd_runtime,
+                    "providers": (
+                        list(ctd.providers)
+                        if args.ctd_runtime == "onnxruntime"
+                        else [args.ctd_device]
+                    ),
                 },
                 "rtdetr": {
                     "sha256": _sha256(rtdetr_model),

@@ -22,6 +22,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     load_page_masks,
     load_stage1_manifest,
     read_detector_cache,
+    run_stage1,
     score_page,
     write_detector_cache,
 )
@@ -223,6 +224,29 @@ def test_role_candidate_cache_roundtrip_and_provenance_mismatch(tmp_path: Path) 
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
     with pytest.raises(ValueError, match="provenance mismatch"):
         read_detector_cache(tmp_path, spec, source_sha)
+
+
+def test_cached_page_inference_requires_composite_input_sha(tmp_path: Path) -> None:
+    spec = RoleCandidateSpec(
+        candidate_id="ctd-ownership-roi",
+        provider="ballons-ctd",
+        role="seed",
+        variant="raw",
+        code_commit="abc123",
+        model_sha256="11" * 32,
+        runtime_provider="cuda",
+        preprocessing_contract_sha256="22" * 32,
+    )
+
+    with pytest.raises(ValueError, match="composite cache input SHA"):
+        run_stage1(
+            (),
+            lambda _image: None,
+            variant="raw",
+            candidate_spec=spec,
+            cache_root=tmp_path,
+            page_infer=lambda _page, _image: None,
+        )
 
 
 def test_expansion_requires_seed_and_component_contact() -> None:
