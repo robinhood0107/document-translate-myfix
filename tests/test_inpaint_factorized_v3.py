@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -27,6 +28,8 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     write_detector_cache,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (
+    assert_complete_closure_ledger,
+    build_combination_closure_ledger,
     build_factorized_matrix,
     fill_factorized_mask,
     reconstruction_error,
@@ -38,11 +41,13 @@ from benchmarking.inpaint_detector_bakeoff.silhouette import (
     extract_pr2_validated_interior,
 )
 from scripts.benchmark_inpaint_factorized_v3 import (
+    _prepare_closure_ledger,
     _declared_combinations,
     _route_fill_backend,
     main as factorized_main,
 )
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
+from scripts.build_inpaint_factorized_manifest_v4 import build_manifest as build_manifest_v4
 from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
@@ -150,6 +155,244 @@ def test_manifest_v3_rejects_target_instance_union_mismatch(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="union of target_instances"):
         load_page_masks(page, shape)
+
+
+def test_manifest_v4_loads_region_semantics_and_proposal_only_reference(
+    tmp_path: Path,
+) -> None:
+    shape = (24, 32)
+    source = np.full((*shape, 3), 180, np.uint8)
+    required = np.zeros(shape, np.uint8)
+    required[6:10, 6:10] = 255
+    optional = np.zeros(shape, np.uint8)
+    optional[14:18, 20:24] = 255
+    ambiguous = np.zeros(shape, np.uint8)
+    ambiguous[2:4, 24:28] = 255
+    zeros = np.zeros(shape, np.uint8)
+    full = np.full(shape, 255, np.uint8)
+    paths = {
+        "source": _write_image(tmp_path / "source.png", source),
+        "required": _write_image(tmp_path / "required.png", required),
+        "optional": _write_image(tmp_path / "optional.png", optional),
+        "ambiguous": _write_image(tmp_path / "ambiguous.png", ambiguous),
+        "zeros": _write_image(tmp_path / "zeros.png", zeros),
+        "full": _write_image(tmp_path / "full.png", full),
+    }
+    source_sha = hashlib.sha256(Path(paths["source"]).read_bytes()).hexdigest()
+    reference_path = tmp_path / "reference.png"
+    reference_path.write_bytes(Path(paths["source"]).read_bytes())
+    manifest = {
+        "schema_version": "inpaint-detector-bakeoff-manifest-v4",
+        "pages": [
+            {
+                "page_id": "p1",
+                "path": paths["source"],
+                "target_text_mask": paths["required"],
+                "preserve_mask": paths["optional"],
+                "target_instances": [
+                    {
+                        "instance_id": "dialogue",
+                        "region_id": "bubble",
+                        "mask_path": paths["required"],
+                        "semantic_role": "dialogue_bubble",
+                        "processing_action": "translate_inpaint",
+                        "priority": "required",
+                    },
+                    {
+                        "instance_id": "sfx",
+                        "region_id": "bubble",
+                        "mask_path": paths["optional"],
+                        "semantic_role": "sfx",
+                        "processing_action": "preserve",
+                        "priority": "optional",
+                    },
+                    {
+                        "instance_id": "review",
+                        "region_id": "bubble",
+                        "mask_path": paths["ambiguous"],
+                        "semantic_role": "ambiguous",
+                        "processing_action": "review",
+                        "priority": "ambiguous",
+                    },
+                ],
+                "regions": [
+                    {
+                        "region_id": "bubble",
+                        "bubble_route_class": "clean_flat",
+                        "bubble_interior_mask": paths["full"],
+                        "ownership_mask": paths["full"],
+                        "protected_structure_mask": paths["zeros"],
+                        "ambiguous_structure_mask": paths["ambiguous"],
+                        "corner_protect_mask": paths["zeros"],
+                    }
+                ],
+                "protected_structure_mask": paths["zeros"],
+                "ambiguous_structure_mask": paths["ambiguous"],
+                "ownership_mask": paths["full"],
+                "bubble_interior_mask": paths["full"],
+                "corner_protect_mask": paths["zeros"],
+                "expected_edit": "required",
+                "paired_reference": {
+                    "path": str(reference_path),
+                    "source_sha256": source_sha,
+                    "reference_sha256": source_sha,
+                    "proposal_only": True,
+                },
+            }
+        ],
+    }
+    path = tmp_path / "manifest-v4.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    page = load_stage1_manifest(path)[0]
+    masks = load_page_masks(page, shape)
+
+    assert [instance.priority for instance in page.target_instances] == [
+        "required",
+        "optional",
+        "ambiguous",
+    ]
+    assert page.paired_reference is not None
+    assert page.paired_reference.proposal_only is True
+    assert len(masks.regions) == 1
+    assert np.array_equal(masks.target, required)
+    assert np.array_equal(masks.preserve, optional)
+
+    claim = cv2.bitwise_or(required, optional)
+    result = CandidateMaskResult("mixed", claim, claim, claim)
+    row, edit = score_page(page, result, masks, variant="raw")
+
+    assert np.count_nonzero(edit & optional) == 0
+    assert row["preserve_edit_overlap"] == 0
+    assert np.count_nonzero(edit & required) == np.count_nonzero(required)
+
+
+def test_manifest_v4_rejects_optional_text_as_edit_target(tmp_path: Path) -> None:
+    shape = (12, 16)
+    mask = np.zeros(shape, np.uint8)
+    mask[4:8, 4:8] = 255
+    full = np.full(shape, 255, np.uint8)
+    source = np.full((*shape, 3), 180, np.uint8)
+    paths = {
+        "source": _write_image(tmp_path / "source.png", source),
+        "mask": _write_image(tmp_path / "mask.png", mask),
+        "full": _write_image(tmp_path / "full.png", full),
+        "zero": _write_image(tmp_path / "zero.png", np.zeros(shape, np.uint8)),
+    }
+    payload = {
+        "schema_version": "inpaint-detector-bakeoff-manifest-v4",
+        "pages": [{
+            "page_id": "p",
+            "path": paths["source"],
+            "target_text_mask": None,
+            "preserve_mask": paths["mask"],
+            "target_instances": [{
+                "instance_id": "sfx",
+                "region_id": "r",
+                "mask_path": paths["mask"],
+                "semantic_role": "sfx",
+                "processing_action": "translate_inpaint",
+                "priority": "optional",
+            }],
+            "regions": [{
+                "region_id": "r",
+                "bubble_route_class": "ambiguous",
+                "bubble_interior_mask": paths["full"],
+                "ownership_mask": paths["full"],
+                "protected_structure_mask": paths["zero"],
+                "ambiguous_structure_mask": paths["zero"],
+                "corner_protect_mask": paths["zero"],
+            }],
+            "expected_edit": "none",
+        }],
+    }
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="optional target instance must use preserve"):
+        load_stage1_manifest(path)
+
+
+def test_manifest_v4_builder_rejects_candidate_seen_decisions(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    assert cv2.imwrite(str(source), np.full((8, 8, 3), 180, np.uint8))
+    source_manifest = tmp_path / "source.json"
+    source_manifest.write_text(
+        json.dumps({"pages": [{"page_id": "p", "path": str(source)}]}),
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "decisions.json"
+    decisions.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-decisions-v4",
+                "candidate_seen": True,
+                "pages": [{"page_id": "p"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="before viewing candidates"):
+        build_manifest_v4(source_manifest, decisions)
+
+
+def test_manifest_v4_builder_rejects_non_proposal_paired_reference(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    reference = tmp_path / "reference.png"
+    assert cv2.imwrite(str(source), np.full((8, 8, 3), 180, np.uint8))
+    assert cv2.imwrite(str(reference), np.full((8, 8, 3), 200, np.uint8))
+    zero = tmp_path / "zero.png"
+    full = tmp_path / "full.png"
+    assert cv2.imwrite(str(zero), np.zeros((8, 8), np.uint8))
+    assert cv2.imwrite(str(full), np.full((8, 8), 255, np.uint8))
+    source_manifest = tmp_path / "source.json"
+    source_manifest.write_text(
+        json.dumps({"pages": [{"page_id": "p", "path": str(source)}]}),
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "decisions.json"
+    decisions.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-decisions-v4",
+                "candidate_seen": False,
+                "pages": [{
+                    "page_id": "p",
+                    "target_text_mask": None,
+                    "preserve_mask": str(zero),
+                    "target_instances": [],
+                    "regions": [{
+                        "region_id": "r",
+                        "bubble_route_class": "ambiguous",
+                        "bubble_interior_mask": str(full),
+                        "ownership_mask": str(full),
+                        "protected_structure_mask": str(zero),
+                        "ambiguous_structure_mask": str(zero),
+                        "corner_protect_mask": str(zero),
+                    }],
+                    "protected_structure_mask": str(zero),
+                    "ambiguous_structure_mask": str(zero),
+                    "ownership_mask": str(full),
+                    "bubble_interior_mask": str(full),
+                    "corner_protect_mask": str(zero),
+                    "expected_edit": "none",
+                    "paired_reference": {
+                        "path": str(reference),
+                        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                        "reference_sha256": hashlib.sha256(reference.read_bytes()).hexdigest(),
+                        "proposal_only": False,
+                    },
+                }],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="proposal_only"):
+        build_manifest_v4(source_manifest, decisions)
 
 
 def test_instance_seed_recall_is_separate_from_final_edit_coverage() -> None:
@@ -516,7 +759,7 @@ def test_oracle_background_reconstruction_scores_fill_independently() -> None:
     assert reconstruction_error(candidate, truth, edit) == 0.0
 
 
-def test_matrix_has_control_single_and_pairwise_but_no_triple_product() -> None:
+def test_matrix_generates_every_logical_cartesian_combination() -> None:
     axes = {
         "detector": ("d0", "d1", "d2"),
         "router": ("r0", "r1"),
@@ -526,12 +769,115 @@ def test_matrix_has_control_single_and_pairwise_but_no_triple_product() -> None:
 
     records = build_factorized_matrix(axes, controls)
 
-    assert len(records) == 10
+    assert len(records) == 12
     assert controls in records
-    assert not any(
+    assert any(
         row["detector"] != "d0" and row["router"] != "r0" and row["fill"] != "f0"
         for row in records
     )
+
+
+def test_closure_ledger_accounts_for_executed_invalid_and_blocked() -> None:
+    selections = [
+        {
+            "detector": "full",
+            "ownership": "o",
+            "silhouette": "s",
+            "router": "R1",
+            "expansion": "raw",
+            "fill": "mask_only",
+        },
+        {
+            "detector": "full",
+            "ownership": "o",
+            "silhouette": "s",
+            "router": "R0",
+            "expansion": "bubble_interior",
+            "fill": "mask_only",
+        },
+        {
+            "detector": "blocked",
+            "ownership": "o",
+            "silhouette": "s",
+            "router": "R1",
+            "expansion": "raw",
+            "fill": "mask_only",
+        },
+    ]
+    ledger = build_combination_closure_ledger(
+        selections,
+        stage="stage1",
+        family_metadata={
+            "detector": {
+                "blocked": {"asset_status": "blocked"},
+            }
+        },
+    )
+
+    assert_complete_closure_ledger(selections, ledger)
+    assert [record.closure_state for record in ledger] == [
+        "executed",
+        "invalid_with_reason",
+        "blocked_asset",
+    ]
+    assert ledger[1].reason == "broad_expansion_requires_broad_router"
+    assert ledger[2].reason == "provider_asset_or_parity_missing"
+
+
+def test_closure_ledger_rejects_unaccounted_combination() -> None:
+    selections = [
+        {"detector": "d0", "router": "R0"},
+        {"detector": "d1", "router": "R0"},
+    ]
+    ledger = build_combination_closure_ledger(
+        selections[:1],
+        stage="stage1",
+    )
+
+    with pytest.raises(ValueError, match="closure ledger mismatch"):
+        assert_complete_closure_ledger(selections, ledger)
+
+
+def test_physical_matrix_reuses_content_identical_logical_families(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "mask.png"
+    artifact.write_bytes(b"same-artifact")
+    combinations = [
+        {
+            "detector": detector,
+            "ownership": "o",
+            "silhouette": "s",
+            "router": "R0",
+            "expansion": "raw",
+            "fill": "mask_only",
+        }
+        for detector in ("d0", "d1")
+    ]
+    detector = {
+        "seed_variant": "raw",
+        "pages": {"p": {"raw": str(artifact), "refined": str(artifact), "dilated": str(artifact)}},
+    }
+    matrix = {
+        "families": {
+            "detector": {"d0": detector, "d1": detector},
+            "ownership": {"o": {"pages": {"p": {"mask": str(artifact)}}}},
+            "silhouette": {"s": {"pages": {"p": {"interior": str(artifact)}}}},
+            "router": {"R0": {"algorithm": "R0", "pages": {"p": {}}}},
+        },
+        "oracle_only": [],
+    }
+
+    ledger, physical = _prepare_closure_ledger(
+        combinations,
+        matrix=matrix,
+        manifest_sha256="11" * 32,
+    )
+
+    assert len(physical) == 1
+    assert [row.closure_state for row in ledger] == ["executed", "reused_by_sha"]
+    assert ledger[1].reused_from == ledger[0].logical_id
+    assert ledger[1].content_sha256 == ledger[0].content_sha256
 
 
 def test_explicit_matrix_can_add_one_compatible_multi_role_run() -> None:

@@ -3,8 +3,11 @@
 from .contracts import (
     BubbleRouteDecision,
     CandidateMaskResult,
+    CombinationClosureRecord,
     DetectorBox,
     FactorizedRunRecord,
+    ProposalOnlyReference,
+    RegionEvaluationSpec,
     RoleCandidateSpec,
     Stage1Page,
     TargetInstance,
@@ -13,8 +16,11 @@ from .contracts import (
 __all__ = [
     "BubbleRouteDecision",
     "CandidateMaskResult",
+    "CombinationClosureRecord",
     "DetectorBox",
     "FactorizedRunRecord",
+    "ProposalOnlyReference",
+    "RegionEvaluationSpec",
     "RoleCandidateSpec",
     "Stage1Page",
     "TargetInstance",

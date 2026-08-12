@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from itertools import combinations
+from itertools import product
 from typing import Callable, Iterable, Mapping, Sequence
 
 import cv2
 import numpy as np
 
-from .contracts import FactorizedRunRecord, binary_mask
+from .contracts import CombinationClosureRecord, FactorizedRunRecord, binary_mask
 from .stage1 import PageMasks
 
 
@@ -197,7 +197,7 @@ def build_factorized_matrix(
     axes: Mapping[str, Sequence[str]],
     controls: Mapping[str, str],
 ) -> list[dict[str, str]]:
-    """Return control, all single-factor, and compatible pairwise combinations."""
+    """Return every logical Cartesian selection in deterministic role order."""
 
     ordered_axes = tuple(controls)
     if set(axes) != set(ordered_axes):
@@ -205,32 +205,116 @@ def build_factorized_matrix(
     for role in ordered_axes:
         if controls[role] not in axes[role]:
             raise ValueError(f"control is missing from matrix axis: {role}")
-    records: list[dict[str, str]] = [dict(controls)]
-    seen = {tuple((role, controls[role]) for role in ordered_axes)}
-
-    def add(values: dict[str, str]) -> None:
-        key = tuple((role, values[role]) for role in ordered_axes)
-        if key not in seen:
-            seen.add(key)
-            records.append(values)
-
-    alternatives = {
-        role: [value for value in axes[role] if value != controls[role]]
-        for role in ordered_axes
-    }
+    values = []
     for role in ordered_axes:
-        for value in alternatives[role]:
-            candidate = dict(controls)
-            candidate[role] = value
-            add(candidate)
-    for left_role, right_role in combinations(ordered_axes, 2):
-        for left_value in alternatives[left_role]:
-            for right_value in alternatives[right_role]:
-                candidate = dict(controls)
-                candidate[left_role] = left_value
-                candidate[right_role] = right_value
-                add(candidate)
+        choices = tuple(dict.fromkeys(str(value) for value in axes[role]))
+        if not choices:
+            raise ValueError(f"matrix axis is empty: {role}")
+        values.append(choices)
+    return [dict(zip(ordered_axes, selection)) for selection in product(*values)]
+
+
+INVALID_COMBINATION_REASONS = frozenset(
+    {
+        "broad_expansion_requires_broad_router",
+        "bubble_fill_requires_silhouette",
+        "roi_trigger_requires_roi_detector",
+        "runtime_detector_limit_exceeded",
+        "oracle_product_candidate",
+        "stage1_fill_backend_forbidden",
+        "broad_expansion_requires_source_seed",
+        "provider_asset_or_parity_missing",
+    }
+)
+
+
+def validate_factorized_selection(
+    selection: Mapping[str, str],
+    *,
+    stage: str,
+    family_metadata: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    oracle_only_ids: Iterable[str] = (),
+) -> tuple[str | None, str]:
+    """Return a stable exclusion reason and closure class for one logical run."""
+
+    expansion = str(selection.get("expansion") or "").lower()
+    router = str(selection.get("router") or "").upper()
+    silhouette = str(selection.get("silhouette") or "").lower()
+    fill = str(selection.get("fill") or "").lower()
+    detector = str(selection.get("detector") or "").lower()
+    if expansion in {"bubble_interior", "validated_interior"} and router in {
+        "R0",
+        "CONTROL_R0",
+    }:
+        return "broad_expansion_requires_broad_router", "invalid_with_reason"
+    if fill in {"robust_flat_median", "planar_gradient", "telea", "conditional_hybrid"} and (
+        not silhouette or "empty" in silhouette
+    ):
+        return "bubble_fill_requires_silhouette", "invalid_with_reason"
+    if "roi_trigger" in selection and selection["roi_trigger"] != "none" and "roi" not in detector:
+        return "roi_trigger_requires_roi_detector", "invalid_with_reason"
+    detector_count = int(selection.get("runtime_detector_count", "1") or "1")
+    if detector_count > 2:
+        return "runtime_detector_limit_exceeded", "invalid_with_reason"
+    oracle = set(oracle_only_ids)
+    if stage == "product" and any(value in oracle for value in selection.values()):
+        return "oracle_product_candidate", "invalid_with_reason"
+    if stage == "stage1" and fill != "mask_only":
+        return "stage1_fill_backend_forbidden", "invalid_with_reason"
+    if family_metadata:
+        for role, value in selection.items():
+            metadata = family_metadata.get(role, {}).get(value, {})
+            if metadata.get("asset_status") in {"missing", "blocked"} or metadata.get(
+                "parity_status"
+            ) in {"missing", "failed"}:
+                return "provider_asset_or_parity_missing", "blocked_asset"
+    return None, "executed"
+
+
+def build_combination_closure_ledger(
+    selections: Iterable[Mapping[str, str]],
+    *,
+    stage: str,
+    family_metadata: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    oracle_only_ids: Iterable[str] = (),
+) -> list[CombinationClosureRecord]:
+    records: list[CombinationClosureRecord] = []
+    for selection in selections:
+        normalized = {str(role): str(value) for role, value in selection.items()}
+        logical_id = "__".join(normalized[role] for role in normalized)
+        reason, state = validate_factorized_selection(
+            normalized,
+            stage=stage,
+            family_metadata=family_metadata,
+            oracle_only_ids=oracle_only_ids,
+        )
+        records.append(
+            CombinationClosureRecord(
+                logical_id=logical_id,
+                selection=normalized,
+                closure_state=state,
+                reason=reason or "",
+            )
+        )
     return records
+
+
+def assert_complete_closure_ledger(
+    logical_selections: Iterable[Mapping[str, str]],
+    ledger: Iterable[CombinationClosureRecord],
+) -> None:
+    expected = {
+        "__".join(str(selection[role]) for role in selection)
+        for selection in logical_selections
+    }
+    rows = list(ledger)
+    actual = {row.logical_id for row in rows}
+    if len(actual) != len(rows):
+        raise ValueError("combination closure ledger contains duplicate logical ids")
+    missing = sorted(expected.difference(actual))
+    extra = sorted(actual.difference(expected))
+    if missing or extra:
+        raise ValueError(f"combination closure ledger mismatch: missing={missing}, extra={extra}")
 
 
 def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
@@ -243,6 +327,7 @@ def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
         "broad_route_false_positive",
         "no_edit_false_edit",
         "required_skip_count",
+        "preserve_edit_overlap",
         "missed_target_instance_count",
         "page_residue_worsened_count",
     )
