@@ -42,6 +42,13 @@ from scripts.validation_artifact_harness import (  # noqa: E402
 )
 
 
+def _route_fill_backend(fill_id: str, route_decision: str) -> str:
+    normalized = str(fill_id).strip().lower()
+    if normalized == "narrow_lama_broad_flat":
+        return "robust_flat_median" if route_decision == "broad" else "current_lama"
+    return normalized
+
+
 FAMILY = "inpaint-factorized-v3"
 CATEGORY = "40-inpaint-mask-render"
 
@@ -489,15 +496,22 @@ def _run_combination(
             final_mask = cv2.bitwise_or(baseline_mask, decision.edit_mask)
             fill_diagnostics = {"backend": fill_id, "applied": False}
         else:
-            callback = lama_pool.fill if fill_id in {"current_lama", "ballons_lama"} else None
+            selected_fill = _route_fill_backend(fill_id, decision.decision)
+            callback = (
+                lama_pool.fill
+                if selected_fill in {"current_lama", "ballons_lama"}
+                else None
+            )
             generated, fill_diagnostics = fill_factorized_mask(
                 source,
                 decision.edit_mask,
-                backend=fill_id,
+                backend=selected_fill,
                 interior_mask=interior,
                 background_exclude_mask=exclude,
                 lama_fill=callback,
             )
+            if selected_fill != fill_id:
+                fill_diagnostics["requested_backend"] = fill_id
             candidate, final_mask = composite_positive_result(
                 baseline,
                 generated,

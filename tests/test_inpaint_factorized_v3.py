@@ -38,6 +38,7 @@ from benchmarking.inpaint_detector_bakeoff.silhouette import (
 )
 from scripts.benchmark_inpaint_factorized_v3 import (
     _declared_combinations,
+    _route_fill_backend,
     main as factorized_main,
 )
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
@@ -381,6 +382,39 @@ def test_router_uses_pixel_ownership_for_narrow_and_region_ownership_for_broad()
     assert np.count_nonzero(decision.edit_mask[4:8, 4:8]) == 0
 
 
+def test_router_reopens_only_detector_seed_from_runtime_baseline_mask() -> None:
+    shape = (40, 60)
+    seed = np.zeros(shape, np.uint8)
+    seed[18:22, 28:32] = 255
+    broad = np.zeros(shape, np.uint8)
+    broad[8:32, 16:44] = 255
+    existing = broad.copy()
+    masks = PageMasks(
+        target=seed.copy(),
+        protected=np.zeros(shape, np.uint8),
+        ambiguous=np.zeros(shape, np.uint8),
+        ownership=seed.copy(),
+        claim_seed=seed.copy(),
+        existing_edit=existing,
+        bubble_interior=broad.copy(),
+        corner=np.zeros(shape, np.uint8),
+        broad_ownership=broad.copy(),
+    )
+
+    decision = decide_bubble_route(
+        "R1",
+        narrow_claim=seed,
+        broad_claim=broad,
+        seed=seed,
+        masks=masks,
+        ballons_clean=True,
+        background_sample_count=128,
+    )
+
+    assert decision.decision == "broad"
+    assert np.array_equal(decision.edit_mask, seed)
+
+
 @pytest.mark.parametrize(
     "backend",
     ["robust_flat_median", "planar_gradient", "telea"],
@@ -431,6 +465,15 @@ def test_page_union_uses_one_lama_call_and_exact_composite() -> None:
     assert diagnostics["applied"] is True
     assert np.all(candidate[edit > 0] == 77)
     assert np.array_equal(candidate[edit == 0], source[edit == 0])
+
+
+def test_route_hybrid_uses_lama_only_for_narrow_and_flat_for_broad() -> None:
+    assert _route_fill_backend("narrow_lama_broad_flat", "narrow") == "current_lama"
+    assert (
+        _route_fill_backend("narrow_lama_broad_flat", "broad")
+        == "robust_flat_median"
+    )
+    assert _route_fill_backend("telea", "broad") == "telea"
 
 
 def test_oracle_background_reconstruction_scores_fill_independently() -> None:
@@ -819,6 +862,7 @@ def test_manifest_builder_attaches_sealed_baseline_by_matching_source(
 
     assert result["pages"][0]["baseline"] == baseline_path
     assert result["pages"][0]["baseline_mask"] == baseline_mask
+    assert result["pages"][0]["existing_source_edit_mask"] == baseline_mask
     assert result["baseline_manifest_sha256"]
 
 
