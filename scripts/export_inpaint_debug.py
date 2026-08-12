@@ -689,6 +689,11 @@ def _process_image(
         "ownership_protect",
         image.shape,
     )
+    routing_bubble_interior = combine_evidence_patches(
+        routing_evidence,
+        "bubble_interior",
+        image.shape,
+    )
     routing_positive_claim = combine_evidence_patches(
         routing_evidence,
         "positive_claim",
@@ -705,6 +710,25 @@ def _process_image(
             for item in routing_evidence
             for provider in item.claim_providers
         }
+    )
+    routing_route_decision_distribution = dict(
+        sorted(
+            Counter(
+                item.route_decision
+                for item in routing_evidence
+                if item.route_decision
+            ).items()
+        )
+    )
+    routing_route_reason_distribution = dict(
+        sorted(
+            Counter(
+                reason
+                for item in routing_evidence
+                for reason in item.route_reasons
+                if reason
+            ).items()
+        )
     )
     evaluation_protected_structure = (
         annotated_protected_structure
@@ -846,6 +870,9 @@ def _process_image(
             "routing_ownership_protect_pixel_count": int(
                 np.count_nonzero(routing_ownership_protect)
             ),
+            "routing_bubble_interior_pixel_count": int(
+                np.count_nonzero(routing_bubble_interior)
+            ),
             "routing_positive_claim_pixel_count": int(
                 np.count_nonzero(routing_positive_claim)
             ),
@@ -853,6 +880,12 @@ def _process_image(
                 np.count_nonzero(routing_positive_edit)
             ),
             "routing_claim_providers": routing_claim_providers,
+            "routing_route_decision_distribution": (
+                routing_route_decision_distribution
+            ),
+            "routing_route_reason_distribution": (
+                routing_route_reason_distribution
+            ),
             "routing_structure_changed_pixel_count_exact": int(
                 np.count_nonzero(
                     (routing_structure_protect > 0)
@@ -1076,6 +1109,7 @@ def _process_image(
     routing_source_owned_path = corpus_output / "routing_source_owned_masks" / f"{page_base_name}_routing_source_owned.png"
     routing_source_raw_owned_path = corpus_output / "routing_source_raw_owned_masks" / f"{page_base_name}_routing_source_raw_owned.png"
     routing_ownership_protect_path = corpus_output / "routing_ownership_protect_masks" / f"{page_base_name}_routing_ownership_protect.png"
+    routing_bubble_interior_path = corpus_output / "routing_bubble_interior_masks" / f"{page_base_name}_routing_bubble_interior.png"
     routing_positive_claim_path = corpus_output / "routing_positive_claim_masks" / f"{page_base_name}_routing_positive_claim.png"
     routing_positive_edit_path = corpus_output / "routing_positive_edit_masks" / f"{page_base_name}_routing_positive_edit.png"
     positive_claim_raw_path = corpus_output / "positive_claim_raw_masks" / f"{page_base_name}_positive_claim_raw.png"
@@ -1118,6 +1152,7 @@ def _process_image(
     _write_image(routing_source_owned_path, routing_source_owned)
     _write_image(routing_source_raw_owned_path, routing_source_raw_owned)
     _write_image(routing_ownership_protect_path, routing_ownership_protect)
+    _write_image(routing_bubble_interior_path, routing_bubble_interior)
     _write_image(routing_positive_claim_path, routing_positive_claim)
     _write_image(routing_positive_edit_path, routing_positive_edit)
     _write_image(
@@ -1261,6 +1296,7 @@ def _process_image(
         "routing_source_owned_mask": routing_source_owned_path,
         "routing_source_raw_owned_mask": routing_source_raw_owned_path,
         "routing_ownership_protect_mask": routing_ownership_protect_path,
+        "routing_bubble_interior_mask": routing_bubble_interior_path,
         "routing_positive_claim_mask": routing_positive_claim_path,
         "routing_positive_edit_mask": routing_positive_edit_path,
         "positive_claim_raw_mask": positive_claim_raw_path,
@@ -1909,11 +1945,14 @@ def _write_page_metrics_jsonl(
         "routing_source_owned_pixel_count",
         "routing_source_raw_owned_pixel_count",
         "routing_ownership_protect_pixel_count",
+        "routing_bubble_interior_pixel_count",
         "routing_positive_claim_pixel_count",
         "routing_positive_edit_pixel_count",
         "positive_claim_raw_pixel_count",
         "positive_claim_runtime",
         "routing_claim_providers",
+        "routing_route_decision_distribution",
+        "routing_route_reason_distribution",
         "routing_structure_changed_pixel_count_exact",
         "outline_damage_ratio",
         "pre_composite_protected_structure_changed_pixel_count_exact",
@@ -2631,6 +2670,10 @@ def main() -> int:
                 int(record.get("routing_ownership_protect_pixel_count", 0) or 0)
                 for record in all_records
             ),
+            "routing_bubble_interior_pixel_count": sum(
+                int(record.get("routing_bubble_interior_pixel_count", 0) or 0)
+                for record in all_records
+            ),
             "routing_positive_claim_pixel_count": sum(
                 int(record.get("routing_positive_claim_pixel_count", 0) or 0)
                 for record in all_records
@@ -2664,6 +2707,38 @@ def main() -> int:
                     for provider in (record.get("routing_claim_providers") or [])
                     if str(provider)
                 }
+            ),
+            "routing_route_decision_distribution": dict(
+                sorted(
+                    sum(
+                        (
+                            Counter(
+                                record.get(
+                                    "routing_route_decision_distribution",
+                                    {},
+                                )
+                            )
+                            for record in all_records
+                        ),
+                        Counter(),
+                    ).items()
+                )
+            ),
+            "routing_route_reason_distribution": dict(
+                sorted(
+                    sum(
+                        (
+                            Counter(
+                                record.get(
+                                    "routing_route_reason_distribution",
+                                    {},
+                                )
+                            )
+                            for record in all_records
+                        ),
+                        Counter(),
+                    ).items()
+                )
             ),
             "residue_pixel_count": sum(
                 int(record["residue_pixel_count"])
