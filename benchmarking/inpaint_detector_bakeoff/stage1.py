@@ -70,7 +70,10 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     schema_version = str(payload.get("schema_version") or "").strip()
     is_v3 = schema_version == "inpaint-detector-bakeoff-manifest-v3"
-    is_v4 = schema_version == "inpaint-detector-bakeoff-manifest-v4"
+    is_v4 = schema_version in {
+        "inpaint-detector-bakeoff-manifest-v4",
+        "inpaint-factorized-source-manifest-v4",
+    }
     if schema_version and not (is_v3 or is_v4):
         raise ValueError(f"unsupported mask-only manifest schema: {schema_version}")
     pages = payload.get("pages")

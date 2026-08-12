@@ -27,6 +27,7 @@ SCHEMA_VERSION = "inpaint-factorized-source-manifest-v4"
 LEDGER_SCHEMA_VERSION = "inpaint-independent-target-review-ledger-v4"
 DECISIONS_SCHEMA_VERSION = "inpaint-independent-target-review-decisions-v4"
 MANUAL_INVENTORY_SCHEMA_VERSION = "inpaint-independent-manual-inventory-v4"
+SEAL_SCHEMA_VERSION = "inpaint-factorized-manifest-seal-v4-independent"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -37,7 +38,11 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _read_mask(path: object, shape: tuple[int, int] | None = None) -> np.ndarray:
-    value = cv2.imdecode(np.fromfile(Path(str(path or "")), dtype=np.uint8), 0)
+    if path is None or not str(path).strip():
+        if shape is None:
+            raise FileNotFoundError(path)
+        return np.zeros(shape, np.uint8)
+    value = cv2.imdecode(np.fromfile(Path(str(path)), dtype=np.uint8), 0)
     if value is None or value.size == 0:
         raise FileNotFoundError(path)
     if shape is not None and value.shape != shape:
@@ -162,14 +167,23 @@ def _index(values: object, key: str) -> dict[str, dict[str, Any]]:
     return output
 
 
-def _empty_region(page_dir: Path, shape: tuple[int, int], region_id: str) -> dict[str, Any]:
+def _empty_region(
+    page_dir: Path,
+    shape: tuple[int, int],
+    region_id: str,
+    *,
+    ownership: np.ndarray | None = None,
+) -> dict[str, Any]:
     empty = np.zeros(shape, np.uint8)
+    exact_ownership = empty if ownership is None else np.asarray(ownership)
     region_dir = page_dir / "regions" / region_id
     return {
         "region_id": region_id,
         "bubble_route_class": "ambiguous",
         "bubble_interior_mask": _write_mask(region_dir / "bubble-interior.png", empty),
-        "ownership_mask": _write_mask(region_dir / "ownership.png", empty),
+        "ownership_mask": _write_mask(
+            region_dir / "ownership.png", exact_ownership
+        ),
         "protected_structure_mask": _write_mask(region_dir / "protected.png", empty),
         "ambiguous_structure_mask": _write_mask(region_dir / "ambiguous.png", empty),
         "corner_protect_mask": _write_mask(region_dir / "corner.png", empty),
@@ -223,9 +237,17 @@ def apply_independent_target_review(
         shape = (height, width)
         page_dir = output_dir / "pages" / page_id
         page_rows = rows_by_page.get(page_id, [])
+        unowned_ownership = np.zeros(shape, np.uint8)
+        required = np.zeros(shape, np.uint8)
+        preserve = np.zeros(shape, np.uint8)
+        ambiguous = np.zeros(shape, np.uint8)
 
-        if page_id in inventory:
-            entry = inventory[page_id]
+        inventory_entry = inventory.get(page_id)
+        inventory_status = (
+            str(inventory_entry.get("status") or "") if inventory_entry else ""
+        )
+        if inventory_entry and inventory_status != "complete_with_reviewed_rows":
+            entry = inventory_entry
             manual = str(entry.get("manual_inventory_path") or "")
             if manual:
                 region_map = {
@@ -257,9 +279,6 @@ def apply_independent_target_review(
             page["target_mask_provenance"] = "source_only_full_page_inventory_review"
         else:
             instances: list[dict[str, Any]] = []
-            required = np.zeros(shape, np.uint8)
-            preserve = np.zeros(shape, np.uint8)
-            ambiguous = np.zeros(shape, np.uint8)
             region_map = {
                 str(value.get("region_id") or ""): dict(value)
                 for value in page.get("regions", [])
@@ -269,7 +288,9 @@ def apply_independent_target_review(
                 if semantic_decision == "not_text":
                     continue
                 extent = str(decision.get("extent") or "")
-                if extent == "manual":
+                if semantic_decision == "ambiguous" and extent == "reject":
+                    extent_path = row.get("location_seed")
+                elif extent == "manual":
                     extent_path = decision.get("manual_extent_path")
                     if not extent_path:
                         raise ValueError(
@@ -287,17 +308,20 @@ def apply_independent_target_review(
                 mask = _read_mask(extent_path, shape)
                 region_id = str(row.get("region_id") or "")
                 region = region_map.get(region_id)
-                protect = np.zeros(shape, np.uint8)
+                hard_protect = np.zeros(shape, np.uint8)
                 if region is not None:
+                    # A candidate-blind human target/preserve decision is more
+                    # authoritative than the old derived structure proxy.  The
+                    # explicitly reviewed ambiguous and corner masks remain
+                    # hard exclusions.
                     for field in (
-                        "protected_structure_mask",
                         "ambiguous_structure_mask",
                         "corner_protect_mask",
                     ):
-                        protect[_read_mask(region[field], shape) > 0] = 255
+                        hard_protect[_read_mask(region[field], shape) > 0] = 255
                     ownership = _read_mask(region["ownership_mask"], shape)
                     mask[ownership == 0] = 0
-                mask[protect > 0] = 0
+                mask[hard_protect > 0] = 0
                 if not np.any(mask):
                     raise ValueError(f"selected review extent became empty: {row['review_id']}")
                 if semantic_decision == "required":
@@ -320,6 +344,8 @@ def apply_independent_target_review(
                 mask[(required > 0) | (preserve > 0) | (ambiguous > 0)] = 0
                 if not np.any(mask):
                     continue
+                if region_id == "region-unowned-review":
+                    unowned_ownership[mask > 0] = 255
                 bucket[mask > 0] = 255
                 instance_id = f"independent-{row['review_id']}"
                 mask_path = _write_mask(page_dir / "instances" / f"{instance_id}.png", mask)
@@ -334,9 +360,14 @@ def apply_independent_target_review(
                         "source_reviewed": True,
                     }
                 )
-                total_instances[
-                    "preserve" if priority == "optional" else priority
-                ] += 1
+            if np.any(unowned_ownership):
+                unowned_region = _empty_region(
+                    page_dir,
+                    shape,
+                    "region-unowned-review",
+                    ownership=unowned_ownership,
+                )
+                page["regions"] = [*page.get("regions", []), unowned_region]
             if not region_map:
                 empty_region = _empty_region(page_dir, shape, "region-page-empty")
                 page["regions"] = [empty_region]
@@ -348,15 +379,58 @@ def apply_independent_target_review(
                 else None
             )
             page["preserve_mask"] = _write_mask(page_dir / "preserve.png", preserve)
-            page["ambiguous_structure_mask"] = _write_mask(
-                page_dir / "ambiguous-structure.png", ambiguous
+            page["target_mask_provenance"] = (
+                "source_only_full_page_inventory_review"
+                if inventory_status == "complete_with_reviewed_rows"
+                else "paired_location_source_only_extent_review"
             )
-            page["target_mask_provenance"] = "paired_location_source_only_extent_review"
+
+        required_mask = _read_mask(page.get("target_text_mask"), shape)
+        preserve_mask = _read_mask(page.get("preserve_mask"), shape)
+        semantic_ambiguous = ambiguous
+        semantic_union = cv2.bitwise_or(
+            cv2.bitwise_or(required_mask, preserve_mask), semantic_ambiguous
+        )
+        protected = _read_mask(source_page.get("protected_structure_mask"), shape)
+        protected[semantic_union > 0] = 0
+        source_ambiguous = _read_mask(
+            source_page.get("ambiguous_structure_mask"), shape
+        )
+        normalized_ambiguous = cv2.bitwise_or(source_ambiguous, semantic_ambiguous)
+        normalized_ambiguous[(required_mask > 0) | (preserve_mask > 0)] = 0
+        ownership = _read_mask(source_page.get("ownership_mask"), shape)
+        ownership[unowned_ownership > 0] = 255
+        page["protected_structure_mask"] = _write_mask(
+            page_dir / "protected-structure.png", protected
+        )
+        page["ambiguous_structure_mask"] = _write_mask(
+            page_dir / "ambiguous-structure.png", normalized_ambiguous
+        )
+        page["ownership_mask"] = _write_mask(
+            page_dir / "ownership.png", ownership
+        )
+        normalized_regions: list[dict[str, Any]] = []
+        for raw_region in page.get("regions", []):
+            region = dict(raw_region)
+            region_id = str(region.get("region_id") or "")
+            region_dir = page_dir / "regions" / region_id
+            region_protected = _read_mask(region.get("protected_structure_mask"), shape)
+            region_protected[semantic_union > 0] = 0
+            region_ambiguous = _read_mask(region.get("ambiguous_structure_mask"), shape)
+            region_ambiguous[semantic_union > 0] = 0
+            region["protected_structure_mask"] = _write_mask(
+                region_dir / "protected.png", region_protected
+            )
+            region["ambiguous_structure_mask"] = _write_mask(
+                region_dir / "ambiguous.png", region_ambiguous
+            )
+            normalized_regions.append(region)
+        page["regions"] = normalized_regions
 
         for instance in page.get("target_instances", []):
             priority = str(instance.get("priority") or "")
             key = "preserve" if priority == "optional" else priority
-            if key in total_instances and page_id in inventory:
+            if key in total_instances:
                 total_instances[key] += 1
         page["expected_edit"] = (
             "required"
@@ -407,6 +481,51 @@ def validate_manifest(path: Path) -> None:
         load_page_masks(page, source.shape[:2])
 
 
+def seal_independent_manifest(
+    manifest_path: Path,
+    review_decisions_path: Path,
+) -> dict[str, Any]:
+    payload = _read_json(manifest_path)
+    decisions = _read_json(review_decisions_path)
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("unsupported independent manifest seal input")
+    if decisions.get("schema_version") != DECISIONS_SCHEMA_VERSION:
+        raise ValueError("unsupported independent review decisions seal input")
+    if not all(
+        (
+            payload.get("annotation_frozen_before_candidate") is True,
+            payload.get("candidate_seen") is False,
+            payload.get("target_extent_independent") is True,
+            payload.get("target_inventory_independent") is True,
+            payload.get("target_review_complete") is True,
+        )
+    ):
+        raise ValueError("independent manifest is not source-only review complete")
+    if (
+        decisions.get("candidate_seen") is not False
+        or decisions.get("review_complete") is not True
+    ):
+        raise ValueError("independent review decisions are not complete")
+    seal = {
+        "schema_version": SEAL_SCHEMA_VERSION,
+        "manifest_sha256": _sha256(manifest_path),
+        "review_decisions_sha256": _sha256(review_decisions_path),
+        "corpus_id": payload.get("corpus_id"),
+        "instance_counts": payload.get("instance_counts"),
+        "annotation_frozen_before_candidate": True,
+        "candidate_seen": False,
+        "source_only_review_complete": True,
+        "target_extent_independent": True,
+        "target_inventory_independent": True,
+    }
+    seal_path = manifest_path.with_suffix(manifest_path.suffix + ".seal.json")
+    seal_path.write_text(
+        json.dumps(seal, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return seal
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply a complete independent target review.")
     parser.add_argument("--semantic-manifest", type=Path, required=True)
@@ -430,6 +549,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     manifest_path = output_dir / "source-manifest-v4-independent.json"
     validate_manifest(manifest_path)
+    seal_independent_manifest(manifest_path, args.review_decisions.resolve())
     print(json.dumps({"pages": len(payload["pages"]), "counts": payload["instance_counts"]}))
     return 0
 
