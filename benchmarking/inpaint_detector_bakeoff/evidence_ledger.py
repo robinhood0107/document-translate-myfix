@@ -797,7 +797,14 @@ def _validate_fusion(payload: Mapping[str, object]) -> None:
         raise ValueError("fusion page statistics do not exactly match runs")
     from scripts.benchmark_inpaint_detector_fusions_v4 import (  # noqa: PLC0415
         _hard_gate_passes as _fusion_hard_gate_passes,
+        _product_mask_hard_gate_passes as _fusion_product_mask_hard_gate_passes,
+        _seed_gate_passes as _fusion_seed_gate_passes,
+        select_seed_admission_run_ids,
     )
+    admission = payload.get("seed_admission")
+    has_seed_admission = admission is not None
+    if has_seed_admission and not isinstance(admission, Mapping):
+        raise ValueError("fusion seed admission must be an object")
 
     for row in runs:
         _validate_run_status(row, "fusion run")
@@ -834,10 +841,23 @@ def _validate_fusion(payload: Mapping[str, object]) -> None:
             )
         try:
             hard_pass = _fusion_hard_gate_passes(canonical_metrics)
+            seed_eligible = _fusion_seed_gate_passes(canonical_metrics)
+            product_mask_hard_pass = _fusion_product_mask_hard_gate_passes(
+                canonical_metrics
+            )
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(
                 "fusion metrics do not satisfy the complete fail-closed schema"
             ) from error
+        if has_seed_admission:
+            if row.get("seed_eligible") is not seed_eligible:
+                raise ValueError(
+                    "fusion seed eligibility differs from canonical metrics"
+                )
+            if row.get("product_mask_hard_pass") is not product_mask_hard_pass:
+                raise ValueError(
+                    "fusion product-mask gate differs from canonical metrics"
+                )
         information_limited = any(
             metrics.get(field) is not True  # type: ignore[union-attr]
             for field in (
@@ -888,9 +908,35 @@ def _validate_fusion(payload: Mapping[str, object]) -> None:
         output_sha = row["metrics"].get("output_mask_set_sha256")  # type: ignore[index]
         if not _is_sha256(output_sha):
             raise ValueError("fusion run lacks exact output-mask-set SHA")
-        closure_sha = str(ledger_by_id[str(row["run_id"])].get("content_sha256") or "")
+        closure_sha = str(
+            ledger_by_id[str(row["run_id"])].get("content_sha256") or ""
+        )
         if str(output_sha) != closure_sha:
             raise ValueError("fusion output SHA differs from closure content SHA")
+    if has_seed_admission:
+        assert isinstance(admission, Mapping)
+        if int(admission.get("runtime_detector_limit") or 0) != 2:
+            raise ValueError(
+                "fusion seed admission must enforce the two-detector limit"
+            )
+        selected = select_seed_admission_run_ids(
+            [dict(row) for row in runs], limit=2
+        )
+        if set(map(str, admission.get("selected_run_ids", []))) != set(selected):
+            raise ValueError("fusion seed admission differs from canonical selection")
+        strict_available = any(bool(row.get("seed_eligible")) for row in runs)
+        if admission.get("strict_seed_available") is not strict_available:
+            raise ValueError("fusion strict-seed availability is inconsistent")
+        for row in runs:
+            admitted = str(row["run_id"]) in selected
+            if row.get("seed_admitted") is not admitted:
+                raise ValueError("fusion run seed-admitted flag is inconsistent")
+            expected_kind = (
+                "strict" if admitted and strict_available else
+                "best_effort" if admitted else "not_selected"
+            )
+            if str(row.get("seed_admission_kind") or "") != expected_kind:
+                raise ValueError("fusion run seed-admission kind is inconsistent")
 
 
 def _validate_semantic(payload: Mapping[str, object]) -> None:
