@@ -229,6 +229,7 @@ def apply_independent_target_review(
         raise ValueError("independent target review ledger binds another semantic manifest")
     if ledger.get("semantic_manifest_sha256") != _sha256(semantic_manifest_path):
         raise ValueError("independent target review ledger semantic manifest SHA differs")
+
     if decisions.get("schema_version") != DECISIONS_SCHEMA_VERSION:
         raise ValueError("unsupported independent target review decisions")
     if ledger.get("candidate_seen") is not False or decisions.get("candidate_seen") is not False:
@@ -240,6 +241,25 @@ def apply_independent_target_review(
         raise ValueError("independent target decisions bind a different review ledger")
     if decisions.get("review_ledger_sha256") != _sha256(ledger_path):
         raise ValueError("independent target decisions review ledger SHA differs")
+
+    source_index: dict[str, dict[str, Any]] = {}
+    needs_source_index = any(
+        not all(field in page for field in ("path", "height", "width"))
+        for page in semantic_pages
+    )
+    if needs_source_index:
+        declared_source_index = str(ledger.get("source_index") or "").strip()
+        if not declared_source_index:
+            raise ValueError("independent target review ledger lacks its source index")
+        source_index_path = Path(declared_source_index).resolve()
+        if ledger.get("source_index_sha256") != _sha256(source_index_path):
+            raise ValueError("independent target review ledger source index SHA differs")
+        source_index_payload = _read_json(source_index_path)
+        source_index = _index(source_index_payload.get("pages"), "page_id")
+        if set(source_index) != {
+            str(page.get("page_id") or "") for page in semantic_pages
+        }:
+            raise ValueError("independent target review source index page set differs")
 
     pages = _index(semantic_pages, "page_id")
     rows = _index(ledger.get("rows"), "review_id")
@@ -265,6 +285,18 @@ def apply_independent_target_review(
     total_instances = {"required": 0, "preserve": 0, "ambiguous": 0}
     for page_id, source_page in pages.items():
         page = dict(source_page)
+        if page_id in source_index:
+            source_record = source_index[page_id]
+            for field in (
+                "path",
+                "height",
+                "width",
+                "source_sha256",
+                "set_id",
+                "paired_reference",
+            ):
+                if field in source_record:
+                    page[field] = source_record[field]
         height, width = int(page["height"]), int(page["width"])
         shape = (height, width)
         page_dir = output_dir / "pages" / page_id

@@ -1245,6 +1245,10 @@ def test_independent_target_review_keeps_unpaired_inventory_pending(
     )
 
     assert payload["review_complete"] is False
+    assert payload["source_index"] == str(source_index.resolve())
+    assert payload["source_index_sha256"] == hashlib.sha256(
+        source_index.read_bytes()
+    ).hexdigest()
     assert payload["target_inventory_independent"] is False
     assert payload["review_row_count"] == 2
     assert payload["rows"][0]["semantic_role_proposal"] == "dialogue_bubble"
@@ -1376,9 +1380,6 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
                 "pages": [
                     {
                         "page_id": "p1",
-                        "path": source,
-                        "height": shape[0],
-                        "width": shape[1],
                         "target_text_mask": None,
                         "preserve_mask": empty,
                         "protected_structure_mask": protect,
@@ -1403,6 +1404,26 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
         ),
         encoding="utf-8",
     )
+    source_index = tmp_path / "source-index.json"
+    source_index.write_text(
+        json.dumps(
+            {
+                "pages": [
+                    {
+                        "page_id": "p1",
+                        "path": source,
+                        "height": shape[0],
+                        "width": shape[1],
+                        "source_sha256": hashlib.sha256(
+                            Path(source).read_bytes()
+                        ).hexdigest(),
+                        "set_id": "example",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     ledger = tmp_path / "ledger.json"
     ledger.write_text(
         json.dumps(
@@ -1410,6 +1431,10 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
                 "schema_version": "inpaint-independent-target-review-ledger-v4",
                 "candidate_seen": False,
                 "review_complete": False,
+                "source_index": str(source_index.resolve()),
+                "source_index_sha256": hashlib.sha256(
+                    source_index.read_bytes()
+                ).hexdigest(),
                 "rows": [
                     {
                         "review_id": "review-0000",

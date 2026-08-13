@@ -361,6 +361,8 @@ def build_independent_target_review(
     )
     payload = {
         "schema_version": SCHEMA_VERSION,
+        "source_index": str(source_index_path.resolve()),
+        "source_index_sha256": _sha256(source_index_path),
         "semantic_manifest": str(semantic_manifest_path.resolve()),
         "semantic_manifest_sha256": _sha256(semantic_manifest_path),
         "candidate_seen": False,
