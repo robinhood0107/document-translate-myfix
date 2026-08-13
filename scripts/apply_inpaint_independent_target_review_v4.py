@@ -505,6 +505,7 @@ def apply_independent_target_review(
             else "none"
         )
         page.update(
+            annotation_basis="source_only_v4",
             target_extent_independent=True,
             target_inventory_independent=True,
             target_review_complete=True,

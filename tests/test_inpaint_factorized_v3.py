@@ -1477,6 +1477,7 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
 
     page = payload["pages"][0]
     target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
+    assert page["annotation_basis"] == "source_only_v4"
     assert payload["target_inventory_independent"] is True
     assert payload["target_extent_independent"] is True
     normalized_protect = cv2.imread(
