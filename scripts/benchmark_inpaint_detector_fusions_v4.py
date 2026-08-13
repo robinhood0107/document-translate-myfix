@@ -25,6 +25,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_page_masks,
     load_stage1_manifest,
     positive_edit_from_claim,
+    validate_source_only_manifest_v4,
 )
 from scripts.validation_artifact_harness import (  # noqa: E402
     select_managed_output_directory,
@@ -123,6 +124,109 @@ class _Totals:
         }
 
 
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def aggregate_fusion_page_statistics(
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    if not rows:
+        raise ValueError("fusion aggregation requires page statistics")
+    page_ids = [str(row.get("page_id") or "") for row in rows]
+    if any(not value for value in page_ids) or len(page_ids) != len(set(page_ids)):
+        raise ValueError("fusion page statistics require unique page IDs")
+    integer_fields = (
+        "target_pixel_count",
+        "target_edit_pixel_count",
+        "protected_edit_overlap",
+        "ambiguous_edit_overlap",
+        "preserve_edit_overlap",
+        "ownership_leak_pixel_count",
+        "false_edit_pixel_count",
+    )
+    for row in rows:
+        for field in integer_fields:
+            value = row.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"fusion page statistics require {field}")
+        scores = row.get("target_instance_scores")
+        if not isinstance(scores, list) or any(
+            not isinstance(score, dict) for score in scores
+        ):
+            raise ValueError("fusion page statistics require target instance scores")
+        output_sha = str(row.get("output_edit_mask_pixel_sha256") or "")
+        if len(output_sha) != 64 or any(c not in "0123456789abcdef" for c in output_sha):
+            raise ValueError("fusion page statistics lack output mask identity")
+        claim_sha = str(row.get("output_claim_mask_pixel_sha256") or "")
+        if len(claim_sha) != 64 or any(
+            c not in "0123456789abcdef" for c in claim_sha
+        ):
+            raise ValueError("fusion page statistics lack output claim identity")
+    scores = [
+        score
+        for row in rows
+        for score in row["target_instance_scores"]  # type: ignore[index]
+    ]
+    for score in scores:
+        coverage = score.get("coverage")
+        if (
+            not isinstance(score.get("seeded"), bool)
+            or not isinstance(coverage, (int, float))
+            or isinstance(coverage, bool)
+            or not np.isfinite(float(coverage))
+            or not 0.0 <= float(coverage) <= 1.0
+        ):
+            raise ValueError("fusion instance score is invalid")
+    target_pixels = sum(int(row["target_pixel_count"]) for row in rows)
+    target_edit = sum(int(row["target_edit_pixel_count"]) for row in rows)
+    if target_edit > target_pixels:
+        raise ValueError("fusion target edit exceeds target inventory")
+    return {
+        "target_instance_count": len(scores),
+        "seeded_target_instance_count": sum(bool(score["seeded"]) for score in scores),
+        "missed_target_instance_count": sum(not bool(score["seeded"]) for score in scores),
+        "target_instance_seed_recall": (
+            float(sum(bool(score["seeded"]) for score in scores)) / float(len(scores))
+            if scores
+            else None
+        ),
+        "aggregate_target_coverage": (
+            float(target_edit) / float(target_pixels) if target_pixels else None
+        ),
+        "minimum_target_instance_coverage": (
+            min(float(score["coverage"]) for score in scores) if scores else None
+        ),
+        "protected_edit_overlap": sum(int(row["protected_edit_overlap"]) for row in rows),
+        "ambiguous_edit_overlap": sum(int(row["ambiguous_edit_overlap"]) for row in rows),
+        "preserve_edit_overlap": sum(int(row["preserve_edit_overlap"]) for row in rows),
+        "ownership_leak_pixel_count": sum(int(row["ownership_leak_pixel_count"]) for row in rows),
+        "false_edit_pixel_count": sum(int(row["false_edit_pixel_count"]) for row in rows),
+        "target_extent_independent": all(row.get("target_extent_independent") is True for row in rows),
+        "target_inventory_independent": all(row.get("target_inventory_independent") is True for row in rows),
+        "target_review_complete": all(row.get("target_review_complete") is True for row in rows),
+        "target_mask_provenance": sorted({str(row.get("target_mask_provenance") or "") for row in rows}),
+        "output_mask_set_sha256": _canonical_sha256(
+            sorted(
+                (
+                    {
+                        "page_id": str(row["page_id"]),
+                        "output_edit_mask_pixel_sha256": str(
+                            row["output_edit_mask_pixel_sha256"]
+                        ),
+                    }
+                    for row in rows
+                ),
+                key=lambda value: value["page_id"],
+            )
+        ),
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -148,6 +252,114 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _pixel_sha256(value: np.ndarray) -> str:
+    return hashlib.sha256(np.ascontiguousarray(value).tobytes()).hexdigest()
+
+
+def _write_fusion_mask_artifact(
+    output_root: Path,
+    *,
+    run_id: str,
+    page_id: str,
+    role: str,
+    mask: np.ndarray,
+) -> dict[str, object]:
+    if role not in {"claim_mask", "edit_mask"}:
+        raise ValueError(f"unsupported fusion output mask role: {role}")
+    run_key = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:20]
+    page_key = hashlib.sha256(page_id.encode("utf-8")).hexdigest()[:20]
+    path = output_root / "fusion-output-masks" / run_key / role / f"{page_key}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(path), mask):
+        raise OSError(f"failed to write fusion output mask: {path}")
+    decoded = cv2.imdecode(
+        np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE
+    )
+    if decoded is None or decoded.size == 0:
+        raise ValueError("fusion output mask is unreadable after write")
+    if not set(np.unique(decoded)).issubset({0, 255}):
+        raise ValueError("fusion output mask is not strict binary")
+    if decoded.shape != mask.shape or _pixel_sha256(decoded) != _pixel_sha256(mask):
+        raise ValueError("fusion written output differs from evaluated mask")
+    return {
+        "run_id": run_id,
+        "page_id": page_id,
+        "role": role,
+        "relative_path": path.resolve().relative_to(output_root.resolve()).as_posix(),
+        "artifact_sha256": _sha256(path),
+        "pixel_sha256": _pixel_sha256(decoded),
+        "shape": list(decoded.shape),
+        "dtype": str(decoded.dtype),
+        "foreground_pixel_count": int(np.count_nonzero(decoded)),
+    }
+
+
+def _seal_fusion_output_inventory(
+    output_root: Path | None,
+    artifacts: list[dict[str, object]],
+    *,
+    run_ids: list[str],
+    page_ids: list[str],
+) -> tuple[dict[str, object] | None, frozenset[str]]:
+    if output_root is None:
+        return None, frozenset()
+    observed = {
+        (str(row["run_id"]), str(row["page_id"]), str(row["role"]))
+        for row in artifacts
+    }
+    complete = sorted(
+        run_id
+        for run_id in run_ids
+        if all(
+            (run_id, page_id, role) in observed
+            for page_id in page_ids
+            for role in ("claim_mask", "edit_mask")
+        )
+    )
+    artifacts.sort(
+        key=lambda row: (
+            str(row["run_id"]), str(row["page_id"]), str(row["role"])
+        )
+    )
+    canonical = {"records": artifacts, "complete_run_ids": complete}
+    inventory = {
+        "schema_version": "inpaint-fusion-output-artifact-inventory-v1",
+        **canonical,
+        "inventory_sha256": _canonical_sha256(canonical),
+    }
+    path = output_root / "fusion-output-artifact-inventory.json"
+    _write_json(path, inventory)
+    return (
+        {
+            "relative_path": path.relative_to(output_root).as_posix(),
+            "artifact_sha256": _sha256(path),
+            "inventory_sha256": inventory["inventory_sha256"],
+            "artifact_count": len(artifacts),
+            "complete_run_ids": complete,
+        },
+        frozenset(complete),
+    )
+
+
+def _logical_inventory_sha256(
+    closure: list[dict[str, object]],
+) -> str:
+    inventory = sorted(
+        (
+            {
+                "logical_id": str(row.get("logical_id") or ""),
+                "selection": dict(row.get("selection") or {}),
+            }
+            for row in closure
+        ),
+        key=lambda row: row["logical_id"],
+    )
+    encoded = json.dumps(
+        inventory, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _existing_edit_paths(manifest_path: Path) -> dict[str, str]:
     payload = _read_json(manifest_path)
     paths: dict[str, str] = {}
@@ -158,7 +370,10 @@ def _existing_edit_paths(manifest_path: Path) -> dict[str, str]:
         if isinstance(value, dict):
             value = value.get("path")
         if isinstance(value, str) and value.strip():
-            paths[str(page.get("page_id") or "")] = value.strip()
+            artifact = Path(value.strip())
+            if not artifact.is_absolute():
+                artifact = manifest_path.parent / artifact
+            paths[str(page.get("page_id") or "")] = str(artifact.resolve())
     return paths
 
 
@@ -238,7 +453,10 @@ def _hard_gate_passes(summary: dict[str, object]) -> bool:
 def run_fusion_matrix(
     manifest_path: Path,
     spec_path: Path,
+    *,
+    output_root: Path | None = None,
 ) -> dict[str, object]:
+    validate_source_only_manifest_v4(manifest_path)
     spec = _read_json(spec_path)
     if spec.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported detector fusion spec")
@@ -259,7 +477,14 @@ def run_fusion_matrix(
     )
     runs = _logical_runs(tuple(candidates), roi_candidates)
     totals = {row["run_id"]: _Totals() for row in runs}
+    page_statistics: dict[str, list[dict[str, object]]] = {
+        row["run_id"]: [] for row in runs
+    }
+    output_artifacts: list[dict[str, object]] = []
     pages = load_stage1_manifest(manifest_path)
+    page_ids = [page.page_id for page in pages]
+    if len(page_ids) != len(set(page_ids)):
+        raise ValueError("fusion manifest contains duplicate page IDs")
     target_extent_independent = all(
         page.target_extent_independent for page in pages
     )
@@ -297,8 +522,11 @@ def run_fusion_matrix(
             )
             loaded[candidate_id] = {"raw": raw, "refined": refined}
         instance_indices = tuple(
-            np.flatnonzero(
-                _read_mask(record.mask_path, page.page_id, shape).reshape(-1)
+            (
+                record.instance_id,
+                np.flatnonzero(
+                    _read_mask(record.mask_path, page.page_id, shape).reshape(-1)
+                ),
             )
             for record in page.target_instances
             if record.priority == "required"
@@ -336,22 +564,97 @@ def run_fusion_matrix(
                     trigger_mask=trigger_mask,
                 )
             edit = positive_edit_from_claim(claim, masks)
+            if output_root is not None:
+                output_artifacts.extend(
+                    (
+                    _write_fusion_mask_artifact(
+                        output_root,
+                        run_id=run["run_id"],
+                        page_id=page.page_id,
+                        role="claim_mask",
+                        mask=claim,
+                    ),
+                    _write_fusion_mask_artifact(
+                        output_root,
+                        run_id=run["run_id"],
+                        page_id=page.page_id,
+                        role="edit_mask",
+                        mask=edit,
+                    ),
+                    )
+                )
             totals[run["run_id"]].update(
                 page=page,
                 claim=claim,
                 edit=edit,
                 masks=masks,
-                instance_indices=instance_indices,
+                instance_indices=tuple(
+                    indices for _instance_id, indices in instance_indices
+                ),
             )
+            flat_claim = claim.reshape(-1)
+            flat_edit = edit.reshape(-1)
+            page_statistics[run["run_id"]].append(
+                {
+                    "page_id": page.page_id,
+                    "target_pixel_count": int(np.count_nonzero(masks.target)),
+                    "target_edit_pixel_count": int(
+                        np.count_nonzero((masks.target > 0) & (edit > 0))
+                    ),
+                    "target_instance_scores": [
+                        {
+                            "instance_id": instance_id,
+                            "seeded": bool(np.count_nonzero(flat_claim[indices])),
+                            "coverage": (
+                                float(np.count_nonzero(flat_edit[indices]))
+                                / float(indices.size)
+                                if indices.size
+                                else 0.0
+                            ),
+                        }
+                        for instance_id, indices in instance_indices
+                    ],
+                    "protected_edit_overlap": int(
+                        np.count_nonzero((edit > 0) & (masks.protected > 0))
+                    ),
+                    "ambiguous_edit_overlap": int(
+                        np.count_nonzero((edit > 0) & (masks.ambiguous > 0))
+                    ),
+                    "preserve_edit_overlap": int(
+                        np.count_nonzero((edit > 0) & (masks.preserve > 0))
+                        if masks.preserve is not None
+                        else 0
+                    ),
+                    "ownership_leak_pixel_count": int(
+                        np.count_nonzero((edit > 0) & (masks.ownership == 0))
+                    ),
+                    "false_edit_pixel_count": (
+                        int(np.count_nonzero(edit)) if page.no_edit else 0
+                    ),
+                    "edit_pixel_count": int(np.count_nonzero(edit)),
+                    "target_extent_independent": page.target_extent_independent,
+                    "target_inventory_independent": page.target_inventory_independent,
+                    "target_review_complete": page.target_review_complete,
+                    "target_mask_provenance": page.target_mask_provenance,
+                    "output_claim_mask_pixel_sha256": _pixel_sha256(claim),
+                    "output_edit_mask_pixel_sha256": hashlib.sha256(
+                        np.ascontiguousarray(edit).tobytes()
+                    ).hexdigest(),
+                }
+            )
+    output_inventory, complete_run_ids = _seal_fusion_output_inventory(
+        output_root,
+        output_artifacts,
+        run_ids=[row["run_id"] for row in runs],
+        page_ids=page_ids,
+    )
     output_runs: list[dict[str, object]] = []
     content_owner: dict[str, str] = {}
     closure: list[dict[str, object]] = []
     for run in runs:
-        summary = totals[run["run_id"]].summary()
-        summary["target_extent_independent"] = target_extent_independent
-        summary["target_inventory_independent"] = target_inventory_independent
-        summary["target_review_complete"] = target_review_complete
-        summary["target_mask_provenance"] = target_mask_provenance
+        summary = aggregate_fusion_page_statistics(
+            page_statistics[run["run_id"]]
+        )
         content_sha = str(summary["output_mask_set_sha256"])
         reused_from = content_owner.get(content_sha, "")
         state = "reused_by_sha" if reused_from else "executed"
@@ -367,53 +670,66 @@ def run_fusion_matrix(
                 "reused_from": reused_from,
             }
         )
+        hard_pass = _hard_gate_passes(summary)
+        artifact_complete = run["run_id"] in complete_run_ids
+        source_information_limited = (
+            not target_extent_independent
+            or not target_inventory_independent
+            or not target_review_complete
+        )
+        status = (
+            "family_complete"
+            if hard_pass and artifact_complete
+            else (
+                "information_limited"
+                if hard_pass and not artifact_complete or source_information_limited
+                else "dominated"
+            )
+        )
+        reason = (
+            ""
+            if status == "family_complete"
+            else (
+                "output_artifact_inventory_missing"
+                if hard_pass and not artifact_complete
+                else (
+                    "target_extent_not_independent"
+                    if not target_extent_independent
+                    else (
+                        "target_inventory_not_independent"
+                        if not target_inventory_independent
+                        else "target_review_incomplete"
+                    )
+                )
+                if source_information_limited
+                else "hard_gate_failed"
+            )
+        )
         output_runs.append(
             {
                 **run,
-                "status": (
-                    "family_complete"
-                    if _hard_gate_passes(summary)
-                    else (
-                        "information_limited"
-                        if not target_extent_independent
-                        or not target_inventory_independent
-                        or not target_review_complete
-                        else "dominated"
-                    )
-                ),
-                "closure_reason": (
-                    ""
-                    if _hard_gate_passes(summary)
-                    else (
-                        (
-                            "target_extent_not_independent"
-                            if not target_extent_independent
-                            else (
-                                "target_inventory_not_independent"
-                                if not target_inventory_independent
-                                else "target_review_incomplete"
-                            )
-                        )
-                        if not target_extent_independent
-                        or not target_inventory_independent
-                        or not target_review_complete
-                        else "hard_gate_failed"
-                    )
-                ),
+                "status": status,
+                "closure_reason": reason,
                 "metrics": summary,
             }
         )
-    return {
+    result = {
         "schema_version": "inpaint-detector-fusion-results-v4",
         "manifest_sha256": _sha256(manifest_path),
         "spec_sha256": _sha256(spec_path),
+        "page_ids": page_ids,
         "candidate_count": len(candidates),
         "logical_combination_count": len(runs),
         "physical_output_count": len(content_owner),
         "unaccounted_combination_count": 0,
         "closure_ledger": closure,
+        "logical_inventory_sha256": _logical_inventory_sha256(closure),
         "runs": output_runs,
+        "pages": page_statistics,
     }
+    if output_inventory is not None:
+        result["output_artifact_inventory"] = output_inventory
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -435,7 +751,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = run_fusion_matrix(args.manifest.resolve(), args.spec.resolve())
+        payload = run_fusion_matrix(
+            args.manifest.resolve(),
+            args.spec.resolve(),
+            output_root=output_root,
+        )
         _write_json(output_root / "fusion-results.json", payload)
         if managed is not None:
             managed.complete(

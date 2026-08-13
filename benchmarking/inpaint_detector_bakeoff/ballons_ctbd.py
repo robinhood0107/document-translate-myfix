@@ -183,11 +183,26 @@ def _build_content_mask(
 class BallonsCTBDReference:
     """Exact Python CTBD preprocessing and content-mask reference adapter."""
 
-    def __init__(self, model_path: str, providers: list[str], settings: CTBDSettings | None = None):
+    def __init__(
+        self,
+        model_path: str,
+        providers: list[str],
+        settings: CTBDSettings | None = None,
+        *,
+        disable_cpu_fallback: bool = False,
+    ):
         import onnxruntime as ort
 
         self.settings = settings or CTBDSettings()
-        self.session = ort.InferenceSession(model_path, providers=list(providers))
+        options = ort.SessionOptions()
+        if disable_cpu_fallback:
+            options.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
+        self.disable_cpu_fallback = bool(disable_cpu_fallback)
+        self.session = ort.InferenceSession(
+            model_path,
+            sess_options=options,
+            providers=list(providers),
+        )
         self.slicer = ImageSlicer(
             height_to_width_ratio_threshold=3.5,
             target_slice_ratio=3.0,

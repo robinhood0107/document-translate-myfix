@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,10 @@ EXTENT_CHOICES = frozenset(
     }
 )
 SEMANTIC_CHOICES = frozenset({"required", "preserve", "ambiguous", "not_text"})
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -131,6 +136,7 @@ def record_independent_target_review(
         "candidate_seen": False,
         "review_complete": True,
         "review_ledger": str(ledger_path.resolve()),
+        "review_ledger_sha256": _sha256(ledger_path),
         "decisions": normalized,
         "full_page_inventory": normalized_inventory,
     }

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 from pathlib import Path
+import platform
+import subprocess
 import time
 from typing import Mapping
 
@@ -12,6 +14,10 @@ import numpy as np
 from modules.masking.ctd_refiner import CTDRefiner, CTDRefinerSettings
 
 from .contracts import CandidateMaskResult, binary_mask
+from .synthetic_training import (
+    supported_font_phrase_pairs,
+    synthetic_training_digest,
+)
 
 
 CHECKPOINT_SCHEMA = "inpaint-ctd-synthetic-finetune-checkpoint-v4"
@@ -21,6 +27,7 @@ CHECKPOINT_SELECTION_CONTRACT = (
     "pareto_instance_seed_recall_all_page_false_claim_"
     "text_page_false_claim_no_text_false_claim_pixel_quality_v3"
 )
+SOURCE_DEPENDENCY_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _sha256(path: Path) -> str:
@@ -41,6 +48,107 @@ def _is_code_commit(value: str) -> bool:
     return len(value) in {40, 64} and all(
         character in "0123456789abcdef" for character in value
     )
+
+
+def source_dependency_provenance() -> dict[str, str]:
+    """Hash the CTD implementation closure that affects train/eval/export."""
+
+    paths = sorted(
+        (SOURCE_DEPENDENCY_ROOT / "modules" / "masking" / "ctd_vendor").rglob(
+            "*.py"
+        )
+    )
+    paths.extend(
+        [
+            SOURCE_DEPENDENCY_ROOT / "modules" / "masking" / "ctd_refiner.py",
+            SOURCE_DEPENDENCY_ROOT / "modules" / "utils" / "mask_roi.py",
+            SOURCE_DEPENDENCY_ROOT / "modules" / "utils" / "textblock.py",
+        ]
+    )
+    return {
+        path.relative_to(SOURCE_DEPENDENCY_ROOT).as_posix(): _sha256(path)
+        for path in sorted(set(paths))
+    }
+
+
+def current_code_commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=Path(__file__).resolve().parents[2],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = result.stdout.strip().lower()
+    if not _is_code_commit(commit):
+        raise RuntimeError("unable to resolve the current Git commit")
+    return commit
+
+
+def font_asset_provenance(font_paths: tuple[Path, ...]) -> list[dict[str, object]]:
+    normalized = tuple(path.resolve() for path in font_paths)
+    supported = supported_font_phrase_pairs(normalized)
+    phrases_by_path: dict[Path, list[str]] = {path: [] for path in normalized}
+    for path, phrase in supported:
+        phrases_by_path[path].append(phrase)
+    return [
+        {
+            "name": path.name,
+            "sha256": _sha256(path),
+            "size_bytes": path.stat().st_size,
+            "supported_phrases": phrases_by_path[path],
+        }
+        for path in normalized
+    ]
+
+
+def evaluation_runtime_provenance(device: str) -> dict[str, object]:
+    import torch
+
+    normalized = str(device).strip()
+    if not normalized:
+        raise ValueError("evaluation device must not be empty")
+    cuda_requested = normalized.startswith("cuda")
+    if cuda_requested and not torch.cuda.is_available():
+        raise RuntimeError("CUDA evaluation requested but CUDA is unavailable")
+    runtime: dict[str, object] = {
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "torch": str(torch.__version__),
+        "numpy": str(np.__version__),
+        "opencv": str(cv2.__version__),
+        "requested_device": normalized,
+        "runtime_provider": "torch_cuda" if cuda_requested else "torch_cpu",
+        "cuda_available": bool(torch.cuda.is_available()),
+        "cuda": str(torch.version.cuda or ""),
+        "cudnn": str(torch.backends.cudnn.version() or ""),
+    }
+    if cuda_requested:
+        index = torch.cuda.current_device() if normalized == "cuda" else torch.device(normalized).index
+        if index is None:
+            index = torch.cuda.current_device()
+        runtime.update(
+            {
+                "cuda_device_index": int(index),
+                "cuda_device_name": str(torch.cuda.get_device_name(index)),
+                "cuda_device_capability": list(torch.cuda.get_device_capability(index)),
+            }
+        )
+    return runtime
+
+
+def cuda_peak_memory_provenance(device: str) -> dict[str, int]:
+    import torch
+
+    if not str(device).startswith("cuda"):
+        return {
+            "peak_memory_allocated_bytes": 0,
+            "peak_memory_reserved_bytes": 0,
+        }
+    return {
+        "peak_memory_allocated_bytes": int(torch.cuda.max_memory_allocated(device)),
+        "peak_memory_reserved_bytes": int(torch.cuda.max_memory_reserved(device)),
+    }
 
 
 def _validated_int(
@@ -168,7 +276,22 @@ def _validate_runtime_versions(value: object) -> None:
             raise ValueError(
                 f"CTD synthetic fine-tune runtime_versions lacks {field}"
             )
+    for field in (
+        "peak_memory_allocated_bytes",
+        "peak_memory_reserved_bytes",
+    ):
+        amount = value.get(field)
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            raise ValueError(
+                f"CTD synthetic fine-tune runtime_versions lacks valid {field}"
+            )
+    allocated = int(value["peak_memory_allocated_bytes"])
+    reserved = int(value["peak_memory_reserved_bytes"])
+    if reserved < allocated:
+        raise ValueError("CTD synthetic fine-tune peak reserved VRAM is below allocated")
     if str(value["device"]).startswith("cuda"):
+        if allocated <= 0 or reserved <= 0:
+            raise ValueError("CUDA training runtime lacks measured peak VRAM")
         if not str(value["cuda"]):
             raise ValueError("CUDA training runtime lacks a CUDA version")
         if not str(value.get("cuda_device_name") or ""):
@@ -180,6 +303,8 @@ def _validate_runtime_versions(value: object) -> None:
             or not all(isinstance(component, int) for component in capability)
         ):
             raise ValueError("CUDA training runtime lacks device capability")
+    elif allocated != 0 or reserved != 0:
+        raise ValueError("CPU training runtime must record zero CUDA peak VRAM")
 
 
 def _validate_font_assets(value: object) -> None:
@@ -214,6 +339,8 @@ def validate_checkpoint_provenance(
     *,
     checkpoint_path: Path,
     base_model_path: Path,
+    font_paths: tuple[Path, ...] = (),
+    expected_code_commit: str | None = None,
 ) -> None:
     if not checkpoint_path.is_file():
         raise FileNotFoundError(checkpoint_path)
@@ -240,6 +367,10 @@ def validate_checkpoint_provenance(
             raise ValueError(
                 f"CTD synthetic fine-tune {field} differs from runtime input"
             )
+    if checkpoint.get("source_dependency_sha256") != source_dependency_provenance():
+        raise ValueError(
+            "CTD synthetic fine-tune source dependency closure differs from runtime"
+        )
     if str(checkpoint.get("training_contract") or "") != TRAINING_CONTRACT:
         raise ValueError("CTD synthetic fine-tune lacks the synthetic-only contract")
     if (
@@ -276,14 +407,47 @@ def validate_checkpoint_provenance(
         or epoch > int(normalized_hyperparameters["epochs"])
     ):
         raise ValueError("CTD synthetic fine-tune checkpoint epoch is invalid")
-    for field in ("train_dataset_sha256", "dev_dataset_sha256"):
-        if not _is_sha256(str(checkpoint.get(field) or "")):
-            raise ValueError(f"CTD synthetic fine-tune lacks {field}")
+    normalized_fonts = tuple(path.resolve() for path in font_paths)
+    declared_fonts = checkpoint.get("font_assets")
+    actual_fonts = font_asset_provenance(normalized_fonts)
+    if declared_fonts != actual_fonts:
+        raise ValueError("CTD synthetic fine-tune font assets differ from runtime inputs")
+    shape = (
+        int(normalized_hyperparameters["image_size"]),
+        int(normalized_hyperparameters["image_size"]),
+    )
+    train_seeds = tuple(range(seed, seed + train_samples))
+    dev_seeds = tuple(
+        range(seed + train_samples, seed + train_samples + dev_samples)
+    )
+    expected_datasets = {
+        "train_dataset_sha256": synthetic_training_digest(
+            train_seeds,
+            shape=shape,
+            font_paths=normalized_fonts,
+        ),
+        "dev_dataset_sha256": synthetic_training_digest(
+            dev_seeds,
+            shape=shape,
+            font_paths=normalized_fonts,
+        ),
+    }
+    for field, expected_digest in expected_datasets.items():
+        declared_digest = str(checkpoint.get(field) or "")
+        if not _is_sha256(declared_digest) or declared_digest != expected_digest:
+            raise ValueError(
+                f"CTD synthetic fine-tune {field} differs from regenerated data"
+            )
     code_commit = str(checkpoint.get("code_commit") or "")
     if not _is_code_commit(code_commit):
         raise ValueError("CTD synthetic fine-tune lacks a valid code_commit")
+    runtime_commit = (expected_code_commit or current_code_commit()).lower()
+    if code_commit != runtime_commit:
+        raise ValueError(
+            "CTD synthetic fine-tune code_commit differs from current Git HEAD"
+        )
     _validate_runtime_versions(checkpoint.get("runtime_versions"))
-    _validate_font_assets(checkpoint.get("font_assets"))
+    _validate_font_assets(declared_fonts)
 
 
 class _FineTunedCTDRefiner(CTDRefiner):
@@ -328,6 +492,8 @@ class CTDSyntheticFineTuneReference:
         detect_size: int = 1280,
         dilate_size: int = 3,
         max_batches: int = 4,
+        font_paths: tuple[str | Path, ...] = (),
+        expected_code_commit: str | None = None,
     ) -> None:
         import torch
 
@@ -345,6 +511,10 @@ class CTDSyntheticFineTuneReference:
             raise ValueError("CTD synthetic fine-tune max_batches must be positive")
         self.base_model_path = Path(base_model_path).resolve()
         self.checkpoint_path = Path(checkpoint_path).resolve()
+        self.font_paths = tuple(Path(path).resolve() for path in font_paths)
+        self.evaluation_runtime = evaluation_runtime_provenance(self.device)
+        if self.device.startswith("cuda"):
+            torch.cuda.reset_peak_memory_stats(self.device)
         if not self.checkpoint_path.is_file():
             raise FileNotFoundError(self.checkpoint_path)
         self.checkpoint_sha256 = _sha256(self.checkpoint_path)
@@ -359,6 +529,8 @@ class CTDSyntheticFineTuneReference:
             checkpoint,
             checkpoint_path=self.checkpoint_path,
             base_model_path=self.base_model_path,
+            font_paths=self.font_paths,
+            expected_code_commit=expected_code_commit,
         )
         self.checkpoint = checkpoint
         settings = CTDRefinerSettings(
@@ -403,6 +575,9 @@ class CTDSyntheticFineTuneReference:
                 "generator_sha256": str(self.checkpoint["generator_sha256"]),
                 "detector_sha256": str(self.checkpoint["detector_sha256"]),
                 "trainer_sha256": str(self.checkpoint["trainer_sha256"]),
+                "source_dependency_sha256": dict(
+                    self.checkpoint["source_dependency_sha256"]
+                ),
                 "training_contract": str(self.checkpoint["training_contract"]),
                 "checkpoint_selection_contract": str(
                     self.checkpoint["checkpoint_selection_contract"]
@@ -420,5 +595,16 @@ class CTDSyntheticFineTuneReference:
                     self.checkpoint["runtime_versions"]
                 ),
                 "code_commit": str(self.checkpoint["code_commit"]),
+                "raw_output_contract": "native_finetuned_ctd_text_seg",
+                "refined_output_contract": "exact_identity_reuse_of_raw",
+                "dilated_output_contract": "elliptical_native3_from_raw",
+                "raw_output_sha256": hashlib.sha256(
+                    raw.tobytes(order="C")
+                ).hexdigest(),
+                "refined_output_sha256": hashlib.sha256(
+                    raw.tobytes(order="C")
+                ).hexdigest(),
+                "evaluation_runtime": dict(self.evaluation_runtime),
+                **cuda_peak_memory_provenance(self.device),
             },
         )

@@ -47,7 +47,18 @@
       "family_id": "detector-fusion",
       "role": "seed",
       "evaluation_scopes": ["synthetic", "e1"],
-      "variants": ["single", "or", "and", "gated_recovery"]
+      "variants": ["single", "or", "and", "gated_recovery"],
+      "candidate_ids": [
+        "current_ctd_raw",
+        "current_ctd_refined",
+        "ballons_ctd_raw",
+        "ballons_ctd_refined",
+        "ballons_ctd_native3",
+        "ctbd_raw",
+        "sickzil_raw",
+        "manga109_text",
+        "ownership_roi_ctd"
+      ]
     },
     {
       "family_id": "roi-trigger",

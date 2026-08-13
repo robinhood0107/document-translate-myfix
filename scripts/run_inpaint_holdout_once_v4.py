@@ -13,13 +13,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarking.inpaint_detector_bakeoff.holdout import (  # noqa: E402
+    canonical_holdout_command,
     claim_holdout_once,
-    execution_argv_sha256,
+    require_a5_product_stack_runner,
     validate_holdout_prerequisites,
 )
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_a5_product_stack_runner()
     parser = argparse.ArgumentParser(
         description=(
             "Atomically consume and run one sealed inpaint holdout. The lock is "
@@ -41,9 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_holdout_prerequisites(prerequisites)
     execution = prerequisites["execution_binding"]
     assert isinstance(execution, dict)
-    if command != execution["argv"] or execution_argv_sha256(command) != execution[
-        "argv_sha256"
-    ]:
+    if command != canonical_holdout_command(execution):
         raise ValueError("holdout command differs from sealed execution argv")
     current_commit = subprocess.run(
         ["git", "rev-parse", "HEAD"],

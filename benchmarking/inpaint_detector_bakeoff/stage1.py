@@ -56,6 +56,324 @@ class PageMasks:
     regions: tuple[RegionMasks, ...] = ()
 
 
+SOURCE_ONLY_MANIFEST_SCHEMA_V4 = "inpaint-factorized-source-manifest-v4"
+SOURCE_ONLY_SPLITS_V4 = frozenset(
+    {
+        "development",
+        "development_source_only",
+        "synthetic_known_ground_truth",
+    }
+)
+
+
+def _canonical_json_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def source_manifest_page_inventory_sha256(
+    pages: Iterable[dict[str, object]],
+) -> str:
+    """Bind the page inventory to ids, source bytes, and evaluation artifacts."""
+
+    records: list[dict[str, str]] = []
+    for page in pages:
+        page_id = str(page.get("page_id") or "").strip()
+        source_sha256 = str(page.get("source_sha256") or "").lower()
+        artifacts = page.get("artifact_sha256")
+        if not page_id or len(source_sha256) != 64 or not isinstance(artifacts, dict):
+            raise ValueError("source-only page inventory record is incomplete")
+        records.append(
+            {
+                "page_id": page_id,
+                "source_sha256": source_sha256,
+                "artifact_inventory_sha256": _canonical_json_sha256(artifacts),
+            }
+        )
+    records.sort(key=lambda value: value["page_id"])
+    return _canonical_json_sha256(records)
+
+
+def _resolve_manifest_artifact(manifest_path: Path, value: object) -> Path | None:
+    normalized = _path_value(value)
+    if normalized is None:
+        return None
+    artifact = Path(normalized)
+    if not artifact.is_absolute():
+        artifact = manifest_path.parent / artifact
+    return artifact.resolve()
+
+
+def _artifact_sha256(path: Path) -> str:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def manifest_page_artifact_sha256(
+    manifest_path: Path,
+    page: dict[str, object],
+) -> dict[str, object]:
+    """Hash every source/evaluation artifact consumed from one v4 page.
+
+    This deliberately derives the inventory from path-bearing contract fields
+    instead of trusting a producer supplied list.  A newly added evaluation
+    mask therefore cannot silently escape the sealed artifact map.
+    """
+
+    hashes: dict[str, object] = {}
+    for field in (
+        "path",
+        "target_text_mask",
+        "preserve_mask",
+        "protected_structure_mask",
+        "ambiguous_structure_mask",
+        "ownership_mask",
+        "bubble_interior_mask",
+        "corner_protect_mask",
+        "claim_seed_mask",
+        "existing_source_edit_mask",
+        "baseline",
+        "baseline_mask",
+        "known_background",
+    ):
+        artifact = _resolve_manifest_artifact(manifest_path, page.get(field))
+        if artifact is not None:
+            hashes[field] = _artifact_sha256(artifact)
+
+    instance_hashes: dict[str, str] = {}
+    instances = page.get("target_instances", [])
+    if not isinstance(instances, list):
+        raise ValueError("source-only manifest target_instances must be an array")
+    for instance in instances:
+        if not isinstance(instance, dict):
+            raise ValueError("source-only manifest target instance must be an object")
+        instance_id = str(instance.get("instance_id") or "").strip()
+        artifact = _resolve_manifest_artifact(
+            manifest_path,
+            instance.get("mask_path", instance.get("mask")),
+        )
+        if not instance_id or artifact is None or instance_id in instance_hashes:
+            raise ValueError(
+                "source-only manifest target instance lacks a unique mask identity"
+            )
+        instance_hashes[instance_id] = _artifact_sha256(artifact)
+    hashes["target_instances"] = instance_hashes
+
+    region_hashes: dict[str, dict[str, str]] = {}
+    regions = page.get("regions", [])
+    if not isinstance(regions, list):
+        raise ValueError("source-only manifest regions must be an array")
+    for region in regions:
+        if not isinstance(region, dict):
+            raise ValueError("source-only manifest region must be an object")
+        region_id = str(region.get("region_id") or "").strip()
+        if not region_id or region_id in region_hashes:
+            raise ValueError("source-only manifest region id must be unique")
+        current: dict[str, str] = {}
+        for field in (
+            "bubble_interior_mask",
+            "ownership_mask",
+            "protected_structure_mask",
+            "ambiguous_structure_mask",
+            "corner_protect_mask",
+        ):
+            artifact = _resolve_manifest_artifact(manifest_path, region.get(field))
+            if artifact is None:
+                raise ValueError(f"source-only manifest region {region_id} lacks {field}")
+            current[field] = _artifact_sha256(artifact)
+        region_hashes[region_id] = current
+    hashes["regions"] = region_hashes
+
+    reference = page.get("paired_reference")
+    if reference is not None:
+        if not isinstance(reference, dict) or reference.get("proposal_only") is not True:
+            raise ValueError("source-only paired reference must be proposal_only")
+        artifact = _resolve_manifest_artifact(manifest_path, reference.get("path"))
+        if artifact is None:
+            raise ValueError("source-only paired reference lacks a path")
+        actual = _artifact_sha256(artifact)
+        if actual != str(reference.get("reference_sha256") or "").lower():
+            raise ValueError("source-only paired reference SHA differs from bytes")
+        source_artifact = _resolve_manifest_artifact(manifest_path, page.get("path"))
+        if source_artifact is None or str(
+            reference.get("source_sha256") or ""
+        ).lower() != _artifact_sha256(source_artifact):
+            raise ValueError("source-only paired reference source SHA differs")
+        hashes["paired_reference"] = actual
+    return hashes
+
+
+def validate_source_only_manifest_v4(path: Path) -> dict[str, object]:
+    """Validate the sealed, candidate-independent v4 evaluation contract.
+
+    Legacy stage-one fixtures intentionally continue to use
+    :func:`load_stage1_manifest`.  Real E1/synthetic evaluation must call this
+    stronger entry point before loading a detector or creating an output run.
+    """
+
+    manifest_path = path.resolve()
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("source-only manifest root must be an object")
+    if payload.get("schema_version") != SOURCE_ONLY_MANIFEST_SCHEMA_V4:
+        raise ValueError("evaluation requires the strict source-only manifest v4")
+    split_role = str(payload.get("split_role") or "")
+    if split_role not in SOURCE_ONLY_SPLITS_V4:
+        raise ValueError("source-only manifest has an unsupported split role")
+    if not str(payload.get("corpus_id") or "").strip():
+        raise ValueError("source-only manifest lacks corpus_id")
+    if payload.get("annotation_frozen_before_candidate") is not True:
+        raise ValueError("source-only annotations were not frozen before candidates")
+    if payload.get("candidate_seen") is not False:
+        raise ValueError("source-only manifest was derived after candidate inspection")
+    for field in (
+        "target_extent_independent",
+        "target_inventory_independent",
+        "target_review_complete",
+    ):
+        if payload.get(field) is not True:
+            raise ValueError(f"source-only manifest lacks {field}")
+
+    # Authenticate the manifest itself before opening any path it names.  An
+    # unsealed JSON file must never be able to turn validation into an
+    # arbitrary artifact reader.
+    seal_path = manifest_path.with_suffix(manifest_path.suffix + ".seal.json")
+    if not seal_path.is_file():
+        raise ValueError("source-only manifest lacks its seal sidecar")
+    seal = json.loads(seal_path.read_text(encoding="utf-8"))
+    if not isinstance(seal, dict):
+        raise ValueError("source-only manifest seal root must be an object")
+    if seal.get("schema_version") not in {
+        "inpaint-factorized-manifest-seal-v4-independent",
+        "inpaint-factorized-manifest-seal-v4-synthetic",
+        "inpaint-factorized-manifest-seal-v4",
+    }:
+        raise ValueError("source-only manifest seal has an unsupported schema")
+    manifest_sha256 = _artifact_sha256(manifest_path)
+    if seal.get("manifest_sha256") != manifest_sha256:
+        raise ValueError("source-only manifest seal SHA differs from manifest bytes")
+    if seal.get("candidate_generated") is not False:
+        raise ValueError("source-only manifest seal was written after a candidate")
+    if seal.get("candidate_seen") is not False:
+        raise ValueError("source-only manifest seal records candidate inspection")
+    if seal.get("annotation_frozen_before_candidate") is not True:
+        raise ValueError("source-only manifest seal lacks frozen annotation status")
+
+    pages = payload.get("pages")
+    if not isinstance(pages, list) or not pages:
+        raise ValueError("source-only manifest requires a non-empty page inventory")
+    page_ids: list[str] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            raise ValueError("source-only manifest page must be an object")
+        page_id = str(page.get("page_id") or "").strip()
+        if not page_id or page_id in page_ids:
+            raise ValueError("source-only manifest has an empty or duplicate page id")
+        page_ids.append(page_id)
+        if page.get("candidate_seen") is not False:
+            raise ValueError(f"source-only page {page_id} was candidate-derived")
+        if page.get("annotation_frozen_before_candidate") is not True:
+            raise ValueError(f"source-only page {page_id} was not frozen")
+        annotation_basis = str(page.get("annotation_basis") or "")
+        if annotation_basis not in {
+            "source_only_v4",
+            "synthetic_known_ground_truth_v4",
+        }:
+            raise ValueError(f"source-only page {page_id} lacks annotation_basis")
+        for field in (
+            "target_extent_independent",
+            "target_inventory_independent",
+            "target_review_complete",
+        ):
+            if page.get(field) is not True:
+                raise ValueError(f"source-only page {page_id} lacks {field}")
+        declared = page.get("artifact_sha256")
+        if not isinstance(declared, dict):
+            raise ValueError(f"source-only page {page_id} lacks artifact_sha256")
+        actual = manifest_page_artifact_sha256(manifest_path, page)
+        if declared != actual:
+            raise ValueError(f"source-only page {page_id} artifact SHA inventory differs")
+        source_sha256 = str(page.get("source_sha256") or "").lower()
+        if source_sha256 != actual.get("path"):
+            raise ValueError(f"source-only page {page_id} source SHA differs")
+
+    sorted_ids = sorted(page_ids)
+    inventory_sha256 = source_manifest_page_inventory_sha256(pages)
+    if payload.get("page_count") != len(page_ids):
+        raise ValueError("source-only manifest page_count differs from pages")
+    if payload.get("page_ids") != sorted_ids:
+        raise ValueError("source-only manifest page_ids differs from pages")
+    if payload.get("page_inventory_sha256") != inventory_sha256:
+        raise ValueError("source-only manifest page inventory SHA differs")
+
+    parsed_pages = load_stage1_manifest(manifest_path)
+    if sorted(page.page_id for page in parsed_pages) != sorted_ids:
+        raise ValueError("source-only canonical page inventory differs")
+    raw_by_id = {str(page["page_id"]): page for page in pages}
+    for page in parsed_pages:
+        image = _read_image(page.source_image)
+        declared_page = raw_by_id[page.page_id]
+        declared_width = declared_page.get("width")
+        declared_height = declared_page.get("height")
+        if (
+            isinstance(declared_width, bool)
+            or not isinstance(declared_width, int)
+            or isinstance(declared_height, bool)
+            or not isinstance(declared_height, int)
+            or (declared_height, declared_width) != image.shape[:2]
+        ):
+            raise ValueError(
+                f"source-only page {page.page_id} dimensions differ from source"
+            )
+        existing_edit = _resolve_manifest_artifact(
+            manifest_path,
+            declared_page.get("existing_source_edit_mask"),
+        )
+        load_page_masks(
+            page,
+            image.shape[:2],
+            existing_edit_path=str(existing_edit) if existing_edit is not None else None,
+            strict_binary=True,
+        )
+        for field in ("baseline_mask",):
+            artifact = _resolve_manifest_artifact(manifest_path, declared_page.get(field))
+            if artifact is not None:
+                _read_mask_contract(
+                    str(artifact),
+                    image.shape[:2],
+                    strict_binary=True,
+                )
+        for field in ("baseline", "known_background"):
+            artifact = _resolve_manifest_artifact(manifest_path, declared_page.get(field))
+            if artifact is not None:
+                auxiliary = _read_image(str(artifact))
+                if auxiliary.shape[:2] != image.shape[:2]:
+                    raise ValueError(
+                        f"source-only page {page.page_id} {field} shape differs"
+                    )
+
+    return {
+        "schema_version": SOURCE_ONLY_MANIFEST_SCHEMA_V4,
+        "corpus_id": str(payload["corpus_id"]),
+        "split_role": split_role,
+        "manifest_sha256": manifest_sha256,
+        "seal_sha256": _artifact_sha256(seal_path),
+        "page_count": len(page_ids),
+        "page_ids": sorted_ids,
+        "page_inventory_sha256": inventory_sha256,
+    }
+
+
 def _path_value(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
@@ -67,7 +385,8 @@ def _path_value(value: object) -> str | None:
 
 
 def load_stage1_manifest(path: Path) -> list[Stage1Page]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    manifest_path = path.resolve()
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     schema_version = str(payload.get("schema_version") or "").strip()
     is_v3 = schema_version == "inpaint-detector-bakeoff-manifest-v3"
     is_v4 = schema_version in {
@@ -213,6 +532,13 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
                 "target_instances",
                 "regions",
                 "expected_edit",
+                "protected_structure_mask",
+                "ambiguous_structure_mask",
+                "ownership_mask",
+                "claim_seed_mask",
+                "bubble_interior_mask",
+                "corner_protect_mask",
+                "existing_source_edit_mask",
             }
             missing = sorted(required_fields.difference(entry))
             if missing:
@@ -226,24 +552,81 @@ def load_stage1_manifest(path: Path) -> list[Stage1Page]:
                 raise ValueError("required manifest v4 page needs required target instances")
             if expected_edit == "none" and (target is not None or required_instances):
                 raise ValueError("no-edit manifest v4 page cannot contain required targets")
+        def resolved(value: object) -> str | None:
+            artifact = _resolve_manifest_artifact(manifest_path, value)
+            return str(artifact) if artifact is not None else None
+
+        normalized_regions = tuple(
+            RegionEvaluationSpec(
+                region_id=region.region_id,
+                bubble_route_class=region.bubble_route_class,
+                bubble_interior_mask=str(
+                    _resolve_manifest_artifact(
+                        manifest_path, region.bubble_interior_mask
+                    )
+                ),
+                ownership_mask=str(
+                    _resolve_manifest_artifact(manifest_path, region.ownership_mask)
+                ),
+                protected_structure_mask=str(
+                    _resolve_manifest_artifact(
+                        manifest_path, region.protected_structure_mask
+                    )
+                ),
+                ambiguous_structure_mask=str(
+                    _resolve_manifest_artifact(
+                        manifest_path, region.ambiguous_structure_mask
+                    )
+                ),
+                corner_protect_mask=str(
+                    _resolve_manifest_artifact(
+                        manifest_path, region.corner_protect_mask
+                    )
+                ),
+            )
+            for region in regions
+        )
+        normalized_instances = tuple(
+            TargetInstance(
+                instance.instance_id,
+                str(_resolve_manifest_artifact(manifest_path, instance.mask_path)),
+                instance.region_id,
+                instance.semantic_role,
+                instance.processing_action,
+                instance.priority,
+            )
+            for instance in target_instances
+        )
+        normalized_reference = (
+            ProposalOnlyReference(
+                source_sha256=paired_reference.source_sha256,
+                reference_sha256=paired_reference.reference_sha256,
+                path=str(
+                    _resolve_manifest_artifact(manifest_path, paired_reference.path)
+                ),
+                proposal_only=paired_reference.proposal_only,
+            )
+            if paired_reference is not None
+            else None
+        )
         records.append(
             Stage1Page(
                 page_id=str(entry.get("page_id") or "").strip(),
-                source_image=str(entry.get("path") or "").strip(),
-                target_text_mask=target,
-                protected_structure_mask=_path_value(entry.get("protected_structure_mask")),
-                ambiguous_structure_mask=_path_value(entry.get("ambiguous_structure_mask")),
-                ownership_mask=_path_value(entry.get("ownership_mask")),
-                claim_seed_mask=_path_value(entry.get("claim_seed_mask")),
+                source_image=resolved(entry.get("path")) or "",
+                target_text_mask=resolved(target),
+                protected_structure_mask=resolved(entry.get("protected_structure_mask")),
+                ambiguous_structure_mask=resolved(entry.get("ambiguous_structure_mask")),
+                ownership_mask=resolved(entry.get("ownership_mask")),
+                claim_seed_mask=resolved(entry.get("claim_seed_mask")),
                 no_edit=expected_edit == "none",
-                target_instances=tuple(target_instances),
+                target_instances=normalized_instances,
                 bubble_route_class=route_class or None,
-                bubble_interior_mask=_path_value(entry.get("bubble_interior_mask")),
-                corner_protect_mask=_path_value(entry.get("corner_protect_mask")),
+                bubble_interior_mask=resolved(entry.get("bubble_interior_mask")),
+                corner_protect_mask=resolved(entry.get("corner_protect_mask")),
                 expected_edit=expected_edit,
-                regions=tuple(regions),
-                preserve_mask=_path_value(entry.get("preserve_mask")),
-                paired_reference=paired_reference,
+                regions=normalized_regions,
+                preserve_mask=resolved(entry.get("preserve_mask")),
+                paired_reference=normalized_reference,
                 target_mask_provenance=str(
                     entry.get("target_mask_provenance") or "legacy_unknown"
                 ).strip(),
@@ -279,11 +662,24 @@ def _file_sha256(path: str) -> str:
 
 
 def _read_mask(path: str | None, shape: tuple[int, int]) -> np.ndarray:
+    return _read_mask_contract(path, shape, strict_binary=False)
+
+
+def _read_mask_contract(
+    path: str | None,
+    shape: tuple[int, int],
+    *,
+    strict_binary: bool,
+) -> np.ndarray:
     if not path:
         return np.zeros(shape, dtype=np.uint8)
     mask = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
     if mask is None or mask.size == 0:
         raise FileNotFoundError(f"unable to read evaluation mask: {path}")
+    if strict_binary:
+        values = np.unique(mask)
+        if np.any((values != 0) & (values != 255)):
+            raise ValueError(f"strict evaluation mask is not binary: {path}")
     return binary_mask(mask, shape)
 
 
@@ -292,23 +688,29 @@ def load_page_masks(
     shape: tuple[int, int],
     *,
     existing_edit_path: str | None = None,
+    strict_binary: bool = False,
 ) -> PageMasks:
-    target = _read_mask(page.target_text_mask, shape)
-    protected = _read_mask(page.protected_structure_mask, shape)
-    ambiguous = _read_mask(page.ambiguous_structure_mask, shape)
+    read_mask = lambda value: _read_mask_contract(
+        value,
+        shape,
+        strict_binary=strict_binary,
+    )
+    target = read_mask(page.target_text_mask)
+    protected = read_mask(page.protected_structure_mask)
+    ambiguous = read_mask(page.ambiguous_structure_mask)
     ownership = (
-        _read_mask(page.ownership_mask, shape)
+        read_mask(page.ownership_mask)
         if page.ownership_mask
         else np.full(shape, 255, dtype=np.uint8)
     )
     claim_seed = (
-        _read_mask(page.claim_seed_mask, shape)
+        read_mask(page.claim_seed_mask)
         if page.claim_seed_mask
         else np.full(shape, 255, dtype=np.uint8)
     )
-    existing_edit = _read_mask(existing_edit_path, shape)
+    existing_edit = read_mask(existing_edit_path)
     all_instance_masks = tuple(
-        (record, _read_mask(record.mask_path, shape))
+        (record, read_mask(record.mask_path))
         for record in page.target_instances
     )
     target_instances = tuple(
@@ -316,12 +718,16 @@ def load_page_masks(
         for record, mask in all_instance_masks
         if record.priority == "required"
     )
-    preserve = _read_mask(page.preserve_mask, shape)
+    preserve = read_mask(page.preserve_mask)
     declared_preserve = np.zeros(shape, dtype=np.uint8)
     declared_ambiguous = np.zeros(shape, dtype=np.uint8)
+    all_instance_occupied = np.zeros(shape, dtype=np.uint8)
     for record, instance_mask in all_instance_masks:
         if not np.any(instance_mask):
             raise ValueError(f"target instance mask is empty: {record.instance_id}")
+        if np.any((all_instance_occupied > 0) & (instance_mask > 0)):
+            raise ValueError(f"target instance masks overlap: {record.instance_id}")
+        all_instance_occupied[instance_mask > 0] = 255
         if record.priority == "optional":
             declared_preserve[instance_mask > 0] = 255
         elif record.priority == "ambiguous":
@@ -342,8 +748,8 @@ def load_page_masks(
         raise ValueError("preserve_mask must equal the union of optional instances")
     if np.any((declared_ambiguous > 0) & (ambiguous == 0)):
         raise ValueError("ambiguous target instances must be inside ambiguous_structure_mask")
-    bubble_interior = _read_mask(page.bubble_interior_mask, shape)
-    corner = _read_mask(page.corner_protect_mask, shape)
+    bubble_interior = read_mask(page.bubble_interior_mask)
+    corner = read_mask(page.corner_protect_mask)
     assert_disjoint_masks(
         {
             "target_text_mask": target,
@@ -356,14 +762,16 @@ def load_page_masks(
         RegionMasks(
             region.region_id,
             region.bubble_route_class,
-            _read_mask(region.bubble_interior_mask, shape),
-            _read_mask(region.ownership_mask, shape),
-            _read_mask(region.protected_structure_mask, shape),
-            _read_mask(region.ambiguous_structure_mask, shape),
-            _read_mask(region.corner_protect_mask, shape),
+            read_mask(region.bubble_interior_mask),
+            read_mask(region.ownership_mask),
+            read_mask(region.protected_structure_mask),
+            read_mask(region.ambiguous_structure_mask),
+            read_mask(region.corner_protect_mask),
         )
         for region in page.regions
     )
+    if page.ownership_mask and np.any((target > 0) & (ownership == 0)):
+        raise ValueError("required target is outside page ownership mask")
     if region_masks:
         ownership_by_region = {region.region_id: region.ownership for region in region_masks}
         for record, instance_mask in all_instance_masks:
@@ -374,10 +782,31 @@ def load_page_masks(
                     f"{record.instance_id}"
                 )
         region_ownership = np.zeros(shape, dtype=np.uint8)
+        region_interior = np.zeros(shape, dtype=np.uint8)
+        region_protected = np.zeros(shape, dtype=np.uint8)
+        region_ambiguous = np.zeros(shape, dtype=np.uint8)
+        region_corner = np.zeros(shape, dtype=np.uint8)
         for region in region_masks:
             region_ownership[region.ownership > 0] = 255
+            region_interior[region.bubble_interior > 0] = 255
+            region_protected[region.protected > 0] = 255
+            region_ambiguous[region.ambiguous > 0] = 255
+            region_corner[region.corner > 0] = 255
         if np.any((target > 0) & (region_ownership == 0)):
             raise ValueError("required target is outside all region ownership masks")
+        if not np.array_equal(ownership, region_ownership):
+            raise ValueError("page ownership_mask must equal region ownership union")
+        if not np.array_equal(bubble_interior, region_interior):
+            raise ValueError(
+                "page bubble_interior_mask must equal region interior union"
+            )
+        for name, page_mask, region_union in (
+            ("protected_structure_mask", protected, region_protected),
+            ("ambiguous_structure_mask", ambiguous, region_ambiguous),
+            ("corner_protect_mask", corner, region_corner),
+        ):
+            if np.any((region_union > 0) & (page_mask == 0)):
+                raise ValueError(f"page {name} must contain its region union")
     return PageMasks(
         target,
         protected,

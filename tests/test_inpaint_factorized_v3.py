@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 import pytest
 
+import scripts.benchmark_inpaint_factorized_v3 as factorized_runner
+
 from benchmarking.inpaint_detector_bakeoff.contracts import (
     binary_mask,
     CandidateMaskResult,
@@ -33,6 +35,8 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     score_page,
     write_detector_cache,
     _read_image as read_stage1_image,
+    manifest_page_artifact_sha256,
+    source_manifest_page_inventory_sha256,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (
     attach_reconstruction_control,
@@ -48,12 +52,17 @@ from benchmarking.inpaint_detector_bakeoff.silhouette import (
     extract_ballons_native_interior,
     extract_pr2_validated_interior,
 )
+from benchmarking.inpaint_detector_bakeoff.evidence_ledger import (
+    _validate_runtime_evidence_ledger,
+    validate_evidence_artifact,
+)
 from benchmarking.inpaint_detector_bakeoff.paired_target import (
     paired_old_text_proposal,
     source_extent_variants,
 )
 from scripts.benchmark_inpaint_factorized_v3 import (
     _annotation_masks,
+    _fill_conditional_hybrid_regions,
     _prepare_closure_ledger,
     _declared_combinations,
     _route_fill_backend,
@@ -110,6 +119,329 @@ def _write_image(path: Path, image: np.ndarray) -> str:
     return str(path)
 
 
+def _bind_independent_review_fixture(
+    semantic_path: Path,
+    ledger_path: Path,
+    decisions_path: Path,
+) -> None:
+    semantic = json.loads(semantic_path.read_text(encoding="utf-8"))
+    semantic.update(
+        {
+            "schema_version": "inpaint-factorized-source-decisions-v4",
+            "candidate_seen": False,
+            "review_complete": True,
+        }
+    )
+    for page in semantic["pages"]:
+        page.update(
+            {
+                "candidate_seen": False,
+                "reviewed_source_only": True,
+                "review_complete": True,
+            }
+        )
+    semantic_path.write_text(json.dumps(semantic), encoding="utf-8")
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["semantic_manifest"] = str(semantic_path.resolve())
+    ledger["semantic_manifest_sha256"] = hashlib.sha256(
+        semantic_path.read_bytes()
+    ).hexdigest()
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    decisions = json.loads(decisions_path.read_text(encoding="utf-8"))
+    decisions["review_ledger"] = str(ledger_path.resolve())
+    decisions["review_ledger_sha256"] = hashlib.sha256(
+        ledger_path.read_bytes()
+    ).hexdigest()
+    decisions_path.write_text(json.dumps(decisions), encoding="utf-8")
+
+
+def test_independent_review_applier_rejects_candidate_seen_semantics_or_wrong_ledger(
+    tmp_path: Path,
+) -> None:
+    semantic = tmp_path / "semantic.json"
+    ledger = tmp_path / "ledger.json"
+    decisions = tmp_path / "decisions.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-decisions-v4",
+                "candidate_seen": True,
+                "review_complete": True,
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "candidate_seen": False,
+                        "reviewed_source_only": True,
+                        "review_complete": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    ledger.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-ledger-v4",
+                "candidate_seen": False,
+                "semantic_manifest": str(semantic.resolve()),
+                "semantic_manifest_sha256": hashlib.sha256(
+                    semantic.read_bytes()
+                ).hexdigest(),
+                "rows": [],
+                "full_page_inventory_pending": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    decisions.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-independent-target-review-decisions-v4",
+                "candidate_seen": False,
+                "review_complete": True,
+                "review_ledger": str(ledger.resolve()),
+                "review_ledger_sha256": hashlib.sha256(
+                    ledger.read_bytes()
+                ).hexdigest(),
+                "decisions": [],
+                "full_page_inventory": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="semantic review input is not source-only"):
+        apply_independent_target_review(
+            semantic, ledger, decisions, tmp_path / "candidate-seen-output"
+        )
+
+    payload = json.loads(semantic.read_text(encoding="utf-8"))
+    payload["candidate_seen"] = False
+    semantic.write_text(json.dumps(payload), encoding="utf-8")
+    ledger_payload = json.loads(ledger.read_text(encoding="utf-8"))
+    ledger_payload["semantic_manifest_sha256"] = hashlib.sha256(
+        semantic.read_bytes()
+    ).hexdigest()
+    ledger.write_text(json.dumps(ledger_payload), encoding="utf-8")
+    decision_payload = json.loads(decisions.read_text(encoding="utf-8"))
+    decision_payload["review_ledger"] = str(tmp_path / "different-ledger.json")
+    decision_payload["review_ledger_sha256"] = hashlib.sha256(
+        ledger.read_bytes()
+    ).hexdigest()
+    decisions.write_text(json.dumps(decision_payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="bind a different review ledger"):
+        apply_independent_target_review(
+            semantic, ledger, decisions, tmp_path / "wrong-ledger-output"
+        )
+
+
+def _write_strict_source_manifest(
+    path: Path,
+    payload: dict[str, object],
+) -> Path:
+    pages = payload.get("pages")
+    assert isinstance(pages, list) and pages
+    for page_index, page in enumerate(pages):
+        assert isinstance(page, dict)
+        page_id = str(page.get("page_id") or f"p{page_index}")
+        source_path = page.get("path")
+        if not isinstance(source_path, str) or not source_path:
+            source_path = _write_image(
+                path.parent / f"{page_id}-source.png",
+                np.full((32, 48, 3), 200, np.uint8),
+            )
+            page["path"] = source_path
+        source = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
+        assert source is not None
+        shape = source.shape[:2]
+        zero = np.zeros(shape, np.uint8)
+        full = np.full(shape, 255, np.uint8)
+        zero_path = _write_image(path.parent / f"{page_id}-zero.png", zero)
+        full_path = _write_image(path.parent / f"{page_id}-full.png", full)
+        raw_instances = page.get("target_instances", [])
+        assert isinstance(raw_instances, list)
+        required_union = np.zeros(shape, np.uint8)
+        preserve_union = np.zeros(shape, np.uint8)
+        ambiguous_union = np.zeros(shape, np.uint8)
+        raw_regions = page.get("regions")
+        if not isinstance(raw_regions, list) or not raw_regions:
+            raw_regions = [{"region_id": "region"}]
+            page["regions"] = raw_regions
+        region_ids = [str(region.get("region_id") or "") for region in raw_regions]
+        for instance_index, instance in enumerate(raw_instances):
+            assert isinstance(instance, dict)
+            instance.setdefault("region_id", region_ids[0])
+            instance.setdefault("semantic_role", "dialogue_bubble")
+            priority = str(instance.get("priority") or "required")
+            instance["priority"] = priority
+            instance.setdefault(
+                "processing_action",
+                "translate_inpaint"
+                if priority == "required"
+                else ("preserve" if priority == "optional" else "review"),
+            )
+            mask_path = instance.get("mask_path")
+            mask = (
+                cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+                if isinstance(mask_path, str) and mask_path
+                else None
+            )
+            if mask is None:
+                mask = np.zeros(shape, np.uint8)
+                y = 2 + instance_index * 4
+                mask[y:y + 2, 3:7] = 255
+                mask_path = _write_image(
+                    path.parent / f"{page_id}-instance-{instance_index}.png",
+                    mask,
+                )
+                instance["mask_path"] = mask_path
+            destination = (
+                required_union
+                if priority == "required"
+                else preserve_union
+                if priority == "optional"
+                else ambiguous_union
+            )
+            destination[mask > 0] = 255
+        target_path = _write_image(
+            path.parent / f"{page_id}-target.png", required_union
+        )
+        preserve_path = _write_image(
+            path.parent / f"{page_id}-preserve.png", preserve_union
+        )
+        ambiguous_path = _write_image(
+            path.parent / f"{page_id}-ambiguous.png", ambiguous_union
+        )
+        page.update(
+            {
+                "target_text_mask": target_path,
+                "preserve_mask": preserve_path,
+                "protected_structure_mask": zero_path,
+                "ambiguous_structure_mask": ambiguous_path,
+                "ownership_mask": full_path,
+                "claim_seed_mask": full_path,
+                "bubble_interior_mask": full_path,
+                "corner_protect_mask": zero_path,
+                "existing_source_edit_mask": str(
+                    page.get("existing_source_edit_mask") or zero_path
+                ),
+                "expected_edit": "required" if np.any(required_union) else "none",
+                "width": shape[1],
+                "height": shape[0],
+                "candidate_seen": False,
+                "annotation_frozen_before_candidate": True,
+                "annotation_basis": "source_only_v4",
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+                "target_mask_provenance": str(
+                    page.get("target_mask_provenance") or "source_only_v4"
+                ),
+            }
+        )
+        for region in raw_regions:
+            assert isinstance(region, dict)
+            region.update(
+                {
+                    "bubble_route_class": str(
+                        region.get("bubble_route_class") or "clean_flat"
+                    ),
+                    "bubble_interior_mask": full_path,
+                    "ownership_mask": full_path,
+                    "protected_structure_mask": zero_path,
+                    "ambiguous_structure_mask": ambiguous_path,
+                    "corner_protect_mask": zero_path,
+                }
+            )
+        page["source_sha256"] = hashlib.sha256(
+            Path(str(source_path)).read_bytes()
+        ).hexdigest()
+    payload.update(
+        {
+            "schema_version": "inpaint-factorized-source-manifest-v4",
+            "corpus_id": str(payload.get("corpus_id") or "fixture"),
+            "split_role": "development_source_only",
+            "annotation_frozen_before_candidate": True,
+            "candidate_seen": False,
+            "target_extent_independent": True,
+            "target_inventory_independent": True,
+            "target_review_complete": True,
+        }
+    )
+    page_ids = sorted(str(page["page_id"]) for page in pages)
+    payload["page_count"] = len(page_ids)
+    payload["page_ids"] = page_ids
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    for page in pages:
+        page["artifact_sha256"] = manifest_page_artifact_sha256(path, page)
+        page["source_sha256"] = page["artifact_sha256"]["path"]
+    payload["page_inventory_sha256"] = source_manifest_page_inventory_sha256(
+        pages
+    )
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    seal = {
+        "schema_version": "inpaint-factorized-manifest-seal-v4",
+        "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "candidate_generated": False,
+        "candidate_seen": False,
+        "annotation_frozen_before_candidate": True,
+    }
+    path.with_suffix(path.suffix + ".seal.json").write_text(
+        json.dumps(seal, sort_keys=True), encoding="utf-8"
+    )
+    return path
+
+
+def test_v4_runners_reject_tampered_source_artifact_before_outputs(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "regions": [
+                    {"region_id": "r", "proposal": {"text_class": "text_bubble"}}
+                ],
+                "target_instances": [
+                    {
+                        "instance_id": "i",
+                        "region_id": "r",
+                        "semantic_role": "dialogue_bubble",
+                        "processing_action": "translate_inpaint",
+                        "priority": "required",
+                    }
+                ],
+            }
+        ]
+    }
+    _write_strict_source_manifest(manifest, payload)
+    page = payload["pages"][0]  # type: ignore[index]
+    target_path = Path(str(page["target_text_mask"]))  # type: ignore[index]
+    source = cv2.imread(str(page["path"]), cv2.IMREAD_COLOR)  # type: ignore[index]
+    assert source is not None
+    assert cv2.imwrite(str(target_path), np.zeros(source.shape[:2], np.uint8))
+
+    with pytest.raises(ValueError, match="artifact SHA inventory differs"):
+        score_semantic_policies(manifest)
+    with pytest.raises(ValueError, match="artifact SHA inventory differs"):
+        run_fusion_matrix(manifest, tmp_path / "missing-spec.json")
+    with pytest.raises(ValueError, match="artifact SHA inventory differs"):
+        factorized_main(
+            [
+                "--manifest",
+                str(manifest),
+                "--matrix",
+                str(tmp_path / "missing-matrix.json"),
+                "--output-dir",
+                str(tmp_path / "must-not-exist"),
+            ]
+        )
+    assert not (tmp_path / "must-not-exist").exists()
+
+
 def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
     tmp_path: Path,
 ) -> None:
@@ -148,10 +480,22 @@ def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
         encoding="utf-8",
     )
 
+    _write_strict_source_manifest(
+        manifest, json.loads(manifest.read_text(encoding="utf-8"))
+    )
     result = score_semantic_policies(manifest)
     policies = {row["policy_id"]: row for row in result["policies"]}
 
     assert result["unaccounted_policy_count"] == 0
+    assert result["page_ids"] == ["p"]
+    assert set(result["pages"]) == {
+        "current_default",
+        "detector_explicit_role",
+        "ocr_semantic_hint",
+        "explicit_role_consensus",
+        "human_oracle",
+    }
+    assert len(result["logical_inventory_sha256"]) == 64
     assert policies["current_default"]["status"] == "dominated"
     assert policies["current_default"]["metrics"]["required_translate_recall"] == 1.0
     assert policies["current_default"]["metrics"]["preserve_destructive_count"] == 1
@@ -204,6 +548,9 @@ def test_semantic_policy_blocks_partially_missing_provider_evidence(
         encoding="utf-8",
     )
 
+    _write_strict_source_manifest(
+        manifest, json.loads(manifest.read_text(encoding="utf-8"))
+    )
     policies = {
         row["policy_id"]: row for row in score_semantic_policies(manifest)["policies"]
     }
@@ -286,6 +633,7 @@ def test_detector_ceiling_reports_instances_missed_by_every_provider(
                         "claim_seed_mask": empty_path,
                         "bubble_interior_mask": empty_path,
                         "corner_protect_mask": empty_path,
+                        "existing_source_edit_mask": empty_path,
                         "preserve_mask": empty_path,
                     }
                 ],
@@ -702,6 +1050,7 @@ def test_manifest_rejects_instance_owned_only_by_a_different_region(
                         "claim_seed_mask": paths["target"],
                         "bubble_interior_mask": paths["right"],
                         "corner_protect_mask": paths["zero"],
+                        "existing_source_edit_mask": paths["zero"],
                         "target_instances": [
                             {
                                 "instance_id": "misowned",
@@ -1096,6 +1445,7 @@ def test_independent_target_review_applier_seals_only_selected_safe_extent(
         encoding="utf-8",
     )
 
+    _bind_independent_review_fixture(semantic, ledger, decisions)
     payload = apply_independent_target_review(
         semantic, ledger, decisions, tmp_path / "output"
     )
@@ -1208,6 +1558,7 @@ def test_independent_target_review_uses_source_only_manual_row_extent(
     decisions = tmp_path / "decisions.json"
     record_independent_target_review(ledger, raw_decisions, decisions)
 
+    _bind_independent_review_fixture(semantic, ledger, decisions)
     payload = apply_independent_target_review(
         semantic, ledger, decisions, tmp_path / "output"
     )
@@ -1343,6 +1694,7 @@ def test_independent_target_review_applier_replaces_unpaired_page_with_instances
         encoding="utf-8",
     )
 
+    _bind_independent_review_fixture(semantic, ledger, decisions)
     payload = apply_independent_target_review(
         semantic, ledger, decisions, tmp_path / "output"
     )
@@ -1580,9 +1932,25 @@ def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) 
         encoding="utf-8",
     )
 
-    result = run_fusion_matrix(manifest_path, spec_path)
+    _write_strict_source_manifest(
+        manifest_path, json.loads(manifest_path.read_text(encoding="utf-8"))
+    )
+    output_root = tmp_path / "fusion-output"
+    result = run_fusion_matrix(
+        manifest_path,
+        spec_path,
+        output_root=output_root,
+    )
 
     metrics = result["runs"][0]["metrics"]
+    assert result["page_ids"] == ["p1"]
+    assert result["pages"]["detector"][0]["page_id"] == "p1"
+    assert len(result["logical_inventory_sha256"]) == 64
+    assert result["output_artifact_inventory"]["artifact_count"] == 2
+    assert (
+        output_root
+        / result["output_artifact_inventory"]["relative_path"]
+    ).is_file()
     assert metrics["target_instance_seed_recall"] == 1.0
     assert metrics["aggregate_target_coverage"] == 0.0
     assert metrics["output_mask_set_sha256"] != hashlib.sha256().hexdigest()
@@ -1645,15 +2013,8 @@ def test_detector_fusion_marks_detector_derived_targets_information_limited(
         encoding="utf-8",
     )
 
-    result = run_fusion_matrix(manifest_path, spec_path)
-
-    run = result["runs"][0]
-    assert run["status"] == "information_limited"
-    assert run["closure_reason"] == "target_extent_not_independent"
-    assert run["metrics"]["target_extent_independent"] is False
-    assert run["metrics"]["target_mask_provenance"] == [
-        "current_ctd_raw_components"
-    ]
+    with pytest.raises(ValueError, match="strict source-only manifest v4"):
+        run_fusion_matrix(manifest_path, spec_path)
 
 
 def test_stage1_reads_unicode_source_and_mask_paths(tmp_path: Path) -> None:
@@ -2053,8 +2414,10 @@ def test_manifest_v4_loads_region_semantics_and_proposal_only_reference(
                 "protected_structure_mask": paths["zeros"],
                 "ambiguous_structure_mask": paths["ambiguous"],
                 "ownership_mask": paths["full"],
+                "claim_seed_mask": paths["full"],
                 "bubble_interior_mask": paths["full"],
                 "corner_protect_mask": paths["zeros"],
+                "existing_source_edit_mask": paths["zeros"],
                 "expected_edit": "required",
                 "paired_reference": {
                     "path": str(reference_path),
@@ -2130,6 +2493,13 @@ def test_factorized_source_manifest_v4_uses_the_strict_region_contract(
                 "ambiguous_structure_mask": paths["zero"],
                 "corner_protect_mask": paths["zero"],
             }],
+            "protected_structure_mask": paths["zero"],
+            "ambiguous_structure_mask": paths["zero"],
+            "ownership_mask": paths["zero"],
+            "claim_seed_mask": paths["target"],
+            "bubble_interior_mask": paths["zero"],
+            "corner_protect_mask": paths["zero"],
+            "existing_source_edit_mask": paths["zero"],
             "expected_edit": "required",
         }],
     }
@@ -2434,6 +2804,7 @@ def test_independent_ambiguous_review_becomes_hard_preserve_mask(
         "full_page_inventory": [],
     }), encoding="utf-8")
 
+    _bind_independent_review_fixture(semantic, ledger, decisions)
     payload = apply_independent_target_review(
         semantic, ledger, decisions, tmp_path / "output"
     )
@@ -3696,6 +4067,7 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
     output = tmp_path / "output"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+    _write_strict_source_manifest(manifest_path, manifest)
 
     exit_code = factorized_main(
         [
@@ -3713,6 +4085,7 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
     result = json.loads((output / "factorized-results.json").read_text(encoding="utf-8"))
     assert exit_code == 0
     assert result["combination_count"] == 1
+    assert len(result["logical_inventory_sha256"]) == 64
     assert result["runs"][0]["status"] == "pareto"
     assert result["runs"][0]["metrics"]["aggregate_target_coverage"] == 1.0
     assert result["runs"][0]["metrics"][
@@ -3720,6 +4093,23 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
     ] == {"dialogue_bubble": 1.0}
     assert result["runs"][0]["metrics"]["reconstruction_mse"] == 0.0
     assert result["runs"][0]["metrics"]["outside_final_changed"] == 0
+    run_id = result["runs"][0]["run_id"]
+    assert result["pages"][run_id][0]["canonical_statistics"][
+        "schema_version"
+    ] == "inpaint-factorized-page-statistics-v1"
+    assert len(result["runs"][0]["metrics"]["output_mask_set_sha256"]) == 64
+    assert result["output_artifact_inventory"]["artifact_count"] == 4
+    assert result["output_artifact_inventory"]["complete_run_ids"] == [run_id]
+    runtime_binding = result["runtime_evidence_ledger"]
+    assert runtime_binding["role"] == "runtime_evidence"
+    assert runtime_binding["complete_run_ids"] == [run_id]
+    runtime_ledger = json.loads(
+        (output / runtime_binding["relative_path"]).read_text(encoding="utf-8")
+    )
+    assert runtime_ledger["runs"][0]["pages"][0]["inference_events"] == []
+    assert runtime_ledger["runs"][0]["aggregate"][
+        "positive_lama_inference_count"
+    ] == 0
 
 
 def test_manifest_builder_uses_only_source_manifest_and_frozen_decisions(
@@ -4229,6 +4619,7 @@ def test_isolated_factorized_results_require_every_executed_closure_row(
     assert merged["physical_combination_count"] == 2
     assert merged["unaccounted_combination_count"] == 0
     assert merged["closure_ledger"] == ledger
+    assert len(merged["logical_inventory_sha256"]) == 64
 
 
 def test_silhouette_consensus_builds_union_intersection_and_n_of_four() -> None:
@@ -4316,3 +4707,471 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
     )
     assert len(physical) == 11
     assert {row.closure_state for row in ledger} == {"executed"}
+
+
+def test_conditional_hybrid_uses_authoritative_mixed_region_routes() -> None:
+    height, width = 80, 120
+    truth = np.zeros((height, width, 3), np.uint8)
+    truth[:, :60] = (210, 210, 210)
+    yy, xx = np.indices((height, 60))
+    gradient = np.clip(120 + xx + yy // 4, 0, 255).astype(np.uint8)
+    truth[:, 60:, 0] = gradient
+    truth[:, 60:, 1] = np.clip(gradient + 10, 0, 255)
+    truth[:, 60:, 2] = np.clip(gradient + 20, 0, 255)
+    edit = np.zeros((height, width), np.uint8)
+    edit[30:40, 20:34] = 255
+    edit[32:43, 80:96] = 255
+    source = truth.copy()
+    source[edit > 0] = 15
+    zero = np.zeros((height, width), np.uint8)
+    left = np.zeros_like(zero)
+    left[:, :60] = 255
+    right = np.zeros_like(zero)
+    right[:, 60:] = 255
+    masks = PageMasks(
+        target=edit,
+        protected=zero,
+        ambiguous=zero,
+        ownership=np.full_like(zero, 255),
+        claim_seed=np.full_like(zero, 255),
+        existing_edit=zero,
+        bubble_interior=np.full_like(zero, 255),
+        corner=zero,
+        broad_ownership=np.full_like(zero, 255),
+        preserve=zero,
+        regions=(
+            RegionMasks("flat", "clean_flat", left, left, zero, zero, zero),
+            RegionMasks(
+                "gradient", "clean_gradient", right, right, zero, zero, zero
+            ),
+        ),
+    )
+
+    def unexpected_lama(_image: np.ndarray, _mask: np.ndarray) -> np.ndarray:
+        raise AssertionError("clean mixed regions must not use the LaMa fallback")
+
+    candidate, diagnostics = _fill_conditional_hybrid_regions(
+        source,
+        edit,
+        masks,
+        route_decision="broad",
+        background_exclude_mask=zero,
+        lama_fill=unexpected_lama,
+    )
+
+    assert diagnostics["positive_lama_inference_count"] == 0
+    assert [row["backend"] for row in diagnostics["region_fills"]] == [
+        "robust_flat_median",
+        "planar_gradient",
+    ]
+    assert all(row["applied"] is True for row in diagnostics["region_fills"])
+    assert np.array_equal(candidate[edit == 0], source[edit == 0])
+    assert np.max(np.abs(candidate[edit > 0].astype(int) - truth[edit > 0])) <= 1
+
+
+def test_conditional_hybrid_routes_authoritative_overlap_to_one_narrow_lama_call() -> None:
+    shape = (48, 64)
+    source = np.full((*shape, 3), 220, np.uint8)
+    edit = np.zeros(shape, np.uint8)
+    edit[20:28, 28:36] = 255
+    source[edit > 0] = 20
+    zero = np.zeros(shape, np.uint8)
+    first = np.zeros(shape, np.uint8)
+    first[8:40, 8:40] = 255
+    second = np.zeros(shape, np.uint8)
+    second[8:40, 24:56] = 255
+    ownership = cv2.bitwise_or(first, second)
+    masks = PageMasks(
+        target=edit,
+        protected=zero,
+        ambiguous=zero,
+        ownership=ownership,
+        claim_seed=edit,
+        existing_edit=zero,
+        bubble_interior=ownership,
+        corner=zero,
+        broad_ownership=ownership,
+        preserve=zero,
+        regions=(
+            RegionMasks("left", "clean_flat", first, first, zero, zero, zero),
+            RegionMasks("right", "clean_gradient", second, second, zero, zero, zero),
+        ),
+    )
+    calls: list[np.ndarray] = []
+
+    def fake_lama(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        calls.append(mask.copy())
+        candidate = image.copy()
+        candidate[mask > 0] = 220
+        return candidate
+
+    candidate, diagnostics = _fill_conditional_hybrid_regions(
+        source,
+        edit,
+        masks,
+        route_decision="broad",
+        background_exclude_mask=zero,
+        lama_fill=fake_lama,
+        narrow_claim=edit,
+    )
+
+    assert len(calls) == 1
+    assert np.array_equal(calls[0], edit)
+    assert diagnostics["positive_lama_inference_count"] == 1
+    assert diagnostics["authoritative_region_overlap_pixel_count"] > 0
+    assert diagnostics["authoritative_overlap_edit_pixel_count"] == int(
+        np.count_nonzero(edit)
+    )
+    assert diagnostics["authoritative_overlap_narrow_verified"] is True
+    fallback = diagnostics["region_fills"][-1]
+    assert fallback["fallback_scope"] == "narrow_page_level"
+    assert fallback["fallback_reasons"] == ["authoritative_region_overlap"]
+    assert np.array_equal(candidate[edit == 0], source[edit == 0])
+
+
+def test_conditional_hybrid_rejects_broad_overlap_outside_narrow_claim() -> None:
+    shape = (16, 20)
+    source = np.full((*shape, 3), 200, np.uint8)
+    edit = np.zeros(shape, np.uint8)
+    edit[4:12, 6:14] = 255
+    narrow = np.zeros(shape, np.uint8)
+    narrow[6:10, 8:12] = 255
+    zero = np.zeros(shape, np.uint8)
+    full = np.full(shape, 255, np.uint8)
+    masks = PageMasks(
+        target=narrow,
+        protected=zero,
+        ambiguous=zero,
+        ownership=full,
+        claim_seed=narrow,
+        existing_edit=zero,
+        bubble_interior=full,
+        corner=zero,
+        broad_ownership=full,
+        preserve=zero,
+        regions=(
+            RegionMasks("a", "clean_flat", full, full, zero, zero, zero),
+            RegionMasks("b", "clean_flat", full, full, zero, zero, zero),
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="escaped the narrow detector claim"):
+        _fill_conditional_hybrid_regions(
+            source,
+            edit,
+            masks,
+            route_decision="broad",
+            background_exclude_mask=zero,
+            lama_fill=lambda image, _mask: image,
+            narrow_claim=narrow,
+        )
+
+
+def test_synthetic_ownership_conflict_completes_with_one_narrow_page_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synthetic_root = tmp_path / "synthetic"
+    payload = build_generalization_synthetic_manifest(synthetic_root)
+    conflict = next(
+        page
+        for page in payload["pages"]
+        if page["page_id"] == "synthetic-ownership-conflict"
+    )
+    payload["pages"] = [conflict]
+    payload["page_count"] = 1
+    payload["page_ids"] = [conflict["page_id"]]
+    payload["page_inventory_sha256"] = source_manifest_page_inventory_sha256(
+        payload["pages"]
+    )
+    manifest = synthetic_root / "synthetic-inpaint-generalization-v4.json"
+    manifest.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    manifest.with_suffix(manifest.suffix + ".seal.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-manifest-seal-v4",
+                "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "candidate_generated": False,
+                "candidate_seen": False,
+                "annotation_frozen_before_candidate": True,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    page_id = str(conflict["page_id"])
+    target = str(conflict["target_text_mask"])
+    ownership = str(conflict["ownership_mask"])
+    interior = str(conflict["bubble_interior_mask"])
+    zero = str(conflict["protected_structure_mask"])
+    matrix = {
+        "schema_version": "inpaint-factorized-matrix-v3",
+        "manifest": str(manifest),
+        "axes": {
+            "detector": ["detector"],
+            "ownership": ["ownership"],
+            "silhouette": ["silhouette"],
+            "router": ["R3"],
+            "expansion": ["bubble_interior"],
+            "fill": ["conditional_hybrid"],
+        },
+        "controls": {
+            "detector": "detector",
+            "ownership": "ownership",
+            "silhouette": "silhouette",
+            "router": "R3",
+            "expansion": "bubble_interior",
+            "fill": "conditional_hybrid",
+        },
+        "families": {
+            "detector": {
+                "detector": {
+                    "seed_variant": "raw",
+                    "pages": {
+                        page_id: {
+                            "raw": target,
+                            "refined": target,
+                            "dilated": target,
+                        }
+                    },
+                }
+            },
+            "ownership": {
+                "ownership": {
+                    "pages": {
+                        page_id: {
+                            "mask": ownership,
+                            "broad_mask": ownership,
+                            "content_components": target,
+                        }
+                    }
+                }
+            },
+            "silhouette": {
+                "silhouette": {"pages": {page_id: {"interior": interior}}}
+            },
+            "router": {
+                "R3": {
+                    "algorithm": "R3",
+                    "minimum_background_samples": 1,
+                    "pages": {
+                        page_id: {
+                            "ballons_clean": True,
+                            "pr2_clean": True,
+                            "ballons_clean_mask": interior,
+                            "pr2_clean_mask": interior,
+                            "unsafe_signal_mask": zero,
+                        }
+                    },
+                }
+            },
+        },
+        "retain_page_artifacts": True,
+        "oracle_only": [],
+    }
+    matrix_path = tmp_path / "matrix.json"
+    matrix_path.write_text(json.dumps(matrix, sort_keys=True), encoding="utf-8")
+    output = tmp_path / "output"
+
+    class FakeLamaPool:
+        last: "FakeLamaPool | None" = None
+
+        def __init__(self, **_kwargs: object) -> None:
+            self.call_count = 0
+            self.call_durations: list[float] = []
+            FakeLamaPool.last = self
+
+        def fill(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+            self.call_count += 1
+            self.call_durations.append(0.01)
+            candidate = image.copy()
+            candidate[mask > 0] = 245
+            return candidate
+
+        def runtime_metrics_since(self, call_index: int) -> dict[str, object]:
+            called = self.call_count - call_index
+            return {
+                "runtime_telemetry_complete": True,
+                "positive_lama_runtime_p95_seconds": 0.01 if called else None,
+                "peak_vram_allocated_mib": 1.0 if called else None,
+                "peak_vram_reserved_mib": 1.0 if called else None,
+                "cpu_fallback_count": 0,
+                "lama_runtime_provider": "cuda:0" if called else "",
+                "lama_runtime_precision": "bf16" if called else "",
+            }
+
+    monkeypatch.setattr(factorized_runner, "_LamaPool", FakeLamaPool)
+    original_runtime_identity = factorized_runner._runtime_identity
+    monkeypatch.setattr(
+        factorized_runner,
+        "_runtime_identity",
+        lambda **_kwargs: {
+            **original_runtime_identity(
+                device="cpu",
+                precision="bf16",
+                inpaint_size=2048,
+                lama_model_path=_kwargs["lama_model_path"],
+            ),
+            "requested_device": "cuda",
+            "torch_version": "test",
+            "torch_cuda_version": "test",
+            "cudnn_version": 1,
+            "cuda_available": True,
+            "gpu_name": "test-gpu",
+        },
+    )
+
+    assert factorized_main(
+        [
+            "--manifest",
+            str(manifest),
+            "--matrix",
+            str(matrix_path),
+            "--output-dir",
+            str(output),
+            "--device",
+            "cuda",
+        ]
+    ) == 0
+    result = json.loads(
+        (output / "factorized-results.json").read_text(encoding="utf-8")
+    )
+    run = result["runs"][0]
+    row = result["pages"][run["run_id"]][0]
+    diagnostics = row["fill"]
+    assert FakeLamaPool.last is not None
+    assert FakeLamaPool.last.call_count == 1
+    assert result["closure_ledger"][0]["closure_state"] == "executed"
+    assert diagnostics["authoritative_overlap_narrow_verified"] is True
+    assert diagnostics["authoritative_overlap_edit_pixel_count"] > 0
+    assert diagnostics["region_fills"][-1]["fallback_reasons"] == [
+        "authoritative_region_overlap"
+    ]
+    edit_path = output / "runs" / run["run_id"] / "edit_masks" / f"{page_id}.png"
+    assert np.array_equal(
+        cv2.imread(str(edit_path), cv2.IMREAD_GRAYSCALE),
+        cv2.imread(target, cv2.IMREAD_GRAYSCALE),
+    )
+    assert row["canonical_statistics"]["outside_final_changed_pixel_count"] == 0
+    runtime_binding = result["runtime_evidence_ledger"]
+    runtime_ledger = json.loads(
+        (output / runtime_binding["relative_path"]).read_text(encoding="utf-8")
+    )
+    event = runtime_ledger["runs"][0]["pages"][0]["inference_events"][0]
+    assert event == {
+        "backend": "current_lama",
+        "call_index": 1,
+        "cpu_fallback": False,
+        "duration_seconds": 0.01,
+        "precision": "bf16",
+        "provider": "cuda:0",
+    }
+    result_path = output / "factorized-results.json"
+    _validate_runtime_evidence_ledger(
+        result,
+        result_path,
+        schema="inpaint-factorized-results-v3",
+        finalists=frozenset({run["run_id"]}),
+    )
+    validate_evidence_artifact(result)
+
+    runtime_path = output / runtime_binding["relative_path"]
+
+    def reseal_runtime_ledger() -> None:
+        runtime_canonical = {
+            "runtime_identity": runtime_ledger["runtime_identity"],
+            "runtime_source_inventory": runtime_ledger[
+                "runtime_source_inventory"
+            ],
+            "runs": runtime_ledger["runs"],
+            "complete_run_ids": runtime_ledger["complete_run_ids"],
+            "positive_lama_inference_count": runtime_ledger[
+                "positive_lama_inference_count"
+            ],
+        }
+        runtime_ledger["ledger_sha256"] = hashlib.sha256(
+            json.dumps(
+                runtime_canonical,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        runtime_path.write_text(
+            json.dumps(runtime_ledger, sort_keys=True), encoding="utf-8"
+        )
+        runtime_binding["ledger_sha256"] = runtime_ledger["ledger_sha256"]
+        runtime_binding["complete_run_ids"] = runtime_ledger[
+            "complete_run_ids"
+        ]
+        runtime_binding["positive_lama_inference_count"] = runtime_ledger[
+            "positive_lama_inference_count"
+        ]
+        runtime_binding["artifact_sha256"] = hashlib.sha256(
+            runtime_path.read_bytes()
+        ).hexdigest()
+
+    single_result = json.loads(json.dumps(result))
+    single_ledger = json.loads(json.dumps(runtime_ledger))
+    second_run = json.loads(json.dumps(run))
+    second_run_id = f"{run['run_id']}__second"
+    second_run["run_id"] = second_run_id
+    result["runs"].append(second_run)
+    result["pages"][second_run_id] = json.loads(
+        json.dumps(result["pages"][run["run_id"]])
+    )
+    second_runtime_run = json.loads(json.dumps(runtime_ledger["runs"][0]))
+    second_runtime_run["run_id"] = second_run_id
+    second_runtime_run["pages"][0]["inference_events"][0]["call_index"] = 2
+    runtime_ledger["runs"].append(second_runtime_run)
+    runtime_ledger["complete_run_ids"].append(second_run_id)
+    runtime_ledger["positive_lama_inference_count"] = 2
+    result["positive_lama_inference_count"] = 2
+    reseal_runtime_ledger()
+    _validate_runtime_evidence_ledger(
+        result,
+        result_path,
+        schema="inpaint-factorized-results-v3",
+        finalists=frozenset({run["run_id"]}),
+    )
+    runtime_ledger["runs"][0]["pages"][0]["inference_events"][0][
+        "call_index"
+    ] = 2
+    runtime_ledger["runs"][1]["pages"][0]["inference_events"][0][
+        "call_index"
+    ] = 1
+    reseal_runtime_ledger()
+    with pytest.raises(ValueError, match="global call inventory order differs"):
+        _validate_runtime_evidence_ledger(
+            result,
+            result_path,
+            schema="inpaint-factorized-results-v3",
+            finalists=frozenset({run["run_id"]}),
+        )
+
+    result.clear()
+    result.update(single_result)
+    runtime_ledger = single_ledger
+    runtime_binding = result["runtime_evidence_ledger"]
+    runtime_path = output / runtime_binding["relative_path"]
+    event = runtime_ledger["runs"][0]["pages"][0]["inference_events"][0]
+    event["call_index"] = 2
+    reseal_runtime_ledger()
+    with pytest.raises(ValueError, match="global call inventory"):
+        _validate_runtime_evidence_ledger(
+            result,
+            result_path,
+            schema="inpaint-factorized-results-v3",
+            finalists=frozenset({run["run_id"]}),
+        )
+
+    event["call_index"] = 1
+    event["backend"] = "ballons_lama"
+    reseal_runtime_ledger()
+    with pytest.raises(ValueError, match="backend differs from run selection"):
+        _validate_runtime_evidence_ledger(
+            result,
+            result_path,
+            schema="inpaint-factorized-results-v3",
+            finalists=frozenset({run["run_id"]}),
+        )
