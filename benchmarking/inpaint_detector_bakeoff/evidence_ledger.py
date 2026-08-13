@@ -966,6 +966,7 @@ def _validate_semantic(payload: Mapping[str, object]) -> None:
             "current_default",
             "detector_explicit_role",
             "ocr_semantic_hint",
+            "ocr_provenance_verifier",
             "explicit_role_consensus",
             "human_oracle",
         }
@@ -1014,6 +1015,9 @@ def _validate_semantic(payload: Mapping[str, object]) -> None:
             "ambiguous_instance_count",
             "ambiguous_destructive_count",
             "unavailable_instance_count",
+            "no_edit_page_count",
+            "no_edit_false_translate_page_count",
+            "no_edit_false_translate_region_count",
         )
         values: dict[str, int] = {}
         for field in integer_fields:
@@ -1052,6 +1056,7 @@ def _validate_semantic(payload: Mapping[str, object]) -> None:
             and (required == 0 or float(recall) >= 1.0)
             and values["preserve_destructive_count"] == 0
             and values["ambiguous_destructive_count"] == 0
+            and values["no_edit_false_translate_page_count"] == 0
         )
         expected = "blocked_asset" if blocked else (
             "family_complete" if hard_pass else "dominated"
@@ -2987,7 +2992,16 @@ def registry_evidence_adapter_gaps(
         "easyocr-dbnet18": frozenset({"raw", "refined", "native3"}),
         "detector-fusion": frozenset({"single", "or", "and", "gated_recovery"}),
         "roi-trigger": frozenset({"none", "always", "seed_missing", "raw_refined_disagreement", "source_seed_unavailable", "union"}),
-        "semantic-policy": frozenset({"current_default", "detector_explicit_role", "ocr_semantic_hint", "explicit_role_consensus", "human_oracle"}),
+        "semantic-policy": frozenset(
+            {
+                "current_default",
+                "detector_explicit_role",
+                "ocr_semantic_hint",
+                "ocr_provenance_verifier",
+                "explicit_role_consensus",
+                "human_oracle",
+            }
+        ),
         "ownership": frozenset({"block_region", "dual_ownership", "ctbd_content", "ysg_standard", "ysg_obb", "manga109"}),
         "bubble-silhouette": frozenset({"pr2_validated", "ballons_native", "ctbd_bubble", "manga109_balloon", "pair_union_ballons_pr2", "pair_intersection_ballons_pr2", "consensus_2_of_4", "consensus_3_of_4"}),
         "router": frozenset({"R0", "R1", "R2", "R3", "R4"}),
