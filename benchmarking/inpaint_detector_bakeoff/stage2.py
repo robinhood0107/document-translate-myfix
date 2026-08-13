@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from itertools import product
+import math
 from typing import Callable, Iterable, Mapping, Sequence
 
 import cv2
@@ -270,6 +271,18 @@ def validate_factorized_selection(
         return "oracle_product_candidate", "invalid_with_reason"
     if stage == "stage1" and fill != "mask_only":
         return "stage1_fill_backend_forbidden", "invalid_with_reason"
+    if expansion in {
+        "content_component",
+        "bubble_interior",
+        "validated_interior",
+        "lab_dilate1",
+        "lab_dilate2",
+        "lab_dilate3",
+        "lab_dilate4",
+    } and family_metadata:
+        detector_metadata = family_metadata.get("detector", {}).get(detector, {})
+        if detector_metadata.get("source_seed_available") is False:
+            return "broad_expansion_requires_source_seed", "invalid_with_reason"
     if family_metadata:
         for role, value in selection.items():
             metadata = family_metadata.get(role, {}).get(value, {})
@@ -326,11 +339,31 @@ def assert_complete_closure_ledger(
         raise ValueError(f"combination closure ledger mismatch: missing={missing}, extra={extra}")
 
 
+def _finite_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float, np.integer, np.floating))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
 def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
-    if (
-        metrics.get("target_extent_independent") is False
-        or metrics.get("target_inventory_independent") is False
-        or metrics.get("target_review_complete") is False
+    """Fail closed unless a run carries the complete v3 safety contract.
+
+    Older result rows often omitted a metric and were consequently interpreted
+    as zero (or treated missing target coverage as acceptable).  That makes an
+    incomplete artifact eligible for Pareto selection.  The gate deliberately
+    distinguishes a source-only mask run from a product/fill run, but every
+    required field must be explicitly present and finite in either mode.
+    """
+
+    if any(
+        metrics.get(name) is not True
+        for name in (
+            "target_extent_independent",
+            "target_inventory_independent",
+            "target_review_complete",
+        )
     ):
         return False
     zero_metrics = (
@@ -346,25 +379,141 @@ def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
         "missed_target_instance_count",
         "page_residue_worsened_count",
     )
-    if any(int(metrics.get(name, 0) or 0) != 0 for name in zero_metrics):
+    if any(
+        name not in metrics
+        or not _finite_number(metrics.get(name))
+        or int(metrics[name]) != 0
+        for name in zero_metrics
+    ):
+        return False
+    for name in ("page_count", "required_target_instance_count", "target_pixel_count"):
+        if name not in metrics or not _finite_number(metrics.get(name)):
+            return False
+        if int(metrics[name]) < 0:
+            return False
+    if int(metrics["page_count"]) < 1:
         return False
     coverage = metrics.get("aggregate_target_coverage")
     minimum = metrics.get("minimum_target_instance_coverage")
     seed_recall = metrics.get("target_instance_seed_recall")
+    required_instances = int(metrics["required_target_instance_count"])
+    target_pixels = int(metrics["target_pixel_count"])
+    if required_instances > 0:
+        if not all(_finite_number(value) for value in (coverage, minimum, seed_recall)):
+            return False
+        role_recall = metrics.get("target_instance_seed_recall_by_semantic_role")
+        if not isinstance(role_recall, Mapping) or not role_recall:
+            return False
+        if any(
+            not str(role).strip()
+            or not _finite_number(value)
+            or float(value) < 1.0
+            for role, value in role_recall.items()
+        ):
+            return False
+    elif any(value is not None for value in (minimum, seed_recall)):
+        return False
+    if target_pixels > 0:
+        if not _finite_number(coverage):
+            return False
+    elif coverage is not None:
+        return False
     aggregate_residue = metrics.get("aggregate_residue_score")
     baseline_residue = metrics.get("baseline_aggregate_residue_score")
-    residue_gate_applicable = bool(metrics.get("residue_gate_applicable", True))
+    residue_gate_applicable = metrics.get("residue_gate_applicable")
+    if not isinstance(residue_gate_applicable, bool):
+        return False
     residue_improved = not residue_gate_applicable or (
-        aggregate_residue is not None
-        and baseline_residue is not None
+        _finite_number(aggregate_residue)
+        and _finite_number(baseline_residue)
         and float(aggregate_residue) < float(baseline_residue)
     )
+    reconstruction_gate_applicable = metrics.get("reconstruction_gate_applicable")
+    if not isinstance(reconstruction_gate_applicable, bool):
+        return False
+    if reconstruction_gate_applicable:
+        reconstruction = metrics.get("reconstruction_mse")
+        narrow_control = metrics.get("narrow_control_reconstruction_mse")
+        if not _finite_number(reconstruction) or not _finite_number(narrow_control):
+            return False
+        if float(reconstruction) > float(narrow_control) + 1e-12:
+            return False
+
+    runtime_telemetry_complete = metrics.get("runtime_telemetry_complete")
+    if runtime_telemetry_complete is not True:
+        return False
+    runtime_seconds = metrics.get("runtime_seconds")
+    inference_count = metrics.get("positive_lama_inference_count")
+    maximum_page_calls = metrics.get("maximum_positive_lama_inference_per_page")
+    cpu_fallback_count = metrics.get("cpu_fallback_count")
+    if not all(
+        _finite_number(value)
+        for value in (
+            runtime_seconds,
+            inference_count,
+            maximum_page_calls,
+            cpu_fallback_count,
+        )
+    ):
+        return False
+    if (
+        float(runtime_seconds) < 0.0
+        or int(inference_count) < 0
+        or int(maximum_page_calls) not in {0, 1}
+        or int(cpu_fallback_count) != 0
+    ):
+        return False
+    if int(inference_count) > 0:
+        provider = str(metrics.get("lama_runtime_provider") or "").lower()
+        precision = str(metrics.get("lama_runtime_precision") or "").lower()
+        if not provider.startswith("cuda") or not precision:
+            return False
+        for name in (
+            "positive_lama_runtime_p95_seconds",
+            "peak_vram_allocated_mib",
+            "peak_vram_reserved_mib",
+        ):
+            if not _finite_number(metrics.get(name)) or float(metrics[name]) < 0.0:
+                return False
     return (
-        (coverage is None or float(coverage) >= 0.98)
-        and (minimum is None or float(minimum) >= 0.98)
-        and (seed_recall is None or float(seed_recall) >= 1.0)
+        (target_pixels == 0 or float(coverage) >= 0.98)
+        and (required_instances == 0 or float(minimum) >= 0.98)
+        and (required_instances == 0 or float(seed_recall) >= 1.0)
         and residue_improved
     )
+
+
+def attach_reconstruction_control(
+    records: Iterable[FactorizedRunRecord],
+    control_run_id: str | None,
+) -> list[FactorizedRunRecord]:
+    """Bind synthetic reconstruction candidates to one executed narrow control."""
+
+    rows = list(records)
+    applicable = [
+        row
+        for row in rows
+        if row.metrics.get("reconstruction_gate_applicable") is True
+    ]
+    if not applicable:
+        return rows
+    if not str(control_run_id or "").strip():
+        return rows
+    controls = [row for row in rows if row.run_id == str(control_run_id)]
+    if len(controls) != 1:
+        raise ValueError("reconstruction control run must be present exactly once")
+    control_mse = controls[0].metrics.get("reconstruction_mse")
+    if not _finite_number(control_mse):
+        raise ValueError("reconstruction control run lacks a finite MSE")
+    output: list[FactorizedRunRecord] = []
+    for row in rows:
+        if row.metrics.get("reconstruction_gate_applicable") is not True:
+            output.append(row)
+            continue
+        metrics = dict(row.metrics)
+        metrics["narrow_control_reconstruction_mse"] = float(control_mse)
+        output.append(replace(row, metrics=metrics))
+    return output
 
 
 def select_pareto_records(

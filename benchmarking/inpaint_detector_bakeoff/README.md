@@ -80,6 +80,28 @@ results are marked `oracle_only` and cannot become product finalists. Safe
 non-oracle results are Pareto-ranked only after the instance, structure,
 ownership, no-edit, broad-route, and outside-final hard gates pass.
 
+Private result artifacts are bound to the closure ledger with
+`scripts/update_inpaint_method_evidence_v4.py`. Each update must name the exact
+registered family, scope, and variant or variants that the artifact proves; a
+result file never marks an entire family complete implicitly.
+The update also requires the exact sealed scope manifest and verifies its byte
+SHA against the artifact before accepting the scope label.
+Changing an existing family/role/variant/scope proof also requires the explicit
+`--replace` flag. Historical A1 protection runs use the separate
+`historical-a1` scope and never satisfy the current E1 requirement.
+An unavailable official runtime or weight is recorded explicitly as
+`blocked_asset` against the sealed scope manifest; it is never represented by a
+fabricated execution artifact and never blocks unrelated method families.
+
+If all available detector pairs still miss required source instances, the lab
+may fine-tune the existing CTD segmentation head on deterministic synthetic
+data only. The CTD backbone stays frozen and teacher distillation outside the
+synthetic target preserves the original non-text behavior. The generator
+includes low-contrast embossed text, bright/dark and
+outlined text, crop-edge placement, flat/gradient/paper backgrounds, halftone,
+hatching, and explicit no-text negatives. E1 is evaluation-only and every
+checkpoint records that no sealed holdout image was used for training.
+
 Broad masks are permitted only when a detector seed exists inside authoritative
 ownership and a validated bubble interior, the selected router reports a clean
 bubble, no texture/microtexture/line/ambiguous signal exists, the candidate does
