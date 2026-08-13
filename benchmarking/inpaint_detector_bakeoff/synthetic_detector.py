@@ -27,6 +27,13 @@ CHECKPOINT_SELECTION_CONTRACT = (
     "pareto_instance_seed_recall_all_page_false_claim_"
     "text_page_false_claim_no_text_false_claim_pixel_quality_v3"
 )
+ARCHITECTURE_HEAD_ONLY = "head_only"
+ARCHITECTURE_LAST_BACKBONE_STAGE = "last_backbone_stage"
+ARCHITECTURE_MODES = (
+    ARCHITECTURE_HEAD_ONLY,
+    ARCHITECTURE_LAST_BACKBONE_STAGE,
+)
+LAST_BACKBONE_STAGE_INDICES = (8, 9)
 SOURCE_DEPENDENCY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -194,6 +201,14 @@ def _validated_float(
 def validate_training_hyperparameters(
     parameters: Mapping[str, object],
 ) -> dict[str, int | float | str | bool]:
+    architecture_mode = str(
+        parameters.get("architecture_mode", ARCHITECTURE_HEAD_ONLY)
+    ).strip()
+    if architecture_mode not in ARCHITECTURE_MODES:
+        raise ValueError(
+            "CTD synthetic fine-tune architecture_mode must be head_only or "
+            "last_backbone_stage"
+        )
     normalized: dict[str, int | float | str | bool] = {
         "seed": _validated_int(
             parameters,
@@ -233,6 +248,16 @@ def validate_training_hyperparameters(
         "evaluation_batch_size": _validated_int(
             parameters, "evaluation_batch_size", minimum=1
         ),
+        "backbone_learning_rate_scale": _validated_float(
+            {
+                "backbone_learning_rate_scale": parameters.get(
+                    "backbone_learning_rate_scale", 0.1
+                )
+            },
+            "backbone_learning_rate_scale",
+            positive=True,
+        ),
+        "architecture_mode": architecture_mode,
     }
     if int(normalized["image_size"]) % 32:
         raise ValueError("CTD synthetic fine-tune image_size must be divisible by 32")
@@ -250,6 +275,33 @@ def validate_training_hyperparameters(
     normalized["optimizer"] = "AdamW"
     normalized["adam_amsgrad"] = False
     return normalized
+
+
+def apply_synthetic_checkpoint_weights(model, checkpoint: Mapping[str, object]) -> None:
+    state_dict = checkpoint.get("text_seg_state_dict")
+    if not isinstance(state_dict, Mapping) or not state_dict:
+        raise ValueError("CTD synthetic fine-tune checkpoint lacks text_seg_state_dict")
+    model.text_seg.load_state_dict(state_dict, strict=True)
+    architecture_mode = str(
+        checkpoint.get("architecture_mode", ARCHITECTURE_HEAD_ONLY)
+    )
+    if architecture_mode == ARCHITECTURE_HEAD_ONLY:
+        return
+    if architecture_mode != ARCHITECTURE_LAST_BACKBONE_STAGE:
+        raise ValueError("unsupported CTD synthetic fine-tune architecture_mode")
+    indices = checkpoint.get("backbone_stage_indices")
+    if list(indices or ()) != list(LAST_BACKBONE_STAGE_INDICES):
+        raise ValueError("CTD synthetic fine-tune backbone stage indices differ")
+    stage_state = checkpoint.get("backbone_stage_state_dict")
+    if not isinstance(stage_state, Mapping) or set(stage_state) != {
+        str(index) for index in LAST_BACKBONE_STAGE_INDICES
+    }:
+        raise ValueError("CTD synthetic fine-tune lacks backbone stage state")
+    for index in LAST_BACKBONE_STAGE_INDICES:
+        module_state = stage_state[str(index)]
+        if not isinstance(module_state, Mapping) or not module_state:
+            raise ValueError("CTD synthetic fine-tune backbone module state is empty")
+        model.blk_det.model[index].load_state_dict(module_state, strict=True)
 
 
 def _validate_runtime_versions(value: object) -> None:
@@ -382,6 +434,25 @@ def validate_checkpoint_provenance(
     if not isinstance(hyperparameters, Mapping):
         raise ValueError("CTD synthetic fine-tune lacks training_hyperparameters")
     normalized_hyperparameters = validate_training_hyperparameters(hyperparameters)
+    architecture_mode = str(normalized_hyperparameters["architecture_mode"])
+    if str(checkpoint.get("architecture_mode", ARCHITECTURE_HEAD_ONLY)) != architecture_mode:
+        raise ValueError(
+            "CTD synthetic fine-tune architecture_mode differs from hyperparameters"
+        )
+    if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE:
+        indices = checkpoint.get("backbone_stage_indices")
+        if list(indices or ()) != list(LAST_BACKBONE_STAGE_INDICES):
+            raise ValueError("CTD synthetic fine-tune backbone stage indices differ")
+        stage_state = checkpoint.get("backbone_stage_state_dict")
+        if not isinstance(stage_state, Mapping) or set(stage_state) != {
+            str(index) for index in LAST_BACKBONE_STAGE_INDICES
+        }:
+            raise ValueError("CTD synthetic fine-tune lacks backbone stage state")
+    else:
+        if list(checkpoint.get("backbone_stage_indices") or ()):
+            raise ValueError("head-only CTD checkpoint must not declare backbone indices")
+        if checkpoint.get("backbone_stage_state_dict") not in (None, {}):
+            raise ValueError("head-only CTD checkpoint must not contain backbone state")
     seed = int(normalized_hyperparameters["seed"])
     train_samples = int(normalized_hyperparameters["train_samples"])
     dev_samples = int(normalized_hyperparameters["dev_samples"])
@@ -472,10 +543,7 @@ class _FineTunedCTDRefiner(CTDRefiner):
             return
         if self.backend != "torch" or not hasattr(self.net, "text_seg"):
             raise RuntimeError("CTD synthetic fine-tune requires the PyTorch backend")
-        state_dict = self._checkpoint.get("text_seg_state_dict")
-        if not isinstance(state_dict, Mapping):
-            raise ValueError("CTD synthetic fine-tune checkpoint lacks text_seg_state_dict")
-        self.net.text_seg.load_state_dict(state_dict, strict=True)
+        apply_synthetic_checkpoint_weights(self.net, self._checkpoint)
         self.net.eval()
         self._fine_tune_loaded = True
 
@@ -579,6 +647,14 @@ class CTDSyntheticFineTuneReference:
                     self.checkpoint["source_dependency_sha256"]
                 ),
                 "training_contract": str(self.checkpoint["training_contract"]),
+                "architecture_mode": str(
+                    self.checkpoint.get(
+                        "architecture_mode", ARCHITECTURE_HEAD_ONLY
+                    )
+                ),
+                "backbone_stage_indices": list(
+                    self.checkpoint.get("backbone_stage_indices", [])
+                ),
                 "checkpoint_selection_contract": str(
                     self.checkpoint["checkpoint_selection_contract"]
                 ),

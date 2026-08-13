@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from modules.masking.ctd_vendor.ctd import TextDetBase  # noqa: E402
 from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: E402
+    apply_synthetic_checkpoint_weights,
     source_dependency_provenance,
     validate_checkpoint_provenance,
 )
@@ -76,10 +77,7 @@ def apply_synthetic_checkpoint(
     model: TextDetBase,
     checkpoint: dict[str, object],
 ) -> None:
-    state_dict = checkpoint.get("text_seg_state_dict")
-    if not isinstance(state_dict, dict) or not state_dict:
-        raise ValueError("synthetic checkpoint lacks text_seg_state_dict")
-    model.text_seg.load_state_dict(state_dict, strict=True)
+    apply_synthetic_checkpoint_weights(model, checkpoint)
     model.eval()
 
 
@@ -227,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     checkpoint_sha256 = ""
     checkpoint_code_commit = ""
     checkpoint_training_contract = ""
+    checkpoint_architecture_mode = ""
+    checkpoint_backbone_stage_indices: list[int] = []
     if checkpoint_path is not None:
         if not checkpoint_path.is_file():
             raise FileNotFoundError(checkpoint_path)
@@ -239,6 +239,12 @@ def main(argv: list[str] | None = None) -> int:
         checkpoint_sha256 = _sha256(checkpoint_path)
         checkpoint_code_commit = str(checkpoint["code_commit"])
         checkpoint_training_contract = str(checkpoint["training_contract"])
+        checkpoint_architecture_mode = str(
+            checkpoint.get("architecture_mode", "head_only")
+        )
+        checkpoint_backbone_stage_indices = [
+            int(index) for index in checkpoint.get("backbone_stage_indices", [])
+        ]
     model = TextDetBase(
         str(source),
         device="cpu",
@@ -281,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
         "synthetic_checkpoint_sha256": checkpoint_sha256,
         "checkpoint_code_commit": checkpoint_code_commit,
         "checkpoint_training_contract": checkpoint_training_contract,
+        "checkpoint_architecture_mode": checkpoint_architecture_mode,
+        "checkpoint_backbone_stage_indices": checkpoint_backbone_stage_indices,
         "export_code_commit": _current_commit(),
         "exporter_sha256": _sha256(Path(__file__).resolve()),
         "source_dependency_sha256": source_dependency_provenance(),

@@ -25,9 +25,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: E402
+    ARCHITECTURE_HEAD_ONLY,
+    ARCHITECTURE_LAST_BACKBONE_STAGE,
     CHECKPOINT_SELECTION_CONTRACT,
     CHECKPOINT_SCHEMA,
+    LAST_BACKBONE_STAGE_INDICES,
     TRAINING_CONTRACT,
+    apply_synthetic_checkpoint_weights,
     font_asset_provenance,
     source_dependency_provenance,
     validate_training_hyperparameters,
@@ -97,7 +101,9 @@ def _training_hyperparameters(
             "weight_decay": ADAM_WEIGHT_DECAY,
             "adam_amsgrad": False,
             "raw_probability_threshold": CTD_RAW_PROBABILITY_THRESHOLD,
-            "evaluation_batch_size": EVALUATION_BATCH_SIZE,
+            "evaluation_batch_size": args.evaluation_batch_size,
+            "architecture_mode": args.architecture_mode,
+            "backbone_learning_rate_scale": args.backbone_learning_rate_scale,
         }
     )
 
@@ -189,6 +195,7 @@ def _evaluate(
     shape: tuple[int, int],
     device: str,
     font_paths: tuple[Path, ...],
+    evaluation_batch_size: int = EVALUATION_BATCH_SIZE,
 ):
     intersections = target_pixels = predicted_pixels = 0
     seeded_instances = required_instances = 0
@@ -197,10 +204,10 @@ def _evaluate(
     no_text_false_pixels = 0
     by_background: dict[str, list[int]] = {}
     by_style: dict[str, list[int]] = {}
-    model.text_seg.eval()
+    _set_evaluation_state(model)
     with torch.no_grad():
-        for offset in range(0, len(seeds), EVALUATION_BATCH_SIZE):
-            batch_seeds = seeds[offset : offset + EVALUATION_BATCH_SIZE]
+        for offset in range(0, len(seeds), evaluation_batch_size):
+            batch_seeds = seeds[offset : offset + evaluation_batch_size]
             samples = [
                 synthetic_training_sample(seed, shape=shape, font_paths=font_paths)
                 for seed in batch_seeds
@@ -360,6 +367,47 @@ def _selection_metric_summary(
     }
 
 
+def _backbone_stage_state_dict(model) -> dict[str, object]:
+    return {
+        str(index): model.blk_det.model[index].state_dict()
+        for index in LAST_BACKBONE_STAGE_INDICES
+    }
+
+
+def _configure_trainable_parameters(model, architecture_mode: str):
+    for parameter in model.blk_det.parameters():
+        parameter.requires_grad_(False)
+    for parameter in model.text_det.parameters():
+        parameter.requires_grad_(False)
+    for parameter in model.text_seg.parameters():
+        parameter.requires_grad_(True)
+    backbone_parameters = []
+    if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE:
+        for index in LAST_BACKBONE_STAGE_INDICES:
+            module = model.blk_det.model[index]
+            for parameter in module.parameters():
+                parameter.requires_grad_(True)
+                backbone_parameters.append(parameter)
+    elif architecture_mode != ARCHITECTURE_HEAD_ONLY:
+        raise ValueError(f"unsupported architecture mode: {architecture_mode}")
+    return list(model.text_seg.parameters()), backbone_parameters
+
+
+def _set_training_state(model, architecture_mode: str) -> None:
+    model.blk_det.eval()
+    model.text_det.eval()
+    model.text_seg.train()
+    if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE:
+        for index in LAST_BACKBONE_STAGE_INDICES:
+            model.blk_det.model[index].train()
+
+
+def _set_evaluation_state(model) -> None:
+    model.blk_det.eval()
+    model.text_det.eval()
+    model.text_seg.eval()
+
+
 def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
     import torch
 
@@ -422,22 +470,42 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         half=False,
         act="leaky",
     )
-    model.blk_det.eval()
-    model.text_det.eval()
-    for parameter in model.blk_det.parameters():
-        parameter.requires_grad_(False)
-    for parameter in model.text_det.parameters():
-        parameter.requires_grad_(False)
-    model.text_seg.train()
+    architecture_mode = str(hyperparameters["architecture_mode"])
+    head_parameters, backbone_parameters = _configure_trainable_parameters(
+        model, architecture_mode
+    )
+    _set_training_state(model, architecture_mode)
     teacher_seg = copy.deepcopy(model.text_seg).eval()
     for parameter in teacher_seg.parameters():
         parameter.requires_grad_(False)
+    teacher_backbone = None
+    if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE:
+        teacher_backbone = copy.deepcopy(model.blk_det).eval()
+        for parameter in teacher_backbone.parameters():
+            parameter.requires_grad_(False)
     anchor = {
-        name: value.detach().clone()
+        f"text_seg.{name}": value.detach().clone()
         for name, value in model.text_seg.named_parameters()
     }
+    if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE:
+        anchor.update(
+            {
+                f"blk_det.{index}.{name}": value.detach().clone()
+                for index in LAST_BACKBONE_STAGE_INDICES
+                for name, value in model.blk_det.model[index].named_parameters()
+            }
+        )
+    parameter_groups: list[dict[str, object]] = [{"params": head_parameters}]
+    if backbone_parameters:
+        parameter_groups.append(
+            {
+                "params": backbone_parameters,
+                "lr": float(hyperparameters["learning_rate"])
+                * float(hyperparameters["backbone_learning_rate_scale"]),
+            }
+        )
     optimizer = torch.optim.AdamW(
-        model.text_seg.parameters(),
+        parameter_groups,
         lr=float(hyperparameters["learning_rate"]),
         betas=(
             float(hyperparameters["adam_beta1"]),
@@ -456,10 +524,16 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
     selected_checkpoint: Path | None = None
     checkpoints: list[dict[str, object]] = []
     baseline_dev_metrics = _evaluate(
-        torch, model, dev_seeds, shape, device, font_paths
+        torch,
+        model,
+        dev_seeds,
+        shape,
+        device,
+        font_paths,
+        int(hyperparameters["evaluation_batch_size"]),
     )
     for epoch in range(1, int(hyperparameters["epochs"]) + 1):
-        model.text_seg.train()
+        _set_training_state(model, architecture_mode)
         random.Random(seed + epoch).shuffle(train_seeds)
         losses = []
         batch_size = int(hyperparameters["batch_size"])
@@ -472,10 +546,19 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
                 font_paths,
             )
             optimizer.zero_grad(set_to_none=True)
-            with torch.no_grad():
+            if teacher_backbone is None:
+                with torch.no_grad():
+                    _blocks, features = model.blk_det(image, detect=True)
+                    teacher_features = features
+            else:
                 _blocks, features = model.blk_det(image, detect=True)
+                with torch.no_grad():
+                    _teacher_blocks, teacher_features = teacher_backbone(
+                        image, detect=True
+                    )
+            with torch.no_grad():
                 teacher_probability = teacher_seg(
-                    *features, forward_mode=TEXTDET_MASK
+                    *teacher_features, forward_mode=TEXTDET_MASK
                 )
             probability = model.text_seg(*features, forward_mode=TEXTDET_MASK)
             data_loss = bce(probability.clamp(1e-5, 1.0 - 1e-5), target)
@@ -485,9 +568,19 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
                 ((probability - teacher_probability) ** 2) * outside
             ) / torch.clamp(torch.sum(outside), min=1.0)
             anchor_loss = sum(
-                torch.mean((value - anchor[name]) ** 2)
+                torch.mean((value - anchor[f"text_seg.{name}"]) ** 2)
                 for name, value in model.text_seg.named_parameters()
             )
+            if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE:
+                anchor_loss = anchor_loss + sum(
+                    torch.mean(
+                        (value - anchor[f"blk_det.{index}.{name}"]) ** 2
+                    )
+                    for index in LAST_BACKBONE_STAGE_INDICES
+                    for name, value in model.blk_det.model[
+                        index
+                    ].named_parameters()
+                )
             loss = (
                 data_loss
                 + float(hyperparameters["distillation_weight"])
@@ -497,7 +590,15 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
             loss.backward()
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
-        metrics = _evaluate(torch, model, dev_seeds, shape, device, font_paths)
+        metrics = _evaluate(
+            torch,
+            model,
+            dev_seeds,
+            shape,
+            device,
+            font_paths,
+            int(hyperparameters["evaluation_batch_size"]),
+        )
         row = {"epoch": epoch, "loss": float(np.mean(losses)), **metrics}
         history.append(row)
         selection_key = _selection_key(metrics)
@@ -505,6 +606,17 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         checkpoint_payload = {
             "schema_version": CHECKPOINT_SCHEMA,
             "text_seg_state_dict": model.text_seg.state_dict(),
+            "architecture_mode": architecture_mode,
+            "backbone_stage_indices": (
+                list(LAST_BACKBONE_STAGE_INDICES)
+                if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE
+                else []
+            ),
+            "backbone_stage_state_dict": (
+                _backbone_stage_state_dict(model)
+                if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE
+                else None
+            ),
             "base_model_sha256": base_model_sha256,
             "image_size": int(hyperparameters["image_size"]),
             "epoch": epoch,
@@ -559,7 +671,7 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
             selected_checkpoint.name
         )
     saved = torch.load(selected_checkpoint, map_location=device, weights_only=True)
-    model.text_seg.load_state_dict(saved["text_seg_state_dict"])
+    apply_synthetic_checkpoint_weights(model, saved)
     model.text_seg.eval()
     selected_dev_metrics = dict(saved["dev_metrics"])
     selection_metric_summary = _selection_metric_summary(
@@ -603,6 +715,7 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         "train_sample_count": len(train_seeds),
         "dev_sample_count": len(dev_seeds),
         "image_size": int(hyperparameters["image_size"]),
+        "architecture_mode": architecture_mode,
         "epochs": int(hyperparameters["epochs"]),
         "batch_size": int(hyperparameters["batch_size"]),
         "learning_rate": float(hyperparameters["learning_rate"]),
@@ -636,7 +749,11 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
             "cudnn_deterministic": True,
             "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG", ""),
         },
-        "architecture_contract": "existing_ctd_frozen_backbone_finetuned_text_seg",
+        "architecture_contract": (
+            "existing_ctd_last_backbone_stage_and_text_seg_finetune"
+            if architecture_mode == ARCHITECTURE_LAST_BACKBONE_STAGE
+            else "existing_ctd_frozen_backbone_finetuned_text_seg"
+        ),
         "evaluation_output_contract": {
             "raw": "native_finetuned_ctd_text_seg",
             "refined": "exact_identity_reuse_of_raw",
@@ -659,7 +776,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-size", type=int, default=320)
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--evaluation-batch-size", type=int, default=EVALUATION_BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument(
+        "--architecture-mode",
+        choices=(ARCHITECTURE_HEAD_ONLY, ARCHITECTURE_LAST_BACKBONE_STAGE),
+        default=ARCHITECTURE_HEAD_ONLY,
+    )
+    parser.add_argument("--backbone-learning-rate-scale", type=float, default=0.1)
     parser.add_argument("--anchor-weight", type=float, default=1e-3)
     parser.add_argument("--distillation-weight", type=float, default=1.0)
     parser.add_argument(
