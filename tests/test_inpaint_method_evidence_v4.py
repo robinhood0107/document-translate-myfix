@@ -570,6 +570,8 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
     )
     patch_path = artifact.parent / "runtime.patch"
     patch_path.write_bytes(runner_patch_path.read_bytes())
+    tracked_worktree_clean = not patch_path.read_bytes()
+    runtime_identity["tracked_worktree_clean"] = tracked_worktree_clean
     source_records = [
         {
             "role": "runner_source_snapshot",
@@ -595,7 +597,7 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
     runtime_identity["tracked_worktree_diff_sha256"] = _sha(patch_path)
     source_canonical = {
         "code_commit": runtime_identity["code_commit"],
-        "tracked_worktree_clean": False,
+        "tracked_worktree_clean": tracked_worktree_clean,
         "records": source_records,
         "lama_model": {
             "asset_id": "lama_large_512px",
@@ -1366,7 +1368,8 @@ def test_factorized_runtime_source_rejects_coordinated_clean_identity_reseal(
     source_binding = payload["runtime_source_inventory"]
     source_path = artifact.parent / source_binding["relative_path"]
     source = json.loads(source_path.read_text(encoding="utf-8"))
-    source["tracked_worktree_clean"] = True
+    tampered_clean = not bool(source["tracked_worktree_clean"])
+    source["tracked_worktree_clean"] = tampered_clean
     source_canonical = {
         "code_commit": source["code_commit"],
         "tracked_worktree_clean": source["tracked_worktree_clean"],
@@ -1388,7 +1391,7 @@ def test_factorized_runtime_source_rejects_coordinated_clean_identity_reseal(
     runtime_binding = payload["runtime_evidence_ledger"]
     runtime_path = artifact.parent / runtime_binding["relative_path"]
     ledger = json.loads(runtime_path.read_text(encoding="utf-8"))
-    ledger["runtime_identity"]["tracked_worktree_clean"] = True
+    ledger["runtime_identity"]["tracked_worktree_clean"] = tampered_clean
     ledger["runtime_source_inventory"] = source_binding
     for run in ledger["runs"]:
         run["runtime_identity"] = ledger["runtime_identity"]
