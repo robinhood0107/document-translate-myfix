@@ -44,6 +44,18 @@
       "variants": ["raw", "refined", "native3"]
     },
     {
+      "family_id": "easyocr-craft",
+      "role": "seed",
+      "evaluation_scopes": ["synthetic", "e1"],
+      "variants": ["raw", "refined", "native3"]
+    },
+    {
+      "family_id": "easyocr-dbnet18",
+      "role": "seed",
+      "evaluation_scopes": ["synthetic", "e1"],
+      "variants": ["raw", "refined", "native3"]
+    },
+    {
       "family_id": "detector-fusion",
       "role": "seed",
       "evaluation_scopes": ["synthetic", "e1"],
