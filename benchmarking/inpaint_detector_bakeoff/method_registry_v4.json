@@ -38,6 +38,12 @@
       "variants": ["raw", "refined"]
     },
     {
+      "family_id": "ctd-synthetic-finetune",
+      "role": "seed",
+      "evaluation_scopes": ["synthetic", "e1"],
+      "variants": ["raw", "refined", "native3"]
+    },
+    {
       "family_id": "detector-fusion",
       "role": "seed",
       "evaluation_scopes": ["synthetic", "e1"],
@@ -92,9 +98,10 @@
         "ballons_native",
         "ctbd_bubble",
         "manga109_balloon",
-        "pair_union",
-        "pair_intersection",
-        "two_of_n_consensus"
+        "pair_union_ballons_pr2",
+        "pair_intersection_ballons_pr2",
+        "consensus_2_of_4",
+        "consensus_3_of_4"
       ]
     },
     {
@@ -124,6 +131,12 @@
       "role": "protection",
       "evaluation_scopes": ["synthetic", "e1"],
       "variants": ["pr4_exact", "C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"]
+    },
+    {
+      "family_id": "exact-protection-historical",
+      "role": "protection",
+      "evaluation_scopes": ["historical-a1"],
+      "variants": ["C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"]
     },
     {
       "family_id": "fill-backend",

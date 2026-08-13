@@ -334,6 +334,7 @@ class FactorizedRunRecord:
     status: str
     metrics: Mapping[str, object]
     closure_reason: str = ""
+    selection: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
@@ -342,6 +343,11 @@ class FactorizedRunRecord:
             raise ValueError(f"unknown factorized run state: {self.status}")
         if self.oracle_only and self.status == "pareto":
             raise ValueError("oracle-only results cannot be product finalists")
+        if self.selection and any(
+            not str(role).strip() or not str(value).strip()
+            for role, value in self.selection.items()
+        ):
+            raise ValueError("factorized run selection contains an empty role or value")
 
     def as_record(self) -> dict[str, object]:
         return {
@@ -356,6 +362,7 @@ class FactorizedRunRecord:
             "status": self.status,
             "metrics": dict(self.metrics),
             "closure_reason": self.closure_reason,
+            "selection": dict(self.selection),
         }
 
 

@@ -17,6 +17,10 @@ from benchmarking.inpaint_detector_bakeoff.method_closure import (  # noqa: E402
     evidence_from_records,
     requirements_from_registry,
 )
+from benchmarking.inpaint_detector_bakeoff.evidence_ledger import (  # noqa: E402
+    registry_evidence_adapter_gaps,
+    sha256_file,
+)
 from scripts.validation_artifact_harness import (  # noqa: E402
     select_managed_output_directory,
 )
@@ -38,15 +42,29 @@ def build_closure(registry_path: Path, evidence_path: Path) -> dict[str, object]
     if registry.get("schema_version") != "inpaint-method-family-registry-v4":
         raise ValueError("unsupported method family registry schema")
     evidence_payload = _read_json(evidence_path)
+    if evidence_payload.get("schema_version") != "inpaint-method-family-evidence-v4":
+        raise ValueError("unsupported method family evidence schema")
     records = evidence_payload.get("evidence")
     if not isinstance(records, list):
         raise ValueError("method evidence must contain an evidence list")
     if any(not isinstance(row, dict) for row in records):
         raise ValueError("method evidence rows must be objects")
-    return build_method_family_closure(
-        requirements_from_registry(registry),
+    scope_manifests = evidence_payload.get("scope_manifests")
+    if not isinstance(scope_manifests, dict):
+        raise ValueError("method evidence must contain canonical scope_manifests")
+    requirements = requirements_from_registry(registry)
+    result = build_method_family_closure(
+        requirements,
         evidence_from_records(records),
+        scope_manifests=scope_manifests,
     )
+    result["registry_sha256"] = sha256_file(registry_path)
+    result["evidence_sha256"] = sha256_file(evidence_path)
+    result["scope_manifests"] = scope_manifests
+    gaps = registry_evidence_adapter_gaps(requirements)
+    result["evidence_adapter_gap_count"] = len(gaps)
+    result["evidence_adapter_gaps"] = list(gaps)
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:

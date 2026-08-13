@@ -34,6 +34,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_stage1_manifest,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (  # noqa: E402
+    attach_reconstruction_control,
     assert_complete_closure_ledger,
     build_combination_closure_ledger,
     build_factorized_matrix,
@@ -343,8 +344,10 @@ class _LamaPool:
         self.inpaint_size = int(inpaint_size)
         self._model: Any | None = None
         self.call_count = 0
+        self.call_durations: list[float] = []
 
     def fill(self, image_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        started = time.perf_counter()
         if self._model is None:
             from modules.inpainting.source_lama_blockwise import SourceLaMaLarge
 
@@ -359,7 +362,45 @@ class _LamaPool:
             mask,
         )
         self.call_count += 1
+        self.call_durations.append(time.perf_counter() - started)
         return cv2.cvtColor(generated_rgb, cv2.COLOR_RGB2BGR)
+
+    def runtime_metrics_since(self, call_index: int) -> dict[str, object]:
+        durations = self.call_durations[int(call_index) :]
+        diagnostics = (
+            list(getattr(self._model, "run_diagnostics", []) or [])[-len(durations) :]
+            if self._model is not None and durations
+            else []
+        )
+        cpu_fallback_count = sum(
+            int(bool(row.get("cpu_fallback_used", False)))
+            for row in diagnostics
+            if isinstance(row, dict)
+        )
+        provider = ""
+        precision = ""
+        if diagnostics:
+            provider = str(diagnostics[-1].get("actual_device") or "")
+            precision = str(diagnostics[-1].get("actual_precision") or "")
+        peak_allocated = peak_reserved = None
+        if durations and str(self.device).lower().startswith("cuda"):
+            import torch
+
+            peak_allocated = float(torch.cuda.max_memory_allocated()) / (1024.0**2)
+            peak_reserved = float(torch.cuda.max_memory_reserved()) / (1024.0**2)
+        return {
+            "runtime_telemetry_complete": True,
+            "positive_lama_runtime_p95_seconds": (
+                float(np.percentile(np.asarray(durations, np.float64), 95.0))
+                if durations
+                else None
+            ),
+            "peak_vram_allocated_mib": peak_allocated,
+            "peak_vram_reserved_mib": peak_reserved,
+            "cpu_fallback_count": int(cpu_fallback_count),
+            "lama_runtime_provider": provider,
+            "lama_runtime_precision": precision,
+        }
 
 
 def _run_combination(
@@ -396,6 +437,7 @@ def _run_combination(
     seed_total = 0
     seed_hits = 0
     instance_coverages: list[float] = []
+    role_seed_counts: dict[str, list[int]] = {}
     residue_sum = 0.0
     residue_count = 0
     baseline_sum = 0.0
@@ -579,6 +621,11 @@ def _run_combination(
             edit_scores.append({"instance_id": instance_id, "coverage": coverage})
             seed_total += 1
             seed_hits += int(seed_covered > 0)
+            role_counts = role_seed_counts.setdefault(
+                str(instance_record.semantic_role), [0, 0]
+            )
+            role_counts[0] += int(seed_covered > 0)
+            role_counts[1] += 1
             instance_coverages.append(coverage)
 
         baseline_path = _path_value(entry.get("baseline"))
@@ -710,6 +757,7 @@ def _run_combination(
             _write_image(run_root / "candidate_images" / f"{page.page_id}.png", candidate)
             _write_image(run_root / "changed_masks" / f"{page.page_id}.png", changed)
 
+    lama_call_count = lama_pool.call_count - calls_before
     metrics = {
         "page_count": len(rows),
         "target_extent_independent": all(
@@ -727,6 +775,13 @@ def _run_combination(
         "target_instance_seed_recall": (
             float(seed_hits) / float(seed_total) if seed_total else None
         ),
+        "target_instance_seed_recall_by_semantic_role": {
+            role: float(hits) / float(total)
+            for role, (hits, total) in sorted(role_seed_counts.items())
+            if total
+        },
+        "required_target_instance_count": seed_total,
+        "target_pixel_count": total_target,
         "missed_target_instance_count": seed_total - seed_hits,
         "aggregate_target_coverage": (
             float(total_target_edit) / float(total_target) if total_target else None
@@ -754,8 +809,11 @@ def _run_combination(
             float(np.mean(reconstruction_values)) if reconstruction_values else None
         ),
         "runtime_seconds": time.perf_counter() - started,
-        "positive_lama_inference_count": lama_pool.call_count - calls_before,
+        "positive_lama_inference_count": lama_call_count,
+        "maximum_positive_lama_inference_per_page": 1 if lama_call_count else 0,
         "residue_gate_applicable": fill_id != "mask_only",
+        "reconstruction_gate_applicable": bool(reconstruction_values),
+        **lama_pool.runtime_metrics_since(calls_before),
     }
     oracle_only_ids = set(matrix.get("oracle_only", []))
     oracle_only = any(value in oracle_only_ids for value in combination.values())
@@ -770,6 +828,7 @@ def _run_combination(
         oracle_only=oracle_only,
         status="active",
         metrics=metrics,
+        selection=dict(combination),
     )
     return record, rows
 
@@ -999,6 +1058,10 @@ def main(argv: list[str] | None = None) -> int:
             records.append(record)
             page_rows[record.run_id] = rows
             gc.collect()
+        records = attach_reconstruction_control(
+            records,
+            str(matrix.get("reconstruction_control_run_id") or "") or None,
+        )
         ranked = select_pareto_records(records)
         result = {
             "schema_version": "inpaint-factorized-results-v3",
@@ -1009,6 +1072,9 @@ def main(argv: list[str] | None = None) -> int:
             "combination_count": len(ranked),
             "closure_ledger": [row.as_record() for row in closure_ledger],
             "positive_lama_inference_count": lama_pool.call_count,
+            "reconstruction_control_run_id": str(
+                matrix.get("reconstruction_control_run_id") or ""
+            ),
             "runs": [record.as_record() for record in ranked],
             "pages": page_rows,
         }

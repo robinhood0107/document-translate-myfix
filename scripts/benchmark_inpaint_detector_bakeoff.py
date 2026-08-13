@@ -30,6 +30,10 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_stage1_manifest,
     run_stage1,
 )
+from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: E402
+    CANDIDATE_ID as SYNTHETIC_FINETUNE_CANDIDATE_ID,
+    CTDSyntheticFineTuneReference,
+)
 from modules.masking.ctd_refiner import CTDRefinerSettings  # noqa: E402
 from modules.utils.download import ModelDownloader, ModelID  # noqa: E402
 from scripts.validation_artifact_harness import (  # noqa: E402
@@ -104,6 +108,26 @@ def _ownership_path(args: argparse.Namespace, page) -> Path:
 
 
 def _candidate(args: argparse.Namespace):
+    if args.candidate == "ctd-synthetic-finetune":
+        if not args.checkpoint:
+            raise ValueError("--checkpoint is required for CTD synthetic fine-tune")
+        model_path = Path(
+            args.model
+            or ModelDownloader.get_file_path(
+                ModelID.CTD_TORCH,
+                "comictextdetector.pt",
+            )
+        )
+        adapter = CTDSyntheticFineTuneReference(
+            model_path,
+            Path(args.checkpoint),
+            device=args.device,
+            detect_size=int(args.detect_size),
+            dilate_size=3,
+            max_batches=int(args.max_batches),
+        )
+        return adapter.infer, model_path, None
+
     if args.candidate == "ballons-ctbd":
         model_path = Path(args.model or ModelDownloader.get_file_path(
             ModelID.RTDETR_V2_ONNX,
@@ -197,11 +221,17 @@ def build_parser() -> argparse.ArgumentParser:
             "ballons-ctd-text-roi",
             "ballons-ctd-original",
             "ballons-ctbd",
+            "ctd-synthetic-finetune",
         ),
         required=True,
     )
     parser.add_argument("--variant", choices=("raw", "refined", "dilated"), default="raw")
     parser.add_argument("--model", default="")
+    parser.add_argument(
+        "--checkpoint",
+        default="",
+        help="Synthetic-only CTD text-seg fine-tune checkpoint.",
+    )
     parser.add_argument("--ballons-root", default="")
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument(
@@ -252,14 +282,30 @@ def main(argv: list[str] | None = None) -> int:
                 if args.ownership_root
                 else "manifest-sparse-mask"
             ),
+            "checkpoint_sha256": (
+                _sha256(Path(args.checkpoint).resolve())
+                if args.checkpoint
+                else ""
+            ),
         }
+        candidate_id = (
+            SYNTHETIC_FINETUNE_CANDIDATE_ID
+            if args.candidate == "ctd-synthetic-finetune"
+            else args.candidate
+        )
+        model_identity_sha256 = _text_sha256(
+            {
+                "model_sha256": _sha256(model_path),
+                "checkpoint_sha256": preprocessing_contract["checkpoint_sha256"],
+            }
+        )
         candidate_spec = RoleCandidateSpec(
-            candidate_id=args.candidate,
+            candidate_id=candidate_id,
             provider=args.candidate,
             role="seed",
             variant="native-bundle-v2",
             code_commit=args.code_commit or _current_commit(),
-            model_sha256=_sha256(model_path),
+            model_sha256=model_identity_sha256,
             runtime_provider=(
                 args.provider if args.candidate == "ballons-ctbd" else args.device
             ),
@@ -316,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise OSError(f"failed to write edit mask for {page_id}")
         result = {
             "schema_version": "inpaint-detector-bakeoff-stage1-v1",
-            "candidate": args.candidate,
+            "candidate": candidate_id,
             "variant": args.variant,
             "manifest_sha256": _sha256(manifest_path),
             "model": {
@@ -324,6 +370,11 @@ def main(argv: list[str] | None = None) -> int:
                 "size_bytes": model_path.stat().st_size,
                 "sha256": _sha256(model_path),
                 "provider": args.provider if args.candidate == "ballons-ctbd" else args.device,
+                "checkpoint_sha256": (
+                    _sha256(Path(args.checkpoint).resolve())
+                    if args.checkpoint
+                    else ""
+                ),
             },
             "role_candidate": {
                 "candidate_id": candidate_spec.candidate_id,

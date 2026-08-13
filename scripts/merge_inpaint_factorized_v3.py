@@ -16,6 +16,7 @@ from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
     FactorizedRunRecord,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (  # noqa: E402
+    attach_reconstruction_control,
     select_pareto_records,
 )
 
@@ -56,6 +57,11 @@ def _record(payload: dict[str, Any]) -> FactorizedRunRecord:
         status="active",
         metrics=metrics,
         closure_reason=str(payload.get("closure_reason") or ""),
+        selection=(
+            {str(key): str(value) for key, value in payload["selection"].items()}
+            if isinstance(payload.get("selection"), dict)
+            else {}
+        ),
     )
 
 
@@ -71,6 +77,7 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
     closure_ledger: list[dict[str, object]] | None = None
     logical_combination_count: int | None = None
     physical_combination_count: int | None = None
+    reconstruction_control_run_id: str | None = None
     for path in result_paths:
         payload = _read_json(path)
         if payload.get("schema_version") != SCHEMA_VERSION:
@@ -131,6 +138,13 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             records.append(record)
             pages[record.run_id] = rows
         inference_count += int(payload.get("positive_lama_inference_count", 0) or 0)
+        current_reconstruction_control = str(
+            payload.get("reconstruction_control_run_id") or ""
+        )
+        if reconstruction_control_run_id is None:
+            reconstruction_control_run_id = current_reconstruction_control
+        elif current_reconstruction_control != reconstruction_control_run_id:
+            raise ValueError("factorized results have different reconstruction controls")
         source_paths.append(str(path.resolve()))
     if closure_ledger is not None:
         expected_run_ids = {
@@ -148,6 +162,7 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
                 "merged factorized results do not account for every executed "
                 f"combination: missing={missing}, extra={extra}"
             )
+    records = attach_reconstruction_control(records, reconstruction_control_run_id)
     ranked = select_pareto_records(records)
     merged = {
         "schema_version": SCHEMA_VERSION,
@@ -155,6 +170,7 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
         "matrix_sha256": matrix_sha,
         "combination_count": len(ranked),
         "positive_lama_inference_count": inference_count,
+        "reconstruction_control_run_id": reconstruction_control_run_id or "",
         "merged_isolated_results": True,
         "source_result_paths": source_paths,
         "runs": [record.as_record() for record in ranked],

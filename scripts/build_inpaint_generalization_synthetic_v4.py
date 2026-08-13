@@ -49,6 +49,17 @@ def _write_json(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
+def _shift_mask(mask: np.ndarray, delta_x: int, delta_y: int) -> np.ndarray:
+    return cv2.warpAffine(
+        mask,
+        np.array(((1.0, 0.0, float(delta_x)), (0.0, 1.0, float(delta_y)))),
+        (mask.shape[1], mask.shape[0]),
+        flags=cv2.INTER_NEAREST,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+
+
 def _base_scene(background: str) -> tuple[np.ndarray, np.ndarray]:
     height, width = SHAPE
     image = np.full((height, width, 3), 150, np.uint8)
@@ -103,7 +114,7 @@ def _paint_text(image: np.ndarray, target: np.ndarray, style: str) -> None:
         radius = {"outline": 2, "shadow": 3, "glow": 5}[style]
         halo = cv2.dilate(target, np.ones((radius * 2 + 1, radius * 2 + 1), np.uint8))
         if style == "shadow":
-            shifted = np.roll(halo, (3, 3), axis=(0, 1))
+            shifted = _shift_mask(halo, 3, 3)
             image[(shifted > 0) & (target == 0)] = (85, 85, 85)
         elif style == "glow":
             image[(halo > 0) & (target == 0)] = (210, 210, 210)

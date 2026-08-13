@@ -35,6 +35,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     _read_image as read_stage1_image,
 )
 from benchmarking.inpaint_detector_bakeoff.stage2 import (
+    attach_reconstruction_control,
     assert_complete_closure_ledger,
     build_combination_closure_ledger,
     build_factorized_matrix,
@@ -96,6 +97,7 @@ from scripts.benchmark_inpaint_semantic_policies_v4 import score_semantic_polici
 from scripts.audit_inpaint_detector_ceiling_v4 import audit_detector_ceiling
 from scripts.build_inpaint_method_closure_v4 import build_closure
 from scripts.build_inpaint_generalization_synthetic_v4 import (
+    _shift_mask as shift_generalization_mask,
     build_synthetic_manifest as build_generalization_synthetic_manifest,
 )
 
@@ -342,6 +344,15 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
     evidence.write_text(
         json.dumps(
             {
+                "schema_version": "inpaint-method-family-evidence-v4",
+                "scope_manifests": {
+                    "e1": {
+                        "sha256": "1" * 64,
+                        "schema_version": "inpaint-factorized-source-manifest-v4",
+                        "corpus_id": "test-e1",
+                        "split_role": "development_source_only",
+                    }
+                },
                 "evidence": [
                     {
                         "family_id": "detector-a",
@@ -351,6 +362,9 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
                         "closure_state": "executed",
                         "disposition": "dominated",
                         "artifact_sha256": "a" * 64,
+                        "scope_manifest_sha256": "1" * 64,
+                        "content_sha256": "c" * 64,
+                        "content_identity_kind": "exact_output",
                     },
                     {
                         "family_id": "detector-a",
@@ -360,6 +374,9 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
                         "closure_state": "reused_by_sha",
                         "disposition": "dominated",
                         "artifact_sha256": "a" * 64,
+                        "scope_manifest_sha256": "1" * 64,
+                        "content_sha256": "c" * 64,
+                        "content_identity_kind": "exact_output",
                         "reused_from": "detector-a/seed/raw/e1",
                     },
                     {
@@ -370,6 +387,7 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
                         "closure_state": "invalid_with_reason",
                         "disposition": "dominated",
                         "reason": "not_supported_by_reference",
+                        "scope_manifest_sha256": "1" * 64,
                     },
                     {
                         "family_id": "exact-protection",
@@ -379,6 +397,9 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
                         "closure_state": "executed",
                         "disposition": "pareto",
                         "artifact_sha256": "b" * 64,
+                        "scope_manifest_sha256": "1" * 64,
+                        "content_sha256": "d" * 64,
+                        "content_identity_kind": "artifact_record",
                     },
                 ]
             }
@@ -395,6 +416,9 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
     assert families["detector-a"]["status"] == "family_complete"
     assert families["exact-protection"]["status"] == "active"
     assert families["exact-protection"]["missing_variants"] == ["ownership"]
+    assert families["exact-protection"]["missing_requirements"] == [
+        {"variant_id": "ownership", "evaluation_scope": "e1"}
+    ]
 
 
 def test_method_family_closure_rejects_unproven_sha_reuse(tmp_path: Path) -> None:
@@ -419,6 +443,15 @@ def test_method_family_closure_rejects_unproven_sha_reuse(tmp_path: Path) -> Non
     evidence.write_text(
         json.dumps(
             {
+                "schema_version": "inpaint-method-family-evidence-v4",
+                "scope_manifests": {
+                    "e1": {
+                        "sha256": "1" * 64,
+                        "schema_version": "inpaint-factorized-source-manifest-v4",
+                        "corpus_id": "test-e1",
+                        "split_role": "development_source_only",
+                    }
+                },
                 "evidence": [
                     {
                         "family_id": "detector-a",
@@ -427,6 +460,7 @@ def test_method_family_closure_rejects_unproven_sha_reuse(tmp_path: Path) -> Non
                         "evaluation_scope": "e1",
                         "closure_state": "reused_by_sha",
                         "disposition": "dominated",
+                        "scope_manifest_sha256": "1" * 64,
                     }
                 ]
             }
@@ -439,6 +473,12 @@ def test_method_family_closure_rejects_unproven_sha_reuse(tmp_path: Path) -> Non
 
     payload = json.loads(evidence.read_text(encoding="utf-8"))
     payload["evidence"][0]["artifact_sha256"] = "a" * 64
+    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="content SHA"):
+        build_closure(registry, evidence)
+
+    payload["evidence"][0]["content_sha256"] = "c" * 64
+    payload["evidence"][0]["content_identity_kind"] = "exact_output"
     evidence.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="source evidence key"):
         build_closure(registry, evidence)
@@ -473,6 +513,15 @@ def test_method_family_closure_requires_reused_sha_to_match_executed_source(
     evidence.write_text(
         json.dumps(
             {
+                "schema_version": "inpaint-method-family-evidence-v4",
+                "scope_manifests": {
+                    "e1": {
+                        "sha256": "1" * 64,
+                        "schema_version": "inpaint-factorized-source-manifest-v4",
+                        "corpus_id": "test-e1",
+                        "split_role": "development_source_only",
+                    }
+                },
                 "evidence": [
                     {
                         "family_id": "detector-a",
@@ -482,6 +531,9 @@ def test_method_family_closure_requires_reused_sha_to_match_executed_source(
                         "closure_state": "executed",
                         "disposition": "dominated",
                         "artifact_sha256": "a" * 64,
+                        "scope_manifest_sha256": "1" * 64,
+                        "content_sha256": "c" * 64,
+                        "content_identity_kind": "exact_output",
                     },
                     {
                         "family_id": "detector-a",
@@ -491,6 +543,9 @@ def test_method_family_closure_requires_reused_sha_to_match_executed_source(
                         "closure_state": "reused_by_sha",
                         "disposition": "dominated",
                         "artifact_sha256": "b" * 64,
+                        "scope_manifest_sha256": "1" * 64,
+                        "content_sha256": "d" * 64,
+                        "content_identity_kind": "exact_output",
                         "reused_from": "detector-a/seed/raw/e1",
                     },
                 ]
@@ -499,14 +554,19 @@ def test_method_family_closure_requires_reused_sha_to_match_executed_source(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="differs"):
+    with pytest.raises(ValueError, match="content SHA differs"):
         build_closure(registry, evidence)
 
     payload = json.loads(evidence.read_text(encoding="utf-8"))
-    payload["evidence"][1]["artifact_sha256"] = "a" * 64
+    payload["evidence"][1]["content_sha256"] = "c" * 64
     evidence.write_text(json.dumps(payload), encoding="utf-8")
     result = build_closure(registry, evidence)
     assert result["all_families_complete"] is True
+
+    payload["evidence"][1]["scope_manifest_sha256"] = "2" * 64
+    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical binding"):
+        build_closure(registry, evidence)
 
 
 def test_v4_method_registry_covers_every_role_and_required_variant() -> None:
@@ -551,6 +611,10 @@ def test_v4_method_registry_covers_every_role_and_required_variant() -> None:
         "C22",
         "C23",
     }
+    assert families["exact-protection-historical"]["evaluation_scopes"] == [
+        "historical-a1"
+    ]
+    assert "pr4_exact" not in families["exact-protection-historical"]["variants"]
     assert set(families["fill-backend"]["variants"]) == {
         "current_lama",
         "ballons_lama",
@@ -589,6 +653,16 @@ def test_generalization_synthetic_v4_covers_required_failure_families(
     assert by_id["synthetic-unowned-meaningful"].target_instances[0].semantic_role == "dialogue_free"
     assert by_id["synthetic-preserve-sfx"].no_edit is True
     assert by_id["synthetic-preserve-sfx"].target_instances[0].processing_action == "preserve"
+
+
+def test_generalization_shadow_shift_clips_without_page_wrap() -> None:
+    mask = np.zeros((16, 20), np.uint8)
+    mask[-3:, -3:] = 255
+
+    shifted = shift_generalization_mask(mask, 3, 3)
+
+    assert np.count_nonzero(shifted) == 0
+    assert np.count_nonzero(shifted[:4, :4]) == 0
 
 
 def test_manifest_rejects_instance_owned_only_by_a_different_region(
@@ -3088,6 +3162,110 @@ def test_closure_ledger_accounts_for_executed_invalid_and_blocked() -> None:
     assert ledger[2].reason == "provider_asset_or_parity_missing"
 
 
+@pytest.mark.parametrize(
+    ("selection", "stage", "reason"),
+    (
+        (
+            {
+                "detector": "full",
+                "ownership": "o",
+                "silhouette": "empty",
+                "router": "R1",
+                "expansion": "raw",
+                "fill": "telea",
+            },
+            "product",
+            "bubble_fill_requires_silhouette",
+        ),
+        (
+            {
+                "detector": "full",
+                "ownership": "o",
+                "silhouette": "s",
+                "router": "R1",
+                "roi_trigger": "seed_missing",
+                "expansion": "raw",
+                "fill": "mask_only",
+            },
+            "stage1",
+            "roi_trigger_requires_roi_detector",
+        ),
+        (
+            {
+                "detector": "full",
+                "ownership": "o",
+                "silhouette": "s",
+                "router": "R1",
+                "runtime_detector_count": "3",
+                "expansion": "raw",
+                "fill": "mask_only",
+            },
+            "stage1",
+            "runtime_detector_limit_exceeded",
+        ),
+        (
+            {
+                "detector": "oracle",
+                "ownership": "o",
+                "silhouette": "s",
+                "router": "R1",
+                "expansion": "raw",
+                "fill": "current_lama",
+            },
+            "product",
+            "oracle_product_candidate",
+        ),
+        (
+            {
+                "detector": "full",
+                "ownership": "o",
+                "silhouette": "s",
+                "router": "R1",
+                "expansion": "raw",
+                "fill": "telea",
+            },
+            "stage1",
+            "stage1_fill_backend_forbidden",
+        ),
+    ),
+)
+def test_every_static_invalid_combination_reason_is_represented(
+    selection: dict[str, str],
+    stage: str,
+    reason: str,
+) -> None:
+    ledger = build_combination_closure_ledger(
+        [selection],
+        stage=stage,
+        oracle_only_ids=("oracle",),
+    )
+
+    assert ledger[0].closure_state == "invalid_with_reason"
+    assert ledger[0].reason == reason
+
+
+def test_broad_expansion_without_source_seed_is_invalid() -> None:
+    selection = {
+        "detector": "empty_detector",
+        "ownership": "o",
+        "silhouette": "s",
+        "router": "R4",
+        "expansion": "content_component",
+        "fill": "mask_only",
+    }
+
+    ledger = build_combination_closure_ledger(
+        [selection],
+        stage="stage1",
+        family_metadata={
+            "detector": {"empty_detector": {"source_seed_available": False}}
+        },
+    )
+
+    assert ledger[0].closure_state == "invalid_with_reason"
+    assert ledger[0].reason == "broad_expansion_requires_source_seed"
+
+
 def test_closure_ledger_rejects_unaccounted_combination() -> None:
     selections = [
         {"detector": "d0", "router": "R0"},
@@ -3181,16 +3359,51 @@ def test_explicit_matrix_can_add_one_compatible_multi_role_run() -> None:
     assert runs[1]["expansion"] == "bubble_interior"
 
 
-def test_pareto_selection_excludes_oracle_and_hard_gate_failure() -> None:
-    safe = {
+def _complete_hard_gate_metrics(**updates: object) -> dict[str, object]:
+    metrics: dict[str, object] = {
+        "page_count": 1,
+        "target_extent_independent": True,
+        "target_inventory_independent": True,
+        "target_review_complete": True,
+        "required_target_instance_count": 1,
+        "target_pixel_count": 10,
         "aggregate_target_coverage": 1.0,
         "minimum_target_instance_coverage": 1.0,
         "target_instance_seed_recall": 1.0,
+        "target_instance_seed_recall_by_semantic_role": {"dialogue_bubble": 1.0},
         "aggregate_residue_score": 0.1,
         "baseline_aggregate_residue_score": 0.2,
+        "residue_gate_applicable": True,
+        "reconstruction_gate_applicable": False,
         "reconstruction_mse": 1.0,
         "runtime_seconds": 1.0,
+        "runtime_telemetry_complete": True,
+        "positive_lama_inference_count": 0,
+        "maximum_positive_lama_inference_per_page": 0,
+        "cpu_fallback_count": 0,
+        "positive_lama_runtime_p95_seconds": None,
+        "peak_vram_allocated_mib": None,
+        "peak_vram_reserved_mib": None,
+        "lama_runtime_provider": "",
+        "lama_runtime_precision": "",
+        "protected_structure_overlap": 0,
+        "protected_structure_changed": 0,
+        "ambiguous_structure_overlap": 0,
+        "ambiguous_structure_changed": 0,
+        "outside_final_changed": 0,
+        "broad_route_false_positive": 0,
+        "no_edit_false_edit": 0,
+        "required_skip_count": 0,
+        "preserve_edit_overlap": 0,
+        "missed_target_instance_count": 0,
+        "page_residue_worsened_count": 0,
     }
+    metrics.update(updates)
+    return metrics
+
+
+def test_pareto_selection_excludes_oracle_and_hard_gate_failure() -> None:
+    safe = _complete_hard_gate_metrics()
     records = [
         FactorizedRunRecord("safe", "d", "o", "s", "r", "e", "f", False, "active", safe),
         FactorizedRunRecord("oracle", "d", "o", "s", "r", "e", "f", True, "active", {**safe, "aggregate_residue_score": 0.0}),
@@ -3206,14 +3419,11 @@ def test_pareto_selection_excludes_oracle_and_hard_gate_failure() -> None:
 
 
 def test_pareto_selection_marks_detector_derived_targets_information_limited() -> None:
-    metrics = {
-        "target_extent_independent": False,
-        "target_mask_provenance": ["current_ctd_raw_components"],
-        "aggregate_target_coverage": 1.0,
-        "minimum_target_instance_coverage": 1.0,
-        "target_instance_seed_recall": 1.0,
-        "residue_gate_applicable": False,
-    }
+    metrics = _complete_hard_gate_metrics(
+        target_extent_independent=False,
+        target_mask_provenance=["current_ctd_raw_components"],
+        residue_gate_applicable=False,
+    )
     record = FactorizedRunRecord(
         "circular", "d", "o", "s", "r", "e", "f", False, "active", metrics
     )
@@ -3225,15 +3435,11 @@ def test_pareto_selection_marks_detector_derived_targets_information_limited() -
 
 
 def test_pareto_selection_requires_independent_target_inventory() -> None:
-    metrics = {
-        "target_extent_independent": True,
-        "target_inventory_independent": False,
-        "target_mask_provenance": ["paired_source_extent"],
-        "aggregate_target_coverage": 1.0,
-        "minimum_target_instance_coverage": 1.0,
-        "target_instance_seed_recall": 1.0,
-        "residue_gate_applicable": False,
-    }
+    metrics = _complete_hard_gate_metrics(
+        target_inventory_independent=False,
+        target_mask_provenance=["paired_source_extent"],
+        residue_gate_applicable=False,
+    )
     record = FactorizedRunRecord(
         "inventory-circular", "d", "o", "s", "r", "e", "f", False, "active", metrics
     )
@@ -3245,15 +3451,10 @@ def test_pareto_selection_requires_independent_target_inventory() -> None:
 
 
 def test_pareto_selection_requires_completed_source_review() -> None:
-    metrics = {
-        "target_extent_independent": True,
-        "target_inventory_independent": True,
-        "target_review_complete": False,
-        "aggregate_target_coverage": 1.0,
-        "minimum_target_instance_coverage": 1.0,
-        "target_instance_seed_recall": 1.0,
-        "residue_gate_applicable": False,
-    }
+    metrics = _complete_hard_gate_metrics(
+        target_review_complete=False,
+        residue_gate_applicable=False,
+    )
     record = FactorizedRunRecord(
         "unreviewed", "d", "o", "s", "r", "e", "f", False, "active", metrics
     )
@@ -3265,14 +3466,7 @@ def test_pareto_selection_requires_completed_source_review() -> None:
 
 
 def test_pareto_gate_rejects_missing_residue_and_ambiguous_changes() -> None:
-    safe = {
-        "aggregate_target_coverage": 1.0,
-        "minimum_target_instance_coverage": 1.0,
-        "target_instance_seed_recall": 1.0,
-        "aggregate_residue_score": 0.1,
-        "baseline_aggregate_residue_score": 0.2,
-        "residue_gate_applicable": True,
-    }
+    safe = _complete_hard_gate_metrics()
     records = [
         FactorizedRunRecord(
             "safe", "d", "o", "s", "r", "e", "f", False, "active", safe
@@ -3310,6 +3504,74 @@ def test_pareto_gate_rejects_missing_residue_and_ambiguous_changes() -> None:
     assert selected["missing-residue"].closure_reason == "hard_gate_failed"
     assert selected["ambiguous-change"].status == "dominated"
     assert selected["ambiguous-change"].closure_reason == "hard_gate_failed"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        "protected_structure_overlap",
+        "aggregate_target_coverage",
+        "target_instance_seed_recall",
+        "runtime_telemetry_complete",
+    ),
+)
+def test_pareto_gate_fails_closed_when_required_metric_is_missing(
+    missing: str,
+) -> None:
+    metrics = _complete_hard_gate_metrics()
+    metrics.pop(missing)
+    record = FactorizedRunRecord(
+        missing, "d", "o", "s", "r", "e", "f", False, "active", metrics
+    )
+
+    selected = select_pareto_records([record])
+
+    assert selected[0].status == "dominated"
+    assert selected[0].closure_reason == "hard_gate_failed"
+
+
+def test_reconstruction_gate_requires_narrow_control_and_rejects_worse_fill() -> None:
+    control = FactorizedRunRecord(
+        "control",
+        "d",
+        "o",
+        "s",
+        "r",
+        "raw",
+        "current_lama",
+        False,
+        "active",
+        _complete_hard_gate_metrics(
+            reconstruction_gate_applicable=True,
+            reconstruction_mse=2.0,
+        ),
+    )
+    worse = FactorizedRunRecord(
+        "worse",
+        "d",
+        "o",
+        "s",
+        "r",
+        "broad",
+        "telea",
+        False,
+        "active",
+        _complete_hard_gate_metrics(
+            reconstruction_gate_applicable=True,
+            reconstruction_mse=3.0,
+        ),
+    )
+
+    selected = {
+        row.run_id: row
+        for row in select_pareto_records(
+            attach_reconstruction_control([control, worse], "control")
+        )
+    }
+
+    assert selected["control"].status == "pareto"
+    assert selected["worse"].status == "dominated"
+    assert selected["worse"].closure_reason == "hard_gate_failed"
 
 
 def test_4k_component_expansion_has_no_python_quadratic_loop() -> None:
@@ -3425,6 +3687,9 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
         },
         "retain_page_artifacts": True,
         "oracle_only": [],
+        "reconstruction_control_run_id": (
+            "detector__ownership__silhouette__R0__raw__robust_flat_median"
+        ),
     }
     manifest_path = tmp_path / "manifest.json"
     matrix_path = tmp_path / "matrix.json"
@@ -3450,6 +3715,9 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
     assert result["combination_count"] == 1
     assert result["runs"][0]["status"] == "pareto"
     assert result["runs"][0]["metrics"]["aggregate_target_coverage"] == 1.0
+    assert result["runs"][0]["metrics"][
+        "target_instance_seed_recall_by_semantic_role"
+    ] == {"dialogue_bubble": 1.0}
     assert result["runs"][0]["metrics"]["reconstruction_mse"] == 0.0
     assert result["runs"][0]["metrics"]["outside_final_changed"] == 0
 
@@ -3857,23 +4125,10 @@ def test_isolated_factorized_results_merge_and_recompute_pareto(
     tmp_path: Path,
 ) -> None:
     def write_result(name: str, run_id: str, runtime: float) -> Path:
-        metrics = {
-            "aggregate_target_coverage": 1.0,
-            "minimum_target_instance_coverage": 1.0,
-            "target_instance_seed_recall": 1.0,
-            "protected_structure_overlap": 0,
-            "protected_structure_changed": 0,
-            "ambiguous_structure_overlap": 0,
-            "ambiguous_structure_changed": 0,
-            "outside_final_changed": 0,
-            "broad_route_false_positive": 0,
-            "no_edit_false_edit": 0,
-            "required_skip_count": 0,
-            "missed_target_instance_count": 0,
-            "page_residue_worsened_count": 0,
-            "runtime_seconds": runtime,
-            "residue_gate_applicable": False,
-        }
+        metrics = _complete_hard_gate_metrics(
+            runtime_seconds=runtime,
+            residue_gate_applicable=False,
+        )
         path = tmp_path / name / "factorized-results.json"
         path.parent.mkdir()
         path.write_text(
@@ -3930,23 +4185,7 @@ def test_isolated_factorized_results_require_every_executed_closure_row(
     def write_result(name: str, run_id: str) -> Path:
         path = tmp_path / name / "factorized-results.json"
         path.parent.mkdir()
-        metrics = {
-            "aggregate_target_coverage": 1.0,
-            "minimum_target_instance_coverage": 1.0,
-            "target_instance_seed_recall": 1.0,
-            "protected_structure_overlap": 0,
-            "protected_structure_changed": 0,
-            "ambiguous_structure_overlap": 0,
-            "ambiguous_structure_changed": 0,
-            "outside_final_changed": 0,
-            "broad_route_false_positive": 0,
-            "no_edit_false_edit": 0,
-            "required_skip_count": 0,
-            "missed_target_instance_count": 0,
-            "page_residue_worsened_count": 0,
-            "runtime_seconds": 1.0,
-            "residue_gate_applicable": False,
-        }
+        metrics = _complete_hard_gate_metrics(residue_gate_applicable=False)
         path.write_text(
             json.dumps(
                 {
