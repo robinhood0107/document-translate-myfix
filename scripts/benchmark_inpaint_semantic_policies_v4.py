@@ -20,6 +20,7 @@ from benchmarking.inpaint_detector_bakeoff.semantic import (  # noqa: E402
     consensus_decision,
     default_detector_decision,
     explicit_decision,
+    ocr_provenance_decision,
 )
 from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     validate_source_only_manifest_v4,
@@ -35,6 +36,7 @@ POLICIES = (
     "current_default",
     "detector_explicit_role",
     "ocr_semantic_hint",
+    "ocr_provenance_verifier",
     "explicit_role_consensus",
     "human_oracle",
 )
@@ -49,6 +51,7 @@ def aggregate_semantic_page_statistics(
     if any(not value for value in page_ids) or len(page_ids) != len(set(page_ids)):
         raise ValueError("semantic page statistics require unique page IDs")
     decisions: list[dict[str, object]] = []
+    no_edit_pages = no_edit_false_pages = no_edit_false_regions = 0
     for row in rows:
         values = row.get("decisions")
         if not isinstance(values, list) or any(
@@ -56,6 +59,20 @@ def aggregate_semantic_page_statistics(
         ):
             raise ValueError("semantic page statistics require decisions")
         decisions.extend(values)
+        no_edit = row.get("no_edit")
+        region_decisions = row.get("region_decisions")
+        if not isinstance(no_edit, bool) or not isinstance(region_decisions, list) or any(
+            not isinstance(value, dict) for value in region_decisions
+        ):
+            raise ValueError("semantic page statistics require region decisions")
+        if no_edit:
+            no_edit_pages += 1
+            translated = sum(
+                int(value.get("predicted_action") == TRANSLATE)
+                for value in region_decisions
+            )
+            no_edit_false_regions += translated
+            no_edit_false_pages += int(translated > 0)
     required = required_translate = preserve = preserve_destructive = 0
     ambiguous = ambiguous_destructive = unavailable = 0
     role_exact = action_exact = 0
@@ -109,6 +126,9 @@ def aggregate_semantic_page_statistics(
         "ambiguous_instance_count": ambiguous,
         "ambiguous_destructive_count": ambiguous_destructive,
         "unavailable_instance_count": unavailable,
+        "no_edit_page_count": no_edit_pages,
+        "no_edit_false_translate_page_count": no_edit_false_pages,
+        "no_edit_false_translate_region_count": no_edit_false_regions,
         "reason_counts": dict(sorted(reasons.items())),
     }
 
@@ -156,6 +176,8 @@ def _decision(
     )
     if policy == "ocr_semantic_hint":
         return ocr
+    if policy == "ocr_provenance_verifier":
+        return ocr_provenance_decision(region)
     if policy == "explicit_role_consensus":
         return consensus_decision(detector, ocr)
     if policy == "human_oracle":
@@ -223,8 +245,40 @@ def score_semantic_policies(manifest_path: Path) -> dict[str, object]:
                         "reason": predicted.reason,
                     }
                 )
+            required_regions = {
+                str(value.get("region_id") or "")
+                for value in raw_instances
+                if isinstance(value, dict) and value.get("priority") == "required"
+            }
+            no_edit = not required_regions
+            region_truth: dict[str, dict[str, Any]] = {}
+            for value in raw_instances:
+                if not isinstance(value, dict):
+                    continue
+                region_id = str(value.get("region_id") or "")
+                current = region_truth.get(region_id)
+                if current is None or value.get("priority") == "required":
+                    region_truth[region_id] = value
+            region_decisions: list[dict[str, object]] = []
+            for region_id, region in sorted(regions.items()):
+                instance = region_truth.get(region_id, {})
+                predicted = _decision(policy, instance, region)
+                region_decisions.append(
+                    {
+                        "region_id": region_id,
+                        "predicted_role": predicted.role,
+                        "predicted_action": predicted.action,
+                        "available": predicted.available,
+                        "reason": predicted.reason,
+                    }
+                )
             policy_pages.append(
-                {"page_id": str(page.get("page_id") or ""), "decisions": decisions}
+                {
+                    "page_id": str(page.get("page_id") or ""),
+                    "no_edit": no_edit,
+                    "decisions": decisions,
+                    "region_decisions": region_decisions,
+                }
             )
         metrics = aggregate_semantic_page_statistics(policy_pages)
         required = int(metrics["required_instance_count"])
@@ -238,6 +292,7 @@ def score_semantic_policies(manifest_path: Path) -> dict[str, object]:
             and (required == 0 or required_recall == 1.0)
             and preserve_destructive == 0
             and ambiguous_destructive == 0
+            and int(metrics["no_edit_false_translate_page_count"]) == 0
         )
         page_statistics[policy] = policy_pages
         output.append(

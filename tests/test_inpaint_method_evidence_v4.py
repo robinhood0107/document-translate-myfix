@@ -2004,6 +2004,7 @@ def test_semantic_disposition_is_artifact_derived_and_blocked_needs_probe(tmp_pa
         "current_default",
         "detector_explicit_role",
         "ocr_semantic_hint",
+        "ocr_provenance_verifier",
         "explicit_role_consensus",
         "human_oracle",
     )
@@ -2029,16 +2030,20 @@ def test_semantic_disposition_is_artifact_derived_and_blocked_needs_probe(tmp_pa
             "available": True,
             "reason": "",
         }
-        metrics = aggregate_semantic_page_statistics(
-            [{"page_id": "p", "decisions": [decision]}]
-        )
+        page = {
+            "page_id": "p",
+            "no_edit": False,
+            "decisions": [decision],
+            "region_decisions": [],
+        }
+        metrics = aggregate_semantic_page_statistics([page])
         return {
             "policy_id": policy_id,
             "oracle_only": policy_id == "human_oracle",
             "status": "dominated" if is_current else "family_complete",
             "closure_reason": "semantic_hard_gate_failed" if is_current else "",
             "metrics": metrics,
-            "page": {"page_id": "p", "decisions": [decision]},
+            "page": page,
         }
 
     artifact = _write_json(
@@ -2094,6 +2099,7 @@ def test_minimal_semantic_metrics_cannot_claim_pareto(tmp_path: Path) -> None:
                             "current_default",
                             "detector_explicit_role",
                             "ocr_semantic_hint",
+                            "ocr_provenance_verifier",
                             "explicit_role_consensus",
                             "human_oracle",
                         )

@@ -97,6 +97,7 @@
         "current_default",
         "detector_explicit_role",
         "ocr_semantic_hint",
+        "ocr_provenance_verifier",
         "explicit_role_consensus",
         "human_oracle"
       ]

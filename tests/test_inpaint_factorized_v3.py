@@ -306,8 +306,10 @@ def _write_strict_source_manifest(
                 else ambiguous_union
             )
             destination[mask > 0] = 255
-        target_path = _write_image(
-            path.parent / f"{page_id}-target.png", required_union
+        target_path = (
+            _write_image(path.parent / f"{page_id}-target.png", required_union)
+            if np.any(required_union)
+            else None
         )
         preserve_path = _write_image(
             path.parent / f"{page_id}-preserve.png", preserve_union
@@ -493,6 +495,7 @@ def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
         "current_default",
         "detector_explicit_role",
         "ocr_semantic_hint",
+        "ocr_provenance_verifier",
         "explicit_role_consensus",
         "human_oracle",
     }
@@ -502,9 +505,133 @@ def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
     assert policies["current_default"]["metrics"]["preserve_destructive_count"] == 1
     assert policies["detector_explicit_role"]["status"] == "blocked_asset"
     assert policies["ocr_semantic_hint"]["status"] == "blocked_asset"
+    assert policies["ocr_provenance_verifier"]["status"] == "blocked_asset"
     assert policies["explicit_role_consensus"]["status"] == "blocked_asset"
     assert policies["human_oracle"]["status"] == "family_complete"
     assert policies["human_oracle"]["oracle_only"] is True
+
+
+def test_ocr_provenance_verifier_requires_provider_evidence_and_abstains_without_text(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "regions": [
+                            {
+                                "region_id": "translate",
+                                "proposal": {
+                                    "text_class": "text_bubble",
+                                    "ocr_evidence_available": True,
+                                    "ocr_text": "example",
+                                    "ocr_script": "Latin",
+                                    "ocr_confidence": 0.75,
+                                },
+                            },
+                            {
+                                "region_id": "preserve",
+                                "proposal": {
+                                    "text_class": "sfx",
+                                    "ocr_evidence_available": True,
+                                },
+                            },
+                            {
+                                "region_id": "abstain",
+                                "proposal": {
+                                    "text_class": "text_free",
+                                    "ocr_evidence_available": True,
+                                    "ocr_text": "",
+                                    "ocr_script": "Latin",
+                                    "ocr_confidence": 0.9,
+                                },
+                            },
+                        ],
+                        "target_instances": [
+                            {
+                                "instance_id": "required",
+                                "region_id": "translate",
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                            {
+                                "instance_id": "preserve",
+                                "region_id": "preserve",
+                                "semantic_role": "sfx",
+                                "processing_action": "preserve",
+                                "priority": "optional",
+                            },
+                            {
+                                "instance_id": "abstain",
+                                "region_id": "abstain",
+                                "semantic_role": "dialogue_free",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_strict_source_manifest(
+        manifest, json.loads(manifest.read_text(encoding="utf-8"))
+    )
+
+    result = score_semantic_policies(manifest)
+    rows = result["pages"]["ocr_provenance_verifier"][0]["decisions"]
+    by_id = {row["instance_id"]: row for row in rows}
+    assert by_id["required"]["predicted_action"] == "translate_inpaint"
+    assert by_id["preserve"]["predicted_action"] == "preserve"
+    assert by_id["abstain"]["predicted_action"] == "review"
+    assert by_id["abstain"]["available"] is True
+
+
+def test_semantic_policy_counts_false_translate_actions_on_no_edit_pages(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "expected_edit": "none",
+                        "regions": [
+                            {
+                                "region_id": "false-translate",
+                                "proposal": {"text_class": "text_bubble"},
+                            }
+                        ],
+                        "target_instances": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_strict_source_manifest(
+        manifest, json.loads(manifest.read_text(encoding="utf-8"))
+    )
+
+    policies = {
+        row["policy_id"]: row for row in score_semantic_policies(manifest)["policies"]
+    }
+    assert policies["current_default"]["metrics"][
+        "no_edit_false_translate_page_count"
+    ] == 1
+    assert policies["current_default"]["status"] == "dominated"
+    assert policies["human_oracle"]["metrics"][
+        "no_edit_false_translate_page_count"
+    ] == 0
 
 
 def test_semantic_policy_blocks_partially_missing_provider_evidence(
