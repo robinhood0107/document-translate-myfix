@@ -57,7 +57,11 @@
         "ctbd_raw",
         "sickzil_raw",
         "manga109_text",
-        "ownership_roi_ctd"
+        "ownership_roi_ctd",
+        "finetune_e6_raw",
+        "finetune_e6_native3",
+        "finetune_e8_raw",
+        "finetune_e8_native3"
       ]
     },
     {
