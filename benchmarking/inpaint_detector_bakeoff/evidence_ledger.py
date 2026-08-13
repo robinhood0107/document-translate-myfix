@@ -403,6 +403,20 @@ def _stage1_variants(payload: Mapping[str, object], family_id: str) -> frozenset
             for source_variant, normalized in aliases.items()
             if isinstance(identities.get(source_variant), Mapping)
         )
+    easyocr_families = {
+        "easyocr-craft": "easyocr-craft",
+        "easyocr-dbnet18": "easyocr-dbnet18",
+    }
+    if easyocr_families.get(candidate) == family_id:
+        aliases = {"raw": "raw", "refined": "refined", "dilated": "native3"}
+        identities = payload.get("variant_output_identity")
+        if not isinstance(identities, Mapping):
+            return frozenset()
+        return frozenset(
+            normalized
+            for source_variant, normalized in aliases.items()
+            if isinstance(identities.get(source_variant), Mapping)
+        )
     candidate_families = {
         "ballons-ctd-text-roi": "ownership-roi-ctd",
         "manga109-text": "manga109-text",
@@ -2570,7 +2584,12 @@ def artifact_variant_facts(payload: Mapping[str, object], family_id: str) -> dic
         return output
     if (
         schema == "inpaint-detector-bakeoff-stage1-v1"
-        and family_id == "ctd-synthetic-finetune"
+        and family_id
+        in {
+            "ctd-synthetic-finetune",
+            "easyocr-craft",
+            "easyocr-dbnet18",
+        }
     ):
         identities = payload["variant_output_identity"]  # type: ignore[index]
         summary = payload["summary"]  # type: ignore[index]
@@ -2964,6 +2983,8 @@ def registry_evidence_adapter_gaps(
         "ctbd-text": frozenset({"raw"}),
         "ownership-roi-ctd": frozenset({"raw", "refined"}),
         "ctd-synthetic-finetune": frozenset({"raw", "refined", "native3"}),
+        "easyocr-craft": frozenset({"raw", "refined", "native3"}),
+        "easyocr-dbnet18": frozenset({"raw", "refined", "native3"}),
         "detector-fusion": frozenset({"single", "or", "and", "gated_recovery"}),
         "roi-trigger": frozenset({"none", "always", "seed_missing", "raw_refined_disagreement", "source_seed_unavailable", "union"}),
         "semantic-policy": frozenset({"current_default", "detector_explicit_role", "ocr_semantic_hint", "explicit_role_consensus", "human_oracle"}),
