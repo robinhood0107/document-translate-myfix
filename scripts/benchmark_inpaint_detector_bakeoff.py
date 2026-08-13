@@ -41,6 +41,10 @@ from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: 
     cuda_peak_memory_provenance,
     evaluation_runtime_provenance,
 )
+from benchmarking.inpaint_detector_bakeoff.tiled_detector import (  # noqa: E402
+    TiledCandidateReference,
+    TiledInferenceSettings,
+)
 from modules.masking.ctd_refiner import CTDRefinerSettings  # noqa: E402
 from modules.utils.download import ModelDownloader, ModelID  # noqa: E402
 from scripts.validation_artifact_harness import (  # noqa: E402
@@ -54,6 +58,9 @@ EVALUATOR_PATH = Path(__file__).resolve()
 STAGE1_PATH = ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "stage1.py"
 SYNTHETIC_DETECTOR_PATH = (
     ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "synthetic_detector.py"
+)
+TILED_DETECTOR_PATH = (
+    ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "tiled_detector.py"
 )
 
 
@@ -123,7 +130,10 @@ def _ownership_path(args: argparse.Namespace, page) -> Path:
 
 
 def _candidate(args: argparse.Namespace):
-    if args.candidate == "ctd-synthetic-finetune":
+    if args.candidate in {
+        "ctd-synthetic-finetune",
+        "ctd-synthetic-finetune-tiled",
+    }:
         if not args.checkpoint:
             raise ValueError("--checkpoint is required for CTD synthetic fine-tune")
         model_path = Path(
@@ -143,7 +153,16 @@ def _candidate(args: argparse.Namespace):
             font_paths=tuple(Path(value) for value in args.font),
             expected_code_commit=_current_commit(),
         )
-        return adapter.infer, model_path, None
+        infer = adapter.infer
+        if args.candidate.endswith("-tiled"):
+            infer = TiledCandidateReference(
+                infer,
+                TiledInferenceSettings(
+                    tile_sizes=tuple(args.tile_size),
+                    overlap=float(args.tile_overlap),
+                ),
+            ).infer
+        return infer, model_path, None
 
     if args.candidate == "ballons-ctbd":
         model_path = Path(args.model or ModelDownloader.get_file_path(
@@ -201,6 +220,15 @@ def _candidate(args: argparse.Namespace):
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         return adapter.infer(image_rgb)
 
+    if args.candidate == "ballons-ctd-tiled":
+        infer = TiledCandidateReference(
+            infer,
+            TiledInferenceSettings(
+                tile_sizes=tuple(args.tile_size),
+                overlap=float(args.tile_overlap),
+            ),
+        ).infer
+
     def infer_ownership_roi(page, image_bgr):
         ownership_path = _ownership_path(args, page)
         ownership = cv2.imdecode(
@@ -242,6 +270,8 @@ def build_parser() -> argparse.ArgumentParser:
             "ballons-ctd-original",
             "ballons-ctbd",
             "ctd-synthetic-finetune",
+            "ctd-synthetic-finetune-tiled",
+            "ballons-ctd-tiled",
         ),
         required=True,
     )
@@ -276,6 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--detect-size", type=int, default=1280)
     parser.add_argument("--max-batches", type=int, default=4)
     parser.add_argument(
+        "--tile-size",
+        action="append",
+        type=int,
+        default=None,
+        help="Source-space square tile size; repeat for multiscale tiling.",
+    )
+    parser.add_argument("--tile-overlap", type=float, default=0.2)
+    parser.add_argument(
         "--ownership-root",
         type=Path,
         help=(
@@ -288,6 +326,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    args.tile_size = list(args.tile_size or [768])
     manifest_path = args.manifest.resolve()
     manifest_binding = validate_source_only_manifest_v4(manifest_path)
     current_commit = _current_commit()
@@ -353,6 +392,12 @@ def main(argv: list[str] | None = None) -> int:
             "ctbd_dilate": int(args.ctbd_dilate),
             "device": args.device,
             "ownership_roi": args.candidate == "ballons-ctd-text-roi",
+            "tile_sizes": (
+                list(args.tile_size) if args.candidate.endswith("-tiled") else []
+            ),
+            "tile_overlap": (
+                float(args.tile_overlap) if args.candidate.endswith("-tiled") else 0.0
+            ),
             "ownership_contract": (
                 "external-page-id-mask"
                 if args.ownership_root
@@ -651,7 +696,8 @@ def main(argv: list[str] | None = None) -> int:
                 "code_commit": current_commit,
                 "evaluator_sha256": _sha256(EVALUATOR_PATH),
                 "stage1_sha256": _sha256(STAGE1_PATH),
-                "synthetic_detector_sha256": _sha256(SYNTHETIC_DETECTOR_PATH),
+            "synthetic_detector_sha256": _sha256(SYNTHETIC_DETECTOR_PATH),
+                "tiled_detector_sha256": _sha256(TILED_DETECTOR_PATH),
                 "runtime": evaluation_runtime,
             },
             "summary": summary,

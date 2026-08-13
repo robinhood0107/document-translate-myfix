@@ -101,6 +101,7 @@ from scripts.export_inpaint_silhouette_consensus_v4 import consensus_masks
 from scripts.benchmark_inpaint_detector_fusions_v4 import (
     _logical_runs as detector_fusion_runs,
     run_fusion_matrix,
+    select_seed_admission_run_ids,
 )
 from scripts.benchmark_inpaint_semantic_policies_v4 import score_semantic_policies
 from scripts.audit_inpaint_detector_ceiling_v4 import audit_detector_ceiling
@@ -1897,6 +1898,66 @@ def test_detector_fusion_matrix_covers_singles_pairs_and_roi_triggers() -> None:
     assert "primary__gated_always__roi" in run_ids
     assert "primary__gated_seed_missing__roi" in run_ids
     assert "secondary__gated_union__roi" in run_ids
+
+
+def test_detector_fusion_best_effort_admission_keeps_recall_and_safety_views() -> None:
+    def row(run_id: str, missed: int, coverage: float, false_edit: int) -> dict[str, object]:
+        return {
+            "run_id": run_id,
+            "seed_eligible": missed == 0,
+            "metrics": {
+                "missed_target_instance_count": missed,
+                "aggregate_target_coverage": coverage,
+                "minimum_target_instance_coverage": 0.0,
+                "false_edit_pixel_count": false_edit,
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+            },
+        }
+
+    selected = select_seed_admission_run_ids(
+        [
+            row("coverage", 7, 0.95, 1700),
+            row("safety", 7, 0.91, 1200),
+            row("worse-recall", 8, 0.99, 10),
+        ]
+    )
+
+    assert selected == frozenset({"coverage", "safety"})
+
+
+def test_detector_fusion_strict_seed_candidates_take_precedence() -> None:
+    rows = [
+        {
+            "run_id": "strict",
+            "seed_eligible": True,
+            "metrics": {
+                "missed_target_instance_count": 0,
+                "aggregate_target_coverage": 0.9,
+                "minimum_target_instance_coverage": 0.8,
+                "false_edit_pixel_count": 100,
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+            },
+        },
+        {
+            "run_id": "best-effort",
+            "seed_eligible": False,
+            "metrics": {
+                "missed_target_instance_count": 1,
+                "aggregate_target_coverage": 1.0,
+                "minimum_target_instance_coverage": 0.0,
+                "false_edit_pixel_count": 0,
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+            },
+        },
+    ]
+
+    assert select_seed_admission_run_ids(rows) == frozenset({"strict"})
 
 
 def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) -> None:

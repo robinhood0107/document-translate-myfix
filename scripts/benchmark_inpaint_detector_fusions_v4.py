@@ -430,9 +430,18 @@ def _logical_runs(
     return runs
 
 
-def _hard_gate_passes(summary: dict[str, object]) -> bool:
+def _seed_gate_passes(summary: dict[str, object]) -> bool:
+    return (
+        summary.get("target_extent_independent") is True
+        and summary.get("target_inventory_independent") is True
+        and summary.get("target_review_complete") is True
+        and int(summary["missed_target_instance_count"]) == 0
+        and float(summary.get("target_instance_seed_recall") or 0.0) >= 1.0
+    )
+
+
+def _product_mask_hard_gate_passes(summary: dict[str, object]) -> bool:
     zero = (
-        "missed_target_instance_count",
         "protected_edit_overlap",
         "ambiguous_edit_overlap",
         "preserve_edit_overlap",
@@ -448,6 +457,68 @@ def _hard_gate_passes(summary: dict[str, object]) -> bool:
         and float(summary.get("aggregate_target_coverage") or 0.0) >= 0.98
         and float(summary.get("minimum_target_instance_coverage") or 0.0) >= 0.98
     )
+
+
+def _hard_gate_passes(summary: dict[str, object]) -> bool:
+    return _seed_gate_passes(summary) and _product_mask_hard_gate_passes(summary)
+
+
+def select_seed_admission_run_ids(
+    runs: list[dict[str, object]], *, limit: int = 2
+) -> frozenset[str]:
+    """Choose complementary best-effort seed proposals when perfection is absent."""
+
+    if limit < 1:
+        raise ValueError("seed admission limit must be positive")
+    eligible = [
+        row
+        for row in runs
+        if isinstance(row.get("metrics"), dict)
+        and all(
+            row["metrics"].get(field) is True  # type: ignore[index]
+            for field in (
+                "target_extent_independent",
+                "target_inventory_independent",
+                "target_review_complete",
+            )
+        )
+    ]
+    strict = [row for row in eligible if bool(row.get("seed_eligible"))]
+    pool = strict or eligible
+    if not pool:
+        return frozenset()
+    minimum_missed = min(
+        int(row["metrics"]["missed_target_instance_count"]) for row in pool  # type: ignore[index]
+    )
+    frontier = [
+        row
+        for row in pool
+        if int(row["metrics"]["missed_target_instance_count"]) == minimum_missed  # type: ignore[index]
+    ]
+    by_coverage = sorted(
+        frontier,
+        key=lambda row: (
+            -float(row["metrics"].get("aggregate_target_coverage") or 0.0),  # type: ignore[index]
+            int(row["metrics"].get("false_edit_pixel_count") or 0),  # type: ignore[index]
+            str(row["run_id"]),
+        ),
+    )
+    by_safety = sorted(
+        frontier,
+        key=lambda row: (
+            int(row["metrics"].get("false_edit_pixel_count") or 0),  # type: ignore[index]
+            -float(row["metrics"].get("aggregate_target_coverage") or 0.0),  # type: ignore[index]
+            str(row["run_id"]),
+        ),
+    )
+    selected: list[str] = []
+    for row in (by_coverage[0], by_safety[0], *by_coverage, *by_safety):
+        run_id = str(row["run_id"])
+        if run_id not in selected:
+            selected.append(run_id)
+        if len(selected) >= limit:
+            break
+    return frozenset(selected)
 
 
 def run_fusion_matrix(
@@ -711,7 +782,18 @@ def run_fusion_matrix(
                 "status": status,
                 "closure_reason": reason,
                 "metrics": summary,
+                "seed_eligible": _seed_gate_passes(summary),
+                "product_mask_hard_pass": _product_mask_hard_gate_passes(summary),
             }
+        )
+    admitted_run_ids = select_seed_admission_run_ids(output_runs, limit=2)
+    strict_seed_available = any(bool(row["seed_eligible"]) for row in output_runs)
+    for row in output_runs:
+        admitted = str(row["run_id"]) in admitted_run_ids
+        row["seed_admitted"] = admitted
+        row["seed_admission_kind"] = (
+            "strict" if admitted and strict_seed_available else
+            "best_effort" if admitted else "not_selected"
         )
     result = {
         "schema_version": "inpaint-detector-fusion-results-v4",
@@ -725,6 +807,11 @@ def run_fusion_matrix(
         "closure_ledger": closure,
         "logical_inventory_sha256": _logical_inventory_sha256(closure),
         "runs": output_runs,
+        "seed_admission": {
+            "runtime_detector_limit": 2,
+            "strict_seed_available": strict_seed_available,
+            "selected_run_ids": sorted(admitted_run_ids),
+        },
         "pages": page_statistics,
     }
     if output_inventory is not None:
