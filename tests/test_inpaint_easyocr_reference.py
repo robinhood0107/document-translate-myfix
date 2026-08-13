@@ -60,6 +60,11 @@ def test_craft_reference_exposes_raw_native_and_dilated_masks() -> None:
 
 class _DBNetModel:
     @staticmethod
+    def get_mini_boxes(contour):
+        assert np.asarray(contour).dtype == np.float32
+        return np.asarray(contour).reshape(-1, 2), 4.0
+
+    @staticmethod
     def resize_image(image, _size):
         return image, image.shape[:2]
 
@@ -74,9 +79,9 @@ class _DBNetModel:
         return output
 
     @staticmethod
-    def hmap2bbox(*_args, **_kwargs):
+    def boxes_from_bitmap(*_args, **_kwargs):
         polygon = np.array([[2, 2], [6, 2], [6, 6], [2, 6]], dtype=np.float32)
-        return ((polygon,),), ((0.9,),)
+        return (polygon,), (0.9,)
 
 
 def test_dbnet_reference_exposes_raw_native_and_dilated_masks() -> None:

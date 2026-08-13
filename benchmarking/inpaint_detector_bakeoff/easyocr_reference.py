@@ -276,18 +276,33 @@ class EasyOCRDBNetReference:
             image_bgr.shape[:2],
         )
         raw = binary_mask(raw_probability >= self.settings.text_threshold)
-        polygon_batches, _scores = self.model.hmap2bbox(
-            tensor,
-            (original_shape,),
-            heatmap,
-            text_threshold=self.settings.text_threshold,
-            bbox_min_score=self.settings.bbox_min_score,
-            bbox_min_size=self.settings.bbox_min_size,
-            max_candidates=0,
-            as_polygon=True,
-        )
-        polygons = list(polygon_batches[0]) if polygon_batches else []
-        refined, detector_boxes = _polygon_mask(polygons, image_bgr.shape[:2])
+        segmentation = heatmap > self.settings.text_threshold
+        original_mini_boxes = self.model.get_mini_boxes
+
+        def float32_mini_boxes(contour):
+            # Newer OpenCV rejects pyclipper's inferred float64/ragged array;
+            # the reference operation itself is defined for CV_32F points.
+            return original_mini_boxes(np.asarray(contour, dtype=np.float32))
+
+        self.model.get_mini_boxes = float32_mini_boxes
+        try:
+            polygons, scores = self.model.boxes_from_bitmap(
+                heatmap[0],
+                segmentation[0],
+                original_shape[1],
+                original_shape[0],
+                bbox_min_score=self.settings.bbox_min_score,
+                bbox_min_size=self.settings.bbox_min_size,
+                max_candidates=0,
+            )
+        finally:
+            self.model.get_mini_boxes = original_mini_boxes
+        accepted = [
+            polygon
+            for polygon, score in zip(polygons, scores)
+            if float(score) > 0.0
+        ]
+        refined, detector_boxes = _polygon_mask(accepted, image_bgr.shape[:2])
         return CandidateMaskResult(
             candidate_id="easyocr_dbnet18",
             raw_mask=raw,
