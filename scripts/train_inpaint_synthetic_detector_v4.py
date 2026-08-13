@@ -28,10 +28,11 @@ from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: 
     CHECKPOINT_SELECTION_CONTRACT,
     CHECKPOINT_SCHEMA,
     TRAINING_CONTRACT,
+    font_asset_provenance,
+    source_dependency_provenance,
     validate_training_hyperparameters,
 )
 from benchmarking.inpaint_detector_bakeoff.synthetic_training import (  # noqa: E402
-    supported_font_phrase_pairs,
     synthetic_training_digest,
     synthetic_training_sample,
 )
@@ -117,6 +118,8 @@ def _runtime_versions(torch, device: str) -> dict[str, object]:
         "device": device,
         "cuda": str(torch.version.cuda or ""),
         "cudnn": str(torch.backends.cudnn.version() or ""),
+        "peak_memory_allocated_bytes": 0,
+        "peak_memory_reserved_bytes": 0,
     }
     if device.startswith("cuda"):
         runtime["cuda_device_name"] = str(torch.cuda.get_device_name(device))
@@ -126,20 +129,21 @@ def _runtime_versions(torch, device: str) -> dict[str, object]:
     return runtime
 
 
-def _font_asset_provenance(font_paths: tuple[Path, ...]) -> list[dict[str, object]]:
-    supported = supported_font_phrase_pairs(font_paths)
-    phrases_by_path: dict[Path, list[str]] = {path: [] for path in font_paths}
-    for path, phrase in supported:
-        phrases_by_path[path].append(phrase)
-    return [
-        {
-            "name": path.name,
-            "sha256": _sha256(path),
-            "size_bytes": path.stat().st_size,
-            "supported_phrases": phrases_by_path[path],
-        }
-        for path in font_paths
-    ]
+def _runtime_with_peak_memory(
+    torch,
+    runtime: dict[str, object],
+    device: str,
+) -> dict[str, object]:
+    current = dict(runtime)
+    if device.startswith("cuda"):
+        torch.cuda.synchronize(device)
+        current["peak_memory_allocated_bytes"] = int(
+            torch.cuda.max_memory_allocated(device)
+        )
+        current["peak_memory_reserved_bytes"] = int(
+            torch.cuda.max_memory_reserved(device)
+        )
+    return current
 
 
 def _tensor_batch(
@@ -366,6 +370,8 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         raise ValueError("device must not be empty")
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA training requested but CUDA is unavailable")
+    if device.startswith("cuda"):
+        torch.cuda.reset_peak_memory_stats(device)
     base_model_path = args.base_model.resolve()
     if not base_model_path.is_file():
         raise FileNotFoundError(base_model_path)
@@ -374,7 +380,7 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         int(hyperparameters["image_size"]),
     )
     font_paths = tuple(Path(value).resolve() for value in args.font)
-    font_assets = _font_asset_provenance(font_paths)
+    font_assets = font_asset_provenance(font_paths)
     train_seeds = list(
         range(seed, seed + int(hyperparameters["train_samples"]))
     )
@@ -402,6 +408,7 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
     generator_sha256 = _sha256(GENERATOR_PATH)
     detector_sha256 = _sha256(DETECTOR_PATH)
     trainer_sha256 = _sha256(TRAINER_PATH)
+    source_dependency_sha256 = source_dependency_provenance()
 
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(True)
@@ -509,12 +516,15 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
             "generator_sha256": generator_sha256,
             "detector_sha256": detector_sha256,
             "trainer_sha256": trainer_sha256,
+            "source_dependency_sha256": source_dependency_sha256,
             "training_contract": TRAINING_CONTRACT,
             "checkpoint_selection_contract": CHECKPOINT_SELECTION_CONTRACT,
             "training_hyperparameters": hyperparameters,
             "train_dataset_sha256": train_dataset_sha256,
             "dev_dataset_sha256": dev_dataset_sha256,
-            "runtime_versions": runtime_versions,
+            "runtime_versions": _runtime_with_peak_memory(
+                torch, runtime_versions, device
+            ),
             "code_commit": code_commit,
             "determinism_contract": {
                 "torch_deterministic_algorithms": True,
@@ -581,6 +591,7 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         str(preview_path), np.concatenate(previews, axis=0)
     ):
         raise OSError(preview_path)
+    runtime_versions = _runtime_with_peak_memory(torch, runtime_versions, device)
     return {
         "schema_version": "inpaint-ctd-synthetic-finetune-training-results-v4",
         "device": device,
@@ -614,6 +625,7 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
         "generator_sha256": generator_sha256,
         "detector_sha256": detector_sha256,
         "trainer_sha256": trainer_sha256,
+        "source_dependency_sha256": source_dependency_sha256,
         "train_dataset_sha256": train_dataset_sha256,
         "dev_dataset_sha256": dev_dataset_sha256,
         "runtime_versions": runtime_versions,
@@ -625,6 +637,11 @@ def train(args: argparse.Namespace, output: Path) -> dict[str, object]:
             "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG", ""),
         },
         "architecture_contract": "existing_ctd_frozen_backbone_finetuned_text_seg",
+        "evaluation_output_contract": {
+            "raw": "native_finetuned_ctd_text_seg",
+            "refined": "exact_identity_reuse_of_raw",
+            "dilated": "elliptical_native3_from_raw",
+        },
         "font_assets": font_assets,
     }
 
@@ -660,6 +677,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _training_hyperparameters(args)
+    if args.output_dir is not None and args.output_dir.resolve().exists():
+        raise FileExistsError(
+            "training output directory must be fresh and absent: "
+            f"{args.output_dir.resolve()}"
+        )
     output, managed = select_managed_output_directory(
         family=FAMILY,
         category=CATEGORY,

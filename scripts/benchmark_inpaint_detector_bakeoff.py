@@ -25,14 +25,21 @@ from benchmarking.inpaint_detector_bakeoff.ballons_ctd import (  # noqa: E402
     BallonsCTDFullPageReference,
     BallonsCTDOriginalReference,
 )
-from benchmarking.inpaint_detector_bakeoff.contracts import RoleCandidateSpec  # noqa: E402
+from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
+    RoleCandidateSpec,
+    binary_mask,
+    mask_sha256,
+)
 from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_stage1_manifest,
     run_stage1,
+    validate_source_only_manifest_v4,
 )
 from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: E402
     CANDIDATE_ID as SYNTHETIC_FINETUNE_CANDIDATE_ID,
     CTDSyntheticFineTuneReference,
+    cuda_peak_memory_provenance,
+    evaluation_runtime_provenance,
 )
 from modules.masking.ctd_refiner import CTDRefinerSettings  # noqa: E402
 from modules.utils.download import ModelDownloader, ModelID  # noqa: E402
@@ -43,6 +50,11 @@ from scripts.validation_artifact_harness import (  # noqa: E402
 
 FAMILY = "inpaint-detector-bakeoff-v2"
 CATEGORY = "40-inpaint-mask-render"
+EVALUATOR_PATH = Path(__file__).resolve()
+STAGE1_PATH = ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "stage1.py"
+SYNTHETIC_DETECTOR_PATH = (
+    ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "synthetic_detector.py"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -94,7 +106,10 @@ def _existing_edit_paths(manifest_path: Path) -> dict[str, str]:
         if isinstance(value, dict):
             value = value.get("path")
         if isinstance(value, str) and value.strip():
-            paths[str(page.get("page_id") or "")] = value.strip()
+            artifact = Path(value.strip())
+            if not artifact.is_absolute():
+                artifact = manifest_path.resolve().parent / artifact
+            paths[str(page.get("page_id") or "")] = str(artifact.resolve())
     return paths
 
 
@@ -125,6 +140,8 @@ def _candidate(args: argparse.Namespace):
             detect_size=int(args.detect_size),
             dilate_size=3,
             max_batches=int(args.max_batches),
+            font_paths=tuple(Path(value) for value in args.font),
+            expected_code_commit=_current_commit(),
         )
         return adapter.infer, model_path, None
 
@@ -134,8 +151,6 @@ def _candidate(args: argparse.Namespace):
             "detector.onnx",
         ))
         providers = [args.provider]
-        if args.provider != "CPUExecutionProvider":
-            providers.append("CPUExecutionProvider")
         adapter = BallonsCTBDReference(
             str(model_path),
             providers,
@@ -143,7 +158,12 @@ def _candidate(args: argparse.Namespace):
                 confidence_threshold=float(args.confidence),
                 inpaint_mask_dilate=int(args.ctbd_dilate),
             ),
+            disable_cpu_fallback=args.provider != "CPUExecutionProvider",
         )
+        if not adapter.providers or adapter.providers[0] != args.provider:
+            raise RuntimeError(
+                "CTBD effective provider differs from the requested provider"
+            )
         return adapter.infer, model_path, None
 
     model_path = Path(args.model or ModelDownloader.get_file_path(
@@ -232,6 +252,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Synthetic-only CTD text-seg fine-tune checkpoint.",
     )
+    parser.add_argument(
+        "--font",
+        action="append",
+        default=[],
+        help=(
+            "Exact local font inputs recorded by the synthetic fine-tune; "
+            "repeat in the original training order."
+        ),
+    )
     parser.add_argument("--ballons-root", default="")
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument(
@@ -260,6 +289,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     manifest_path = args.manifest.resolve()
+    manifest_binding = validate_source_only_manifest_v4(manifest_path)
+    current_commit = _current_commit()
+    if args.code_commit and args.code_commit != current_commit:
+        raise ValueError("--code-commit must equal the current Git HEAD")
+    if args.output_dir is not None and args.output_dir.resolve().exists():
+        raise FileExistsError(
+            "detector evaluation output directory must be fresh and absent: "
+            f"{args.output_dir.resolve()}"
+        )
     output_root, managed = select_managed_output_directory(
         family=FAMILY,
         category=CATEGORY,
@@ -268,7 +306,45 @@ def main(argv: list[str] | None = None) -> int:
     output_root.mkdir(parents=True, exist_ok=True)
     try:
         pages = load_stage1_manifest(manifest_path)
+        if sorted(page.page_id for page in pages) != manifest_binding["page_ids"]:
+            raise ValueError("loaded page inventory differs from the sealed manifest")
+        evaluation_runtime: dict[str, object]
+        if args.candidate == "ballons-ctbd":
+            import onnxruntime as ort
+
+            available = list(ort.get_available_providers())
+            if args.provider not in available:
+                raise RuntimeError(
+                    f"requested ONNX provider is unavailable: {args.provider}"
+                )
+            evaluation_runtime = {
+                "requested_provider": args.provider,
+                "onnxruntime": str(ort.__version__),
+                "available_providers": available,
+            }
+        else:
+            evaluation_runtime = evaluation_runtime_provenance(args.device)
+            if args.device.startswith("cuda"):
+                import torch
+
+                torch.cuda.reset_peak_memory_stats(args.device)
         infer, model_path, page_infer = _candidate(args)
+        if args.candidate == "ballons-ctbd":
+            adapter = getattr(infer, "__self__", None)
+            configured = list(getattr(adapter, "providers", ()))
+            if not configured or configured[0] != args.provider:
+                raise RuntimeError(
+                    "CTBD effective provider differs from the requested provider"
+                )
+            evaluation_runtime.update(
+                {
+                    "runtime_provider": configured[0],
+                    "configured_providers": configured,
+                    "cpu_ep_fallback_disabled": bool(
+                        getattr(adapter, "disable_cpu_fallback", False)
+                    ),
+                }
+            )
         preprocessing_contract = {
             "candidate": args.candidate,
             "detect_size": int(args.detect_size),
@@ -287,6 +363,14 @@ def main(argv: list[str] | None = None) -> int:
                 if args.checkpoint
                 else ""
             ),
+            "font_assets": [
+                {
+                    "name": Path(value).resolve().name,
+                    "sha256": _sha256(Path(value).resolve()),
+                    "size_bytes": Path(value).resolve().stat().st_size,
+                }
+                for value in args.font
+            ],
         }
         candidate_id = (
             SYNTHETIC_FINETUNE_CANDIDATE_ID
@@ -304,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
             provider=args.candidate,
             role="seed",
             variant="native-bundle-v2",
-            code_commit=args.code_commit or _current_commit(),
+            code_commit=current_commit,
             model_sha256=model_identity_sha256,
             runtime_provider=(
                 args.provider if args.candidate == "ballons-ctbd" else args.device
@@ -313,6 +397,40 @@ def main(argv: list[str] | None = None) -> int:
         )
         cache_root = args.cache_dir.resolve() if args.cache_dir else output_root / "detector_cache"
         native_root = output_root / "native_masks"
+        variant_outputs: dict[str, list[dict[str, object]]] = {
+            "raw": [],
+            "refined": [],
+            "dilated": [],
+        }
+        output_artifacts: list[dict[str, object]] = []
+
+        def record_mask_artifact(
+            path: Path,
+            mask: np.ndarray,
+            *,
+            page_id: str,
+            role: str,
+            variant_name: str,
+        ) -> dict[str, object]:
+            decoded = cv2.imdecode(
+                np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE
+            )
+            if decoded is None or decoded.size == 0:
+                raise OSError(f"failed to decode written mask artifact: {path}")
+            normalized = binary_mask(decoded, mask.shape)
+            if not np.array_equal(normalized, binary_mask(mask)):
+                raise RuntimeError(f"written mask artifact differs from memory: {path}")
+            record = {
+                "page_id": page_id,
+                "role": role,
+                "variant": variant_name,
+                "relative_path": path.relative_to(output_root).as_posix(),
+                "artifact_sha256": _sha256(path),
+                "binary_mask_sha256": mask_sha256(normalized),
+                "pixel_count": int(cv2.countNonZero(normalized)),
+            }
+            output_artifacts.append(record)
+            return record
 
         def write_native_masks(page, result) -> None:
             for variant_name, mask in (
@@ -324,6 +442,15 @@ def main(argv: list[str] | None = None) -> int:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if not cv2.imwrite(str(path), mask):
                     raise OSError(f"failed to write native detector mask: {path}")
+                variant_outputs[variant_name].append(
+                    record_mask_artifact(
+                        path,
+                        mask,
+                        page_id=page.page_id,
+                        role="native_detector_mask",
+                        variant_name=variant_name,
+                    )
+                )
             _write_json(
                 native_root / "metadata" / f"{page.page_id}.json",
                 {
@@ -357,14 +484,122 @@ def main(argv: list[str] | None = None) -> int:
         )
         edit_root = output_root / "positive_edit_masks"
         edit_root.mkdir(parents=True, exist_ok=True)
+        edit_outputs: list[dict[str, object]] = []
         for page_id, mask in edits.items():
-            if not cv2.imwrite(str(edit_root / f"{page_id}_positive_edit.png"), mask):
+            path = edit_root / f"{page_id}_positive_edit.png"
+            if not cv2.imwrite(str(path), mask):
                 raise OSError(f"failed to write edit mask for {page_id}")
+            edit_outputs.append(
+                record_mask_artifact(
+                    path,
+                    mask,
+                    page_id=page_id,
+                    role="positive_edit_mask",
+                    variant_name=args.variant,
+                )
+            )
+        variant_output_identity = {
+            name: {
+                "output_mask_set_sha256": _text_sha256(
+                    [
+                        {
+                            "page_id": record["page_id"],
+                            "binary_mask_sha256": record["binary_mask_sha256"],
+                            "pixel_count": record["pixel_count"],
+                        }
+                        for record in sorted(
+                            records, key=lambda row: str(row["page_id"])
+                        )
+                    ]
+                ),
+                "page_count": len(records),
+                "provenance": "native_detector_output",
+                "independent_output": True,
+            }
+            for name, records in variant_outputs.items()
+        }
+        if args.candidate == "ctd-synthetic-finetune":
+            raw_identity = variant_output_identity["raw"]["output_mask_set_sha256"]
+            refined_identity = variant_output_identity["refined"][
+                "output_mask_set_sha256"
+            ]
+            if raw_identity != refined_identity:
+                raise RuntimeError(
+                    "synthetic fine-tune refined output must exactly reuse raw"
+                )
+            variant_output_identity["raw"].update(
+                {"provenance": "native_finetuned_ctd_text_seg"}
+            )
+            variant_output_identity["refined"].update(
+                {
+                    "provenance": "exact_identity_reuse",
+                    "independent_output": False,
+                    "source_variant": "raw",
+                    "source_output_mask_set_sha256": raw_identity,
+                }
+            )
+            variant_output_identity["dilated"].update(
+                {
+                    "provenance": "elliptical_native3_from_raw",
+                    "source_variant": "raw",
+                }
+            )
+        artifact_inventory = {
+            "schema_version": "inpaint-detector-output-artifact-inventory-v1",
+            "records": sorted(
+                output_artifacts,
+                key=lambda value: (
+                    str(value["role"]),
+                    str(value["variant"]),
+                    str(value["page_id"]),
+                ),
+            ),
+        }
+        artifact_inventory["inventory_sha256"] = _text_sha256(
+            artifact_inventory["records"]
+        )
+        artifact_inventory_path = output_root / "output-artifact-inventory.json"
+        _write_json(artifact_inventory_path, artifact_inventory)
+        if args.candidate != "ballons-ctbd":
+            import torch
+
+            if args.device.startswith("cuda"):
+                torch.cuda.synchronize(args.device)
+            evaluation_runtime.update(cuda_peak_memory_provenance(args.device))
+        inference_count = sum(
+            1
+            for row in rows
+            if not bool(dict(row.get("runtime") or {}).get("cache_hit", False))
+        )
+        cache_hit_count = len(rows) - inference_count
+        evaluation_runtime["inference_count"] = inference_count
+        evaluation_runtime["cache_hit_count"] = cache_hit_count
+        if args.device.startswith("cuda") and args.candidate != "ballons-ctbd":
+            if inference_count < 1:
+                raise RuntimeError(
+                    "CUDA evaluation requires at least one current-process inference"
+                )
+            invalid_devices = sorted(
+                {
+                    str(dict(row.get("runtime") or {}).get("device") or "")
+                    for row in rows
+                    if not str(
+                        dict(row.get("runtime") or {}).get("device") or ""
+                    ).startswith("cuda")
+                }
+            )
+            if invalid_devices:
+                raise RuntimeError(
+                    "CUDA evaluation produced a non-CUDA detector runtime: "
+                    + ", ".join(invalid_devices)
+                )
         result = {
             "schema_version": "inpaint-detector-bakeoff-stage1-v1",
             "candidate": candidate_id,
             "variant": args.variant,
             "manifest_sha256": _sha256(manifest_path),
+            "manifest_binding": manifest_binding,
+            "page_ids": list(manifest_binding["page_ids"]),
             "model": {
                 "name": model_path.name,
                 "size_bytes": model_path.stat().st_size,
@@ -388,6 +623,37 @@ def main(argv: list[str] | None = None) -> int:
                 "status": candidate_spec.status,
             },
             "detector_cache_root": str(cache_root),
+            "variant_output_identity": variant_output_identity,
+            "positive_edit_output_identity": {
+                "output_mask_set_sha256": _text_sha256(
+                    [
+                        {
+                            "page_id": record["page_id"],
+                            "binary_mask_sha256": record["binary_mask_sha256"],
+                            "pixel_count": record["pixel_count"],
+                        }
+                        for record in sorted(
+                            edit_outputs, key=lambda row: str(row["page_id"])
+                        )
+                    ]
+                ),
+                "page_count": len(edit_outputs),
+            },
+            "output_artifact_inventory": {
+                "relative_path": artifact_inventory_path.relative_to(
+                    output_root
+                ).as_posix(),
+                "artifact_sha256": _sha256(artifact_inventory_path),
+                "inventory_sha256": artifact_inventory["inventory_sha256"],
+                "artifact_count": len(output_artifacts),
+            },
+            "evaluation_provenance": {
+                "code_commit": current_commit,
+                "evaluator_sha256": _sha256(EVALUATOR_PATH),
+                "stage1_sha256": _sha256(STAGE1_PATH),
+                "synthetic_detector_sha256": _sha256(SYNTHETIC_DETECTOR_PATH),
+                "runtime": evaluation_runtime,
+            },
             "summary": summary,
             "pages": rows,
         }

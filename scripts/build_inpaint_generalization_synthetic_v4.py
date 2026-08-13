@@ -15,7 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.build_inpaint_factorized_manifest_v4 import validate_manifest  # noqa: E402
+from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
+    manifest_page_artifact_sha256,
+    source_manifest_page_inventory_sha256,
+    validate_source_only_manifest_v4,
+)
 
 
 SHAPE = (256, 320)
@@ -28,6 +32,16 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _canonical_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _write_image(path: Path, value: np.ndarray) -> str:
@@ -103,7 +117,7 @@ def _glyph_mask(kind: str) -> np.ndarray:
             cv2.line(mask, (x + 2, 122), (x + 10, 122), 255, 2)
     else:
         cv2.putText(mask, "TXT", (104, 142), cv2.FONT_HERSHEY_SIMPLEX, 1.25, 255, 4, cv2.LINE_AA)
-    return mask
+    return np.where(mask > 0, 255, 0).astype(np.uint8)
 
 
 def _paint_text(image: np.ndarray, target: np.ndarray, style: str) -> None:
@@ -270,13 +284,29 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
         ("preserve-sfx", dict(preserve=True, ownership_mode="unowned", route="ambiguous")),
     )
     pages = [_fixture(output_root, fixture_id, **options) for fixture_id, options in specs]
+    manifest_path = output_root / "synthetic-inpaint-generalization-v4.json"
+    for page in pages:
+        page["annotation_basis"] = "synthetic_known_ground_truth_v4"
+        page["annotation_frozen_before_candidate"] = True
+        page["candidate_seen"] = False
+        page["artifact_sha256"] = manifest_page_artifact_sha256(
+            manifest_path,
+            page,
+        )
+        page["source_sha256"] = page["artifact_sha256"]["path"]
+    page_ids = sorted(str(page["page_id"]) for page in pages)
     return {
         "schema_version": SCHEMA,
         "corpus_id": "synthetic-inpaint-generalization-v4",
         "split_role": "synthetic_known_ground_truth",
         "annotation_frozen_before_candidate": True,
+        "candidate_seen": False,
+        "target_extent_independent": True,
         "target_inventory_independent": True,
         "target_review_complete": True,
+        "page_count": len(page_ids),
+        "page_ids": page_ids,
+        "page_inventory_sha256": source_manifest_page_inventory_sha256(pages),
         "pages": pages,
     }
 
@@ -292,18 +322,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output_dir.resolve()
+    if output.exists():
+        raise FileExistsError(
+            "synthetic v4 output directory must be fresh and absent: " f"{output}"
+        )
+    output.mkdir(parents=True)
     manifest_path = output / "synthetic-inpaint-generalization-v4.json"
     _write_json(manifest_path, build_synthetic_manifest(output))
-    validate_manifest(manifest_path)
     _write_json(
         manifest_path.with_suffix(manifest_path.suffix + ".seal.json"),
         {
             "schema_version": "inpaint-factorized-manifest-seal-v4-synthetic",
             "manifest": manifest_path.name,
             "manifest_sha256": _sha256(manifest_path),
+            "annotation_frozen_before_candidate": True,
+            "candidate_seen": False,
             "candidate_generated": False,
         },
     )
+    validate_source_only_manifest_v4(manifest_path)
     print(manifest_path)
     return 0
 

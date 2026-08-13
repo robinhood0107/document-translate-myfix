@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -25,6 +26,10 @@ from scripts.validation_artifact_harness import default_archive_root  # noqa: E4
 
 
 SCHEMA_VERSION = "inpaint-independent-target-review-ledger-v4"
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -356,6 +361,8 @@ def build_independent_target_review(
     )
     payload = {
         "schema_version": SCHEMA_VERSION,
+        "semantic_manifest": str(semantic_manifest_path.resolve()),
+        "semantic_manifest_sha256": _sha256(semantic_manifest_path),
         "candidate_seen": False,
         "review_complete": False,
         "target_extent_independent": True,

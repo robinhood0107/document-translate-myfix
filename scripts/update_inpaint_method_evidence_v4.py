@@ -31,6 +31,33 @@ def _read_json(path: Path) -> dict[str, object]:
     return payload
 
 
+def _registered_fusion_candidate_ids(
+    registry: dict[str, object],
+) -> frozenset[str] | None:
+    families = registry.get("families")
+    if not isinstance(families, list):
+        raise ValueError("method family registry requires families")
+    matches = [
+        row
+        for row in families
+        if isinstance(row, dict) and row.get("family_id") == "detector-fusion"
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError("method family registry duplicates detector-fusion")
+    values = matches[0].get("candidate_ids")
+    if not isinstance(values, list) or not values or any(
+        not isinstance(value, str) or not value.strip() for value in values
+    ):
+        raise ValueError(
+            "detector-fusion registry requires canonical candidate_ids"
+        )
+    if len(values) != len(set(values)):
+        raise ValueError("detector-fusion registry contains duplicate candidate_ids")
+    return frozenset(values)
+
+
 def update_evidence(
     *,
     registry_path: Path,
@@ -40,6 +67,7 @@ def update_evidence(
     family_id: str,
     variant_ids: frozenset[str],
     evaluation_scope: str,
+    upstream_contract_path: Path | None = None,
     blocker_probe_path: Path | None = None,
     allow_replace: bool = False,
 ) -> dict[str, object]:
@@ -94,6 +122,10 @@ def update_evidence(
             family_id=family_id,
             variant_ids=variant_ids,
             evaluation_scope=evaluation_scope,
+            upstream_contract_path=upstream_contract_path,
+            expected_fusion_candidate_ids=_registered_fusion_candidate_ids(
+                registry
+            ),
         )
     if not updates:
         raise ValueError("no registered method variants match the requested artifact scope")
@@ -128,6 +160,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--scope", required=True)
     parser.add_argument(
+        "--upstream-contract",
+        type=Path,
+        help=(
+            "Exact matrix/spec file whose byte SHA and full logical inventory "
+            "the factorized/fusion artifact declares."
+        ),
+    )
+    parser.add_argument(
         "--blocked-asset-probe",
         type=Path,
         help=(
@@ -149,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
         family_id=str(args.family),
         variant_ids=frozenset(str(value) for value in args.variant),
         evaluation_scope=str(args.scope),
+        upstream_contract_path=(
+            args.upstream_contract.resolve() if args.upstream_contract else None
+        ),
         blocker_probe_path=(
             args.blocked_asset_probe.resolve() if args.blocked_asset_probe else None
         ),

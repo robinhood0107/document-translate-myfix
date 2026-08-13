@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -22,6 +23,23 @@ from benchmarking.inpaint_detector_bakeoff.stage2 import (  # noqa: E402
 
 
 SCHEMA_VERSION = "inpaint-factorized-results-v3"
+
+
+def _logical_inventory_sha256(ledger: list[dict[str, object]]) -> str:
+    inventory = sorted(
+        (
+            {
+                "logical_id": str(row.get("logical_id") or ""),
+                "selection": dict(row.get("selection") or {}),
+            }
+            for row in ledger
+        ),
+        key=lambda row: row["logical_id"],
+    )
+    encoded = json.dumps(
+        inventory, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -98,6 +116,18 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             ):
                 raise ValueError(f"result has invalid closure ledger: {path}")
             normalized_ledger = [dict(row) for row in raw_ledger]
+            expected_inventory_sha256 = _logical_inventory_sha256(
+                normalized_ledger
+            )
+            declared_inventory_sha256 = str(
+                payload.get("logical_inventory_sha256") or ""
+            )
+            if declared_inventory_sha256 and (
+                declared_inventory_sha256 != expected_inventory_sha256
+            ):
+                raise ValueError(
+                    "factorized result logical inventory SHA differs from its ledger"
+                )
             current_logical_count = int(
                 payload.get("logical_combination_count", len(normalized_ledger))
             )
@@ -182,6 +212,9 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
                 "logical_combination_count": logical_combination_count,
                 "physical_combination_count": physical_combination_count,
                 "closure_ledger": closure_ledger,
+                "logical_inventory_sha256": _logical_inventory_sha256(
+                    closure_ledger
+                ),
                 "unaccounted_combination_count": 0,
             }
         )

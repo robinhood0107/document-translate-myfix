@@ -17,8 +17,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
-    load_page_masks,
-    load_stage1_manifest,
+    manifest_page_artifact_sha256,
+    source_manifest_page_inventory_sha256,
+    validate_source_only_manifest_v4,
 )
 from scripts.validation_artifact_harness import default_archive_root  # noqa: E402
 
@@ -200,16 +201,47 @@ def apply_independent_target_review(
     semantic = _read_json(semantic_manifest_path)
     ledger = _read_json(ledger_path)
     decisions = _read_json(decisions_path)
+    if semantic.get("schema_version") != "inpaint-factorized-source-decisions-v4":
+        raise ValueError("unsupported source-only semantic review manifest")
+    if (
+        semantic.get("candidate_seen") is not False
+        or semantic.get("review_complete") is not True
+    ):
+        raise ValueError("semantic review input is not source-only review complete")
+    semantic_pages = semantic.get("pages")
+    if not isinstance(semantic_pages, list) or not semantic_pages:
+        raise ValueError("semantic review input requires reviewed pages")
+    for semantic_page in semantic_pages:
+        if (
+            not isinstance(semantic_page, dict)
+            or semantic_page.get("candidate_seen") is not False
+            or semantic_page.get("reviewed_source_only") is not True
+            or semantic_page.get("review_complete") is not True
+        ):
+            raise ValueError("semantic review page is not source-only review complete")
     if ledger.get("schema_version") != LEDGER_SCHEMA_VERSION:
         raise ValueError("unsupported independent target review ledger")
+    if (
+        str(ledger.get("semantic_manifest") or "").strip()
+        and Path(str(ledger["semantic_manifest"])).resolve()
+        != semantic_manifest_path.resolve()
+    ):
+        raise ValueError("independent target review ledger binds another semantic manifest")
+    if ledger.get("semantic_manifest_sha256") != _sha256(semantic_manifest_path):
+        raise ValueError("independent target review ledger semantic manifest SHA differs")
     if decisions.get("schema_version") != DECISIONS_SCHEMA_VERSION:
         raise ValueError("unsupported independent target review decisions")
     if ledger.get("candidate_seen") is not False or decisions.get("candidate_seen") is not False:
         raise ValueError("independent target review must be candidate blind")
     if decisions.get("review_complete") is not True:
         raise ValueError("independent target review decisions are incomplete")
+    declared_ledger = str(decisions.get("review_ledger") or "").strip()
+    if not declared_ledger or Path(declared_ledger).resolve() != ledger_path.resolve():
+        raise ValueError("independent target decisions bind a different review ledger")
+    if decisions.get("review_ledger_sha256") != _sha256(ledger_path):
+        raise ValueError("independent target decisions review ledger SHA differs")
 
-    pages = _index(semantic.get("pages"), "page_id")
+    pages = _index(semantic_pages, "page_id")
     rows = _index(ledger.get("rows"), "review_id")
     selected = _index(decisions.get("decisions"), "review_id")
     if set(selected) != set(rows):
@@ -465,20 +497,22 @@ def apply_independent_target_review(
         "pages": output_pages,
     }
     output_path = output_dir / "source-manifest-v4-independent.json"
+    for page in output_pages:
+        page.setdefault("existing_source_edit_mask", None)
+        page["artifact_sha256"] = manifest_page_artifact_sha256(output_path, page)
+        page["source_sha256"] = page["artifact_sha256"]["path"]
+    page_ids = sorted(str(page["page_id"]) for page in output_pages)
+    payload["page_count"] = len(page_ids)
+    payload["page_ids"] = page_ids
+    payload["page_inventory_sha256"] = source_manifest_page_inventory_sha256(
+        output_pages
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     return payload
-
-
-def validate_manifest(path: Path) -> None:
-    for page in load_stage1_manifest(path):
-        source = cv2.imdecode(np.fromfile(page.source_image, dtype=np.uint8), 1)
-        if source is None or source.size == 0:
-            raise FileNotFoundError(page.source_image)
-        load_page_masks(page, source.shape[:2])
 
 
 def seal_independent_manifest(
@@ -514,6 +548,7 @@ def seal_independent_manifest(
         "instance_counts": payload.get("instance_counts"),
         "annotation_frozen_before_candidate": True,
         "candidate_seen": False,
+        "candidate_generated": False,
         "source_only_review_complete": True,
         "target_extent_independent": True,
         "target_inventory_independent": True,
@@ -548,8 +583,8 @@ def main(argv: list[str] | None = None) -> int:
         output_dir,
     )
     manifest_path = output_dir / "source-manifest-v4-independent.json"
-    validate_manifest(manifest_path)
     seal_independent_manifest(manifest_path, args.review_decisions.resolve())
+    validate_source_only_manifest_v4(manifest_path)
     print(json.dumps({"pages": len(payload["pages"]), "counts": payload["instance_counts"]}))
     return 0
 

@@ -21,6 +21,9 @@ from benchmarking.inpaint_detector_bakeoff.semantic import (  # noqa: E402
     default_detector_decision,
     explicit_decision,
 )
+from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
+    validate_source_only_manifest_v4,
+)
 from scripts.validation_artifact_harness import (  # noqa: E402
     select_managed_output_directory,
 )
@@ -37,6 +40,79 @@ POLICIES = (
 )
 
 
+def aggregate_semantic_page_statistics(
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    if not rows:
+        raise ValueError("semantic aggregation requires page statistics")
+    page_ids = [str(row.get("page_id") or "") for row in rows]
+    if any(not value for value in page_ids) or len(page_ids) != len(set(page_ids)):
+        raise ValueError("semantic page statistics require unique page IDs")
+    decisions: list[dict[str, object]] = []
+    for row in rows:
+        values = row.get("decisions")
+        if not isinstance(values, list) or any(
+            not isinstance(value, dict) for value in values
+        ):
+            raise ValueError("semantic page statistics require decisions")
+        decisions.extend(values)
+    required = required_translate = preserve = preserve_destructive = 0
+    ambiguous = ambiguous_destructive = unavailable = 0
+    role_exact = action_exact = 0
+    reasons: dict[str, int] = {}
+    for decision in decisions:
+        for field in (
+            "instance_id",
+            "truth_role",
+            "truth_action",
+            "priority",
+            "predicted_role",
+            "predicted_action",
+        ):
+            if not str(decision.get(field) or "").strip():
+                raise ValueError(f"semantic decision lacks {field}")
+        if not isinstance(decision.get("available"), bool):
+            raise ValueError("semantic decision availability must be boolean")
+        role_exact += int(decision["predicted_role"] == decision["truth_role"])
+        action_exact += int(decision["predicted_action"] == decision["truth_action"])
+        unavailable += int(not decision["available"])
+        reason = str(decision.get("reason") or "")
+        if reason:
+            reasons[reason] = reasons.get(reason, 0) + 1
+        priority = str(decision["priority"])
+        if priority == "required":
+            required += 1
+            required_translate += int(decision["predicted_action"] == TRANSLATE)
+        elif priority == "optional":
+            preserve += 1
+            preserve_destructive += int(
+                decision["predicted_action"] == TRANSLATE
+            )
+        elif priority == "ambiguous":
+            ambiguous += 1
+            ambiguous_destructive += int(
+                decision["predicted_action"] == TRANSLATE
+            )
+        else:
+            raise ValueError("semantic decision priority is invalid")
+    total = len(decisions)
+    return {
+        "instance_count": total,
+        "role_exact_accuracy": role_exact / total if total else None,
+        "action_exact_accuracy": action_exact / total if total else None,
+        "required_instance_count": required,
+        "required_translate_recall": (
+            required_translate / required if required else None
+        ),
+        "preserve_instance_count": preserve,
+        "preserve_destructive_count": preserve_destructive,
+        "ambiguous_instance_count": ambiguous,
+        "ambiguous_destructive_count": ambiguous_destructive,
+        "unavailable_instance_count": unavailable,
+        "reason_counts": dict(sorted(reasons.items())),
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -50,6 +126,13 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _logical_inventory_sha256(policy_ids: tuple[str, ...]) -> str:
+    encoded = json.dumps(
+        sorted(policy_ids), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _decision(
@@ -84,20 +167,26 @@ def _decision(
 
 
 def score_semantic_policies(manifest_path: Path) -> dict[str, object]:
+    validate_source_only_manifest_v4(manifest_path)
     manifest = _read_json(manifest_path)
     if manifest.get("schema_version") != "inpaint-factorized-source-manifest-v4":
         raise ValueError("semantic policy scoring requires manifest v4")
     pages = manifest.get("pages")
     if not isinstance(pages, list) or not pages:
         raise ValueError("manifest v4 requires pages")
+    page_ids = [
+        str(page.get("page_id") or "")
+        for page in pages
+        if isinstance(page, dict)
+    ]
+    if len(page_ids) != len(pages) or any(not page_id for page_id in page_ids):
+        raise ValueError("semantic manifest contains an invalid page ID")
+    if len(page_ids) != len(set(page_ids)):
+        raise ValueError("semantic manifest contains duplicate page IDs")
     output: list[dict[str, object]] = []
+    page_statistics: dict[str, list[dict[str, object]]] = {}
     for policy in POLICIES:
-        total = role_exact = action_exact = 0
-        required = required_translate = 0
-        preserve = preserve_destructive = 0
-        ambiguous = ambiguous_destructive = 0
-        unavailable = 0
-        reasons: dict[str, int] = {}
+        policy_pages: list[dict[str, object]] = []
         for page in pages:
             if not isinstance(page, dict):
                 raise ValueError("manifest page must be an object")
@@ -110,6 +199,7 @@ def score_semantic_policies(manifest_path: Path) -> dict[str, object]:
                 for region in raw_regions
                 if isinstance(region, dict)
             }
+            decisions: list[dict[str, object]] = []
             for raw_instance in raw_instances:
                 if not isinstance(raw_instance, dict):
                     raise ValueError("target instance must be an object")
@@ -121,28 +211,35 @@ def score_semantic_policies(manifest_path: Path) -> dict[str, object]:
                 truth_role = str(raw_instance.get("semantic_role") or "ambiguous")
                 truth_action = str(raw_instance.get("processing_action") or REVIEW)
                 priority = str(raw_instance.get("priority") or "ambiguous")
-                total += 1
-                role_exact += int(predicted.role == truth_role)
-                action_exact += int(predicted.action == truth_action)
-                unavailable += int(not predicted.available)
-                if predicted.reason:
-                    reasons[predicted.reason] = reasons.get(predicted.reason, 0) + 1
-                if priority == "required":
-                    required += 1
-                    required_translate += int(predicted.action == TRANSLATE)
-                elif priority == "optional":
-                    preserve += 1
-                    preserve_destructive += int(predicted.action == TRANSLATE)
-                elif priority == "ambiguous":
-                    ambiguous += 1
-                    ambiguous_destructive += int(predicted.action == TRANSLATE)
+                decisions.append(
+                    {
+                        "instance_id": str(raw_instance.get("instance_id") or ""),
+                        "truth_role": truth_role,
+                        "truth_action": truth_action,
+                        "priority": priority,
+                        "predicted_role": predicted.role,
+                        "predicted_action": predicted.action,
+                        "available": predicted.available,
+                        "reason": predicted.reason,
+                    }
+                )
+            policy_pages.append(
+                {"page_id": str(page.get("page_id") or ""), "decisions": decisions}
+            )
+        metrics = aggregate_semantic_page_statistics(policy_pages)
+        required = int(metrics["required_instance_count"])
+        unavailable = int(metrics["unavailable_instance_count"])
+        preserve_destructive = int(metrics["preserve_destructive_count"])
+        ambiguous_destructive = int(metrics["ambiguous_destructive_count"])
+        required_recall = metrics["required_translate_recall"]
         blocked = policy != "human_oracle" and unavailable > 0
         hard_pass = (
             not blocked
-            and required_translate == required
+            and (required == 0 or required_recall == 1.0)
             and preserve_destructive == 0
             and ambiguous_destructive == 0
         )
+        page_statistics[policy] = policy_pages
         output.append(
             {
                 "policy_id": policy,
@@ -157,29 +254,18 @@ def score_semantic_policies(manifest_path: Path) -> dict[str, object]:
                     if blocked
                     else ("" if hard_pass else "semantic_hard_gate_failed")
                 ),
-                "metrics": {
-                    "instance_count": total,
-                    "role_exact_accuracy": role_exact / total if total else None,
-                    "action_exact_accuracy": action_exact / total if total else None,
-                    "required_instance_count": required,
-                    "required_translate_recall": (
-                        required_translate / required if required else None
-                    ),
-                    "preserve_instance_count": preserve,
-                    "preserve_destructive_count": preserve_destructive,
-                    "ambiguous_instance_count": ambiguous,
-                    "ambiguous_destructive_count": ambiguous_destructive,
-                    "unavailable_instance_count": unavailable,
-                    "reason_counts": dict(sorted(reasons.items())),
-                },
+                "metrics": metrics,
             }
         )
     return {
         "schema_version": "inpaint-semantic-policy-results-v4",
         "manifest_sha256": _sha256(manifest_path),
+        "page_ids": page_ids,
         "policy_count": len(POLICIES),
         "unaccounted_policy_count": 0,
+        "logical_inventory_sha256": _logical_inventory_sha256(POLICIES),
         "policies": output,
+        "pages": page_statistics,
     }
 
 
