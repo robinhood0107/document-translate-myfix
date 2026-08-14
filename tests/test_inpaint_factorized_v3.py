@@ -4836,6 +4836,76 @@ def test_isolated_factorized_results_require_every_executed_closure_row(
     assert len(merged["logical_inventory_sha256"]) == 64
 
 
+def test_isolated_factorized_results_merge_local_closure_runtime_diagnostics(
+    tmp_path: Path,
+) -> None:
+    ledger = [
+        {
+            "logical_id": run_id,
+            "selection": {"detector": run_id},
+            "closure_state": "executed",
+            "reason": "",
+            "content_sha256": run_id,
+            "reused_from": "",
+        }
+        for run_id in ("one", "two")
+    ]
+
+    def write_result(name: str, run_id: str, conflict_count: int) -> Path:
+        local_ledger = [dict(row) for row in ledger]
+        local_ledger[[row["logical_id"] for row in ledger].index(run_id)][
+            "runtime_diagnostics"
+        ] = {"conditional_hybrid_overlap_conflict_pixel_count": conflict_count}
+        path = tmp_path / name / "factorized-results.json"
+        path.parent.mkdir()
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "inpaint-factorized-results-v3",
+                    "manifest_sha256": "manifest",
+                    "matrix_sha256": "matrix",
+                    "logical_combination_count": 2,
+                    "physical_combination_count": 2,
+                    "closure_ledger": local_ledger,
+                    "positive_lama_inference_count": 0,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "detector_id": run_id,
+                            "ownership_id": "o",
+                            "silhouette_id": "s",
+                            "router_id": "r",
+                            "expansion_id": "raw",
+                            "fill_id": "mask_only",
+                            "oracle_only": False,
+                            "status": "active",
+                            "metrics": _complete_hard_gate_metrics(
+                                residue_gate_applicable=False
+                            ),
+                            "closure_reason": "",
+                        }
+                    ],
+                    "pages": {run_id: [{"page_id": "p1"}]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    merged = merge_results(
+        [write_result("one", "one", 3), write_result("two", "two", 5)]
+    )
+
+    diagnostics = {
+        row["logical_id"]: row.get("runtime_diagnostics")
+        for row in merged["closure_ledger"]
+    }
+    assert diagnostics == {
+        "one": {"conditional_hybrid_overlap_conflict_pixel_count": 3},
+        "two": {"conditional_hybrid_overlap_conflict_pixel_count": 5},
+    }
+
+
 def test_silhouette_consensus_builds_union_intersection_and_n_of_four() -> None:
     masks = {name: np.zeros((6, 8), np.uint8) for name in (
         "ballons", "pr2", "ctbd", "manga109"
@@ -4869,6 +4939,9 @@ def test_known_background_synthetic_manifest_covers_all_fill_routes(
 ) -> None:
     manifest = build_synthetic_manifest(tmp_path)
 
+    assert manifest["schema_version"] == "inpaint-factorized-source-manifest-v4"
+    assert manifest["split_role"] == "synthetic_known_ground_truth"
+    assert manifest["candidate_seen"] is False
     assert len(manifest["pages"]) == 10
     assert {page["bubble_route_class"] for page in manifest["pages"]} == {
         "clean_flat",
@@ -4878,6 +4951,8 @@ def test_known_background_synthetic_manifest_covers_all_fill_routes(
         "ambiguous",
     }
     for page in manifest["pages"]:
+        assert page["source_sha256"] == page["artifact_sha256"]["path"]
+        assert len(page["regions"]) == 1
         source = cv2.imread(page["path"], cv2.IMREAD_COLOR)
         truth = cv2.imread(page["known_background"], cv2.IMREAD_COLOR)
         target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
@@ -4981,6 +5056,51 @@ def test_conditional_hybrid_uses_authoritative_mixed_region_routes() -> None:
     assert all(row["applied"] is True for row in diagnostics["region_fills"])
     assert np.array_equal(candidate[edit == 0], source[edit == 0])
     assert np.max(np.abs(candidate[edit > 0].astype(int) - truth[edit > 0])) <= 1
+
+
+def test_conditional_hybrid_broad_region_samples_exclude_only_narrow_seed() -> None:
+    shape = (48, 64)
+    source = np.full((*shape, 3), 230, np.uint8)
+    interior = np.zeros(shape, np.uint8)
+    interior[8:40, 10:54] = 255
+    seed = np.zeros(shape, np.uint8)
+    seed[20:28, 28:36] = 255
+    source[seed > 0] = 20
+    zero = np.zeros(shape, np.uint8)
+    masks = PageMasks(
+        target=seed,
+        protected=zero,
+        ambiguous=zero,
+        ownership=seed,
+        claim_seed=seed,
+        existing_edit=zero,
+        bubble_interior=interior,
+        corner=zero,
+        broad_ownership=interior,
+        preserve=zero,
+        regions=(
+            RegionMasks("flat", "clean_flat", interior, seed, zero, zero, zero),
+        ),
+    )
+
+    candidate, diagnostics = _fill_conditional_hybrid_regions(
+        source,
+        interior,
+        masks,
+        route_decision="broad",
+        background_exclude_mask=zero,
+        lama_fill=lambda _image, _mask: (_ for _ in ()).throw(
+            AssertionError("clean broad region must not use LaMa")
+        ),
+        narrow_claim=seed,
+    )
+
+    detail = diagnostics["region_fills"][0]
+    assert detail["applied"] is True
+    assert diagnostics["positive_lama_inference_count"] == 0
+    assert detail["edit_pixel_count"] == int(np.count_nonzero(interior))
+    assert detail["sample_exclusion_pixel_count"] == int(np.count_nonzero(seed))
+    assert np.all(candidate[interior > 0] == 230)
 
 
 def test_conditional_hybrid_routes_authoritative_overlap_to_one_narrow_lama_call() -> None:

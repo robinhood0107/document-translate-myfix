@@ -104,10 +104,22 @@ def _fill_conditional_hybrid_regions(
     assigned = np.zeros(shape, np.uint8)
     fallback = np.zeros(shape, np.uint8)
     diagnostics: list[dict[str, object]] = []
-    region_edits = [
-        cv2.bitwise_and(edit, binary_mask(region.ownership, shape))
-        for region in masks.regions
-    ]
+    region_edits = []
+    for region in masks.regions:
+        region_domain = binary_mask(region.ownership, shape)
+        if (
+            route_decision == "broad"
+            and region.bubble_route_class in {"clean_flat", "clean_gradient"}
+        ):
+            broad_ownership = (
+                binary_mask(masks.broad_ownership, shape)
+                if masks.broad_ownership is not None
+                else binary_mask(masks.ownership, shape)
+            )
+            region_domain = cv2.bitwise_and(
+                binary_mask(region.bubble_interior, shape), broad_ownership
+            )
+        region_edits.append(cv2.bitwise_and(edit, region_domain))
     authoritative_overlap = _authoritative_region_overlap_mask(
         masks.regions, shape
     )
@@ -181,6 +193,14 @@ def _fill_conditional_hybrid_regions(
             backend=backend,
             interior_mask=region.bubble_interior,
             background_exclude_mask=background_exclude_mask,
+            background_sample_edit_mask=(
+                cv2.bitwise_and(
+                    region_edit,
+                    binary_mask(narrow_claim, shape),
+                )
+                if route_decision == "broad" and narrow_claim is not None
+                else None
+            ),
         )
         candidate[region_edit > 0] = generated[region_edit > 0]
         diagnostics.append(
@@ -1699,7 +1719,9 @@ def _run_combination(
                     interior_mask=interior,
                     background_exclude_mask=exclude,
                     background_sample_edit_mask=(
-                        route_seed if decision.decision == "broad" else None
+                        cv2.bitwise_and(route_seed, decision.edit_mask)
+                        if decision.decision == "broad"
+                        else None
                     ),
                     lama_fill=callback,
                 )
