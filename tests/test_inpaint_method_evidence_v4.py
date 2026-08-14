@@ -2749,20 +2749,45 @@ def test_generic_role_result_cannot_self_attest_unverified_upstream(
         )
 
 
-def test_registry_reports_unimplemented_generic_role_adapters_as_gaps() -> None:
+def test_factorized_artifact_proves_exact_handoff_and_named_ownership_roles() -> None:
+    selection = {
+        "detector": "control_source_edit",
+        "ownership": "rtdetr_pixel",
+        "silhouette": "control_empty_silhouette",
+        "router": "control_r0",
+        "expansion": "raw",
+        "fill": "mask_only",
+    }
+    payload = {
+        "schema_version": "inpaint-factorized-results-v3",
+        "runs": [{
+            "run_id": "run",
+            "selection": selection,
+            "ownership_id": "rtdetr_pixel",
+        }],
+        "closure_ledger": [{
+            "logical_id": "run",
+            "selection": selection,
+            "closure_state": "executed",
+        }],
+    }
+    assert artifact_declared_variants(payload, "ownership") == frozenset(
+        {"rtdetr_pixel"}
+    )
+    assert artifact_declared_variants(payload, "exact-protection") == frozenset(
+        {"pr4_exact"}
+    )
+    assert artifact_declared_variants(payload, "exact-composite") == frozenset(
+        {"immutable_original_exact_mask"}
+    )
+
+
+def test_registry_has_evidence_adapters_for_every_registered_role() -> None:
     registry = json.loads(
         (ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "method_registry_v4.json").read_text(encoding="utf-8")
     )
     gaps = registry_evidence_adapter_gaps(requirements_from_registry(registry))
-    assert {
-        (row["family_id"], row["variant_id"])
-        for row in gaps
-    } == {
-        ("ownership", "rtdetr_pixel"),
-        ("ownership", "c13_reconciliation"),
-        ("exact-protection", "pr4_exact"),
-        ("exact-composite", "immutable_original_exact_mask"),
-    }
+    assert gaps == ()
 
 
 def test_scope_manifest_requires_canonical_identity(tmp_path: Path) -> None:

@@ -340,6 +340,16 @@ def _factorized_logical_rows(payload: Mapping[str, object]) -> tuple[Mapping[str
 
 def _factorized_variants(payload: Mapping[str, object], family_id: str) -> frozenset[str]:
     runs = _factorized_logical_rows(payload)
+    if not runs:
+        return frozenset()
+    # Every factorized run consumes the sealed PR4 protection fields and is
+    # recomputed from the immutable source with an exact edit-mask composite.
+    # The finalist validator reopens those source/output bytes and verifies
+    # both invariants, so these are real role proofs rather than declarations.
+    if family_id == "exact-protection":
+        return frozenset({"pr4_exact"})
+    if family_id == "exact-composite":
+        return frozenset({"immutable_original_exact_mask"})
     field_and_map: dict[str, tuple[str, dict[str, str]]] = {
         "current-ctd": (
             "detector_id",
@@ -372,6 +382,8 @@ def _factorized_variants(payload: Mapping[str, object], family_id: str) -> froze
                 "ysg_standard": "ysg_standard",
                 "ysg_obb": "ysg_obb",
                 "manga109_text": "manga109",
+                "rtdetr_pixel": "rtdetr_pixel",
+                "c13_reconciliation": "c13_reconciliation",
             },
         ),
         "bubble-silhouette": (
@@ -3450,13 +3462,14 @@ def registry_evidence_adapter_gaps(
                 "human_oracle",
             }
         ),
-        "ownership": frozenset({"block_region", "dual_ownership", "ctbd_content", "ysg_standard", "ysg_obb", "manga109"}),
+        "ownership": frozenset({"rtdetr_pixel", "block_region", "dual_ownership", "ctbd_content", "ysg_standard", "ysg_obb", "manga109", "c13_reconciliation"}),
         "bubble-silhouette": frozenset({"pr2_validated", "ballons_native", "ctbd_bubble", "manga109_balloon", "pair_union_ballons_pr2", "pair_intersection_ballons_pr2", "consensus_2_of_4", "consensus_3_of_4"}),
         "router": frozenset({"R0", "R1", "R2", "R3", "R4"}),
         "mask-expansion": frozenset({"raw", "refined", "native3", "content_component", "validated_interior", "lab_dilate1", "lab_dilate2", "lab_dilate3", "lab_dilate4"}),
-        "exact-protection": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
+        "exact-protection": frozenset({"pr4_exact", "C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
         "exact-protection-historical": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
         "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "conditional_refill_existing"}),
+        "exact-composite": frozenset({"immutable_original_exact_mask"}),
     }
     gaps = [
         {
