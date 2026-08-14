@@ -169,7 +169,7 @@
     {
       "family_id": "fill-backend",
       "role": "fill",
-      "evaluation_scopes": ["synthetic", "e1-oracle"],
+      "evaluation_scopes": ["synthetic-fill", "e1-oracle"],
       "variants": [
         "current_lama",
         "ballons_lama",

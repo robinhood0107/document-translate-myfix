@@ -145,8 +145,10 @@ def update_evidence(
             variant_ids=variant_ids,
             evaluation_scope=evaluation_scope,
             upstream_contract_path=upstream_contract_path,
-            expected_fusion_candidate_ids=_registered_fusion_candidate_ids(
-                registry
+            expected_fusion_candidate_ids=(
+                _registered_fusion_candidate_ids(registry)
+                if family_id in {"detector-fusion", "roi-trigger"}
+                else None
             ),
         )
     if not updates:

@@ -11,6 +11,9 @@ import numpy as np
 import pytest
 
 from benchmarking.inpaint_detector_bakeoff.evidence_ledger import (
+    _validate_accounted_artifact_once,
+    _scope_manifest_binding_cached,
+    artifact_declared_variants,
     _validate_runtime_evidence_ledger,
     accounted_evidence_from_artifact,
     blocked_asset_evidence,
@@ -32,6 +35,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
 )
 from scripts.build_inpaint_method_closure_v4 import build_closure
 from scripts.update_inpaint_method_evidence_v4 import update_evidence
+from scripts.batch_update_inpaint_method_evidence_v4 import main as batch_update_main
 from scripts.benchmark_inpaint_factorized_v3 import (
     aggregate_factorized_page_statistics,
     _declared_combinations,
@@ -1626,6 +1630,18 @@ def test_fusion_finalist_reopens_sealed_edit_mask_bytes(tmp_path: Path) -> None:
     )
     assert rows[0]["disposition"] == "family_complete"
 
+    scoped_rows = accounted_evidence_from_artifact(
+        requirements,
+        artifact_path=artifact,
+        scope_manifest_path=manifest,
+        family_id="manga109-text",
+        variant_ids=frozenset({"raw"}),
+        evaluation_scope="e1",
+        upstream_contract_path=tmp_path / "fusion-spec.json",
+        expected_fusion_candidate_ids=None,
+    )
+    assert scoped_rows[0]["variant_id"] == "raw"
+
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     binding = payload["output_artifact_inventory"]
     inventory = json.loads(
@@ -2349,6 +2365,92 @@ def test_update_binds_scope_once_and_rejects_mixed_manifest_revision(tmp_path: P
             variant_ids=frozenset({"raw"}), evaluation_scope="e1", allow_replace=True
             , upstream_contract_path=tmp_path / "matrix.json"
         )
+
+
+def test_batch_update_validates_one_shared_artifact_once(tmp_path: Path) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _factorized_artifact(tmp_path, manifest)
+    registry = _write_json(
+        tmp_path / "registry.json",
+        {
+            "schema_version": "inpaint-method-family-registry-v4",
+            "families": [
+                {
+                    "family_id": "current-ctd",
+                    "role": "seed",
+                    "evaluation_scopes": ["e1"],
+                    "variants": ["raw"],
+                },
+                {
+                    "family_id": "ownership",
+                    "role": "ownership",
+                    "evaluation_scopes": ["e1"],
+                    "variants": ["block_region"],
+                },
+            ],
+        },
+    )
+    evidence = tmp_path / "evidence.json"
+    matrix = tmp_path / "matrix.json"
+    plan = _write_json(
+        tmp_path / "batch.json",
+        {
+            "schema_version": "inpaint-method-evidence-batch-plan-v1",
+            "operations": [
+                {
+                    "artifact": str(artifact),
+                    "scope_manifest": str(manifest),
+                    "family": family,
+                    "variants": variants,
+                    "scope": "e1",
+                    "upstream_contract": str(matrix),
+                }
+                for family, variants in (
+                    ("current-ctd", ["raw"]),
+                    ("ownership", ["block_region"]),
+                )
+            ],
+        },
+    )
+    _validate_accounted_artifact_once.cache_clear()
+    _scope_manifest_binding_cached.cache_clear()
+    assert batch_update_main(
+        [
+            "--registry",
+            str(registry),
+            "--evidence",
+            str(evidence),
+            "--plan",
+            str(plan),
+        ]
+    ) == 0
+    cache = _validate_accounted_artifact_once.cache_info()
+    assert cache.misses == 1
+    assert cache.hits == 1
+    scope_cache = _scope_manifest_binding_cached.cache_info()
+    assert scope_cache.misses == 1
+    assert scope_cache.hits >= 3
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert len(payload["evidence"]) == 2
+
+
+def test_fusion_single_runs_prove_finetune_and_dbnet_variants() -> None:
+    payload = {
+        "schema_version": "inpaint-detector-fusion-results-v4",
+        "runs": [
+            {"fusion": "single", "primary": "finetune_e6_raw"},
+            {"fusion": "single", "primary": "finetune_e6_native3"},
+            {"fusion": "single", "primary": "easyocr_dbnet18_raw"},
+            {"fusion": "single", "primary": "easyocr_dbnet18_refined"},
+            {"fusion": "single", "primary": "easyocr_dbnet18_native3"},
+        ],
+    }
+    assert artifact_declared_variants(
+        payload, "ctd-synthetic-finetune"
+    ) == frozenset({"raw", "native3"})
+    assert artifact_declared_variants(
+        payload, "easyocr-dbnet18"
+    ) == frozenset({"raw", "refined", "native3"})
 
 
 def test_build_closure_records_input_hashes_and_scope_binding(tmp_path: Path) -> None:
