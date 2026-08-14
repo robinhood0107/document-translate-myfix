@@ -77,6 +77,10 @@ from scripts.attach_inpaint_relative_baseline_v32 import (
     main as attach_relative_baseline_main,
 )
 from scripts.seal_inpaint_product_baseline_v32 import seal_product_baseline
+from scripts.build_inpaint_product_eval_manifest_v32 import (
+    _canonical_manifest_sha256,
+    build_product_eval_manifest,
+)
 from scripts.build_inpaint_relative_matrix_v32 import build_relative_matrix
 from scripts.adjudicate_inpaint_balanced_preflight_v32 import (
     adjudicate_balanced_preflight,
@@ -785,6 +789,81 @@ def test_relative_baseline_attachment_preserves_frozen_annotations(
     assert matrix["families"]["detector"]["pr6_baseline_edit"]["pages"]["p"][
         "raw"
     ] == str(baseline_mask.resolve())
+
+
+def test_product_eval_manifest_is_a_lossless_source_only_view(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source-manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "required-page",
+                "regions": [{"region_id": "r"}],
+                "target_instances": [
+                    {
+                        "instance_id": "i",
+                        "region_id": "r",
+                        "priority": "required",
+                    }
+                ],
+            },
+            {
+                "page_id": "no-edit-page",
+                "regions": [{"region_id": "r"}],
+                "target_instances": [],
+            },
+        ]
+    }
+    _write_strict_source_manifest(source_manifest, payload)
+    output = tmp_path / "product-eval.json"
+    product, provenance = build_product_eval_manifest(
+        source_manifest_path=source_manifest,
+        output_path=output,
+        source_lock_git_sha="a" * 40,
+    )
+    assert product["manifest_sha256"] == _canonical_manifest_sha256(product)
+    pages = {page["page_id"]: page for page in product["pages"]}
+    source_pages = {page["page_id"]: page for page in payload["pages"]}
+    required = pages["required-page"]
+    assert required["target_text_mask"]["path"] == str(
+        Path(str(source_pages["required-page"]["target_text_mask"])).resolve()
+    )
+    assert required["protected_structure_mask"]["path"] == str(
+        Path(
+            str(source_pages["required-page"]["protected_structure_mask"])
+        ).resolve()
+    )
+    no_edit_target = Path(pages["no-edit-page"]["target_text_mask"]["path"])
+    assert np.count_nonzero(cv2.imread(str(no_edit_target), cv2.IMREAD_GRAYSCALE)) == 0
+    assert provenance["annotation_transform"] == "none"
+    assert provenance["required_page_count"] == 1
+    assert provenance["no_edit_page_count"] == 1
+
+
+def test_product_eval_manifest_rejects_reused_zero_mask_directory(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source-manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "regions": [{"region_id": "r"}],
+                "target_instances": [],
+            }
+        ]
+    }
+    _write_strict_source_manifest(source_manifest, payload)
+    output = tmp_path / "product-eval.json"
+    zero_dir = tmp_path / "product-eval-zero-targets"
+    zero_dir.mkdir()
+    with pytest.raises(FileExistsError, match="zero-mask directory must be fresh"):
+        build_product_eval_manifest(
+            source_manifest_path=source_manifest,
+            output_path=output,
+            source_lock_git_sha="a" * 40,
+        )
 
 
 def test_balanced_preflight_rejects_unavailable_semantic_provider(
