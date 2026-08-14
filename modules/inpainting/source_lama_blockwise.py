@@ -27,6 +27,7 @@ from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_
 from modules.utils.inpaint_evidence import (
     BlockInpaintEvidence,
     SourceLamaBlockwiseResult,
+    combine_evidence_patches,
     mask_patch_from_page_mask,
 )
 from modules.utils.inpaint_positive_evidence import (
@@ -1005,6 +1006,29 @@ def _apply_detector_positive_text_evidence(
     if not positive_backend_supported:
         return current_image, combined_mask, evidence
 
+    exact_background_exclude = np.where(
+        (normalize_edit_mask(combined_mask, original_image.shape) > 0)
+        | (positive.positive_claim > 0)
+        | (
+            combine_evidence_patches(
+                evidence,
+                "structure_protect",
+                original_image.shape,
+            )
+            > 0
+        )
+        | (
+            combine_evidence_patches(
+                evidence,
+                "ownership_protect",
+                original_image.shape,
+            )
+            > 0
+        )
+        | (normalize_edit_mask(protected_corner_mask, original_image.shape) > 0),
+        255,
+        0,
+    ).astype(np.uint8)
     broad_applied = np.zeros(original_image.shape[:2], dtype=np.uint8)
     for block_index, broad_patch in positive.block_broad_edit_patches.items():
         item = evidence_by_index.get(block_index)
@@ -1017,7 +1041,11 @@ def _apply_detector_positive_text_evidence(
         interior_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
         broad_mask[by1:by2, bx1:bx2] = broad_patch.mask
         interior_mask[iy1:iy2, ix1:ix2] = interior_patch.mask
-        sample_mask = (interior_mask > 0) & (broad_mask <= 0)
+        # Broad edit may cover the whole verified bubble interior.  Sample the
+        # remaining source background by excluding known text/edit evidence
+        # and every exact protection mask, rather than sampling only outside
+        # the broad edit where source-owned glyphs can dominate the median.
+        sample_mask = (interior_mask > 0) & (exact_background_exclude <= 0)
         samples = np.asarray(original_image)[sample_mask, :3]
         if samples.shape[0] < 32:
             item.route_decision = "narrow"

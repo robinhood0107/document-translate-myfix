@@ -188,6 +188,7 @@ def test_clean_bubble_positive_evidence_uses_robust_flat_without_extra_lama_call
     image[20:24, 20:24] = 20
     source_mask = np.zeros((40, 40), dtype=np.uint8)
     source_mask[10:18, 10:18] = 255
+    image[source_mask > 0] = 20
     raw_claim = np.zeros_like(source_mask)
     raw_claim[20:24, 20:24] = 255
     block = TextBlock(
