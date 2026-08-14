@@ -93,6 +93,7 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
     inference_count = 0
     source_paths: list[str] = []
     closure_ledger: list[dict[str, object]] | None = None
+    closure_runtime_diagnostics: dict[str, dict[str, object]] = {}
     logical_combination_count: int | None = None
     physical_combination_count: int | None = None
     reconstruction_control_run_id: str | None = None
@@ -109,6 +110,17 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             matrix_sha = current_matrix
         elif current_manifest != manifest_sha or current_matrix != matrix_sha:
             raise ValueError("factorized results have different manifest or matrix SHAs")
+        raw_runs = payload.get("runs")
+        raw_pages = payload.get("pages")
+        if not isinstance(raw_runs, list) or not isinstance(raw_pages, dict):
+            raise ValueError(f"result has invalid runs/pages: {path}")
+        local_run_ids = {
+            str(raw.get("run_id") or "")
+            for raw in raw_runs
+            if isinstance(raw, dict)
+        }
+        if "" in local_run_ids or len(local_run_ids) != len(raw_runs):
+            raise ValueError(f"result has invalid or duplicate run ids: {path}")
         raw_ledger = payload.get("closure_ledger")
         if raw_ledger is not None:
             if not isinstance(raw_ledger, list) or not all(
@@ -116,6 +128,34 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             ):
                 raise ValueError(f"result has invalid closure ledger: {path}")
             normalized_ledger = [dict(row) for row in raw_ledger]
+            diagnostic_run_ids = {
+                str(row.get("logical_id") or "")
+                for row in normalized_ledger
+                if "runtime_diagnostics" in row
+            }
+            if diagnostic_run_ids and diagnostic_run_ids != local_run_ids:
+                raise ValueError(
+                    "factorized result runtime diagnostics do not match its local runs"
+                )
+            base_ledger: list[dict[str, object]] = []
+            for row in normalized_ledger:
+                base_row = dict(row)
+                raw_diagnostics = base_row.pop("runtime_diagnostics", None)
+                base_ledger.append(base_row)
+                if raw_diagnostics is None:
+                    continue
+                if not isinstance(raw_diagnostics, dict):
+                    raise ValueError(
+                        "factorized result has invalid closure runtime diagnostics"
+                    )
+                logical_id = str(base_row.get("logical_id") or "")
+                diagnostics = dict(raw_diagnostics)
+                previous = closure_runtime_diagnostics.get(logical_id)
+                if previous is not None and previous != diagnostics:
+                    raise ValueError(
+                        "factorized results have conflicting closure runtime diagnostics"
+                    )
+                closure_runtime_diagnostics[logical_id] = diagnostics
             expected_inventory_sha256 = _logical_inventory_sha256(
                 normalized_ledger
             )
@@ -141,21 +181,17 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
                 )
             )
             if closure_ledger is None:
-                closure_ledger = normalized_ledger
+                closure_ledger = base_ledger
                 logical_combination_count = current_logical_count
                 physical_combination_count = current_physical_count
             elif (
-                normalized_ledger != closure_ledger
+                base_ledger != closure_ledger
                 or current_logical_count != logical_combination_count
                 or current_physical_count != physical_combination_count
             ):
                 raise ValueError("factorized results have different closure ledgers")
         elif closure_ledger is not None:
             raise ValueError("factorized result is missing the shared closure ledger")
-        raw_runs = payload.get("runs")
-        raw_pages = payload.get("pages")
-        if not isinstance(raw_runs, list) or not isinstance(raw_pages, dict):
-            raise ValueError(f"result has invalid runs/pages: {path}")
         for raw in raw_runs:
             if not isinstance(raw, dict):
                 raise ValueError(f"result run must be an object: {path}")
@@ -177,6 +213,18 @@ def merge_results(result_paths: list[Path]) -> dict[str, Any]:
             raise ValueError("factorized results have different reconstruction controls")
         source_paths.append(str(path.resolve()))
     if closure_ledger is not None:
+        closure_ledger = [
+            {
+                **row,
+                **(
+                    {"runtime_diagnostics": closure_runtime_diagnostics[logical_id]}
+                    if (logical_id := str(row.get("logical_id") or ""))
+                    in closure_runtime_diagnostics
+                    else {}
+                ),
+            }
+            for row in closure_ledger
+        ]
         expected_run_ids = {
             str(row.get("logical_id") or "")
             for row in closure_ledger

@@ -15,9 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.build_inpaint_factorized_manifest_v3 import (  # noqa: E402
-    attach_artifact_hashes,
-    validate_manifest,
+from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
+    manifest_page_artifact_sha256,
+    source_manifest_page_inventory_sha256,
+    validate_source_only_manifest_v4,
 )
 
 
@@ -161,6 +162,9 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
         truth_path = _write_image(page_root / "known-background.png", truth)
         target_path = _write_image(page_root / "target.png", text)
         interior_path = _write_image(page_root / "interior.png", interior)
+        ownership_path = _write_image(
+            page_root / "ownership.png", cv2.bitwise_or(interior, text)
+        )
         protected_path = _write_image(page_root / "protected.png", protected)
         zero_path = _write_image(page_root / "zero.png", zero)
         corner_path = _write_image(page_root / "corner.png", corner)
@@ -170,13 +174,20 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
                 "path": source_path,
                 "target_text_mask": target_path,
                 "target_instances": [
-                    {"instance_id": f"{kind}-text", "mask_path": target_path}
+                    {
+                        "instance_id": f"{kind}-text",
+                        "mask_path": target_path,
+                        "priority": "required",
+                        "semantic_role": "dialogue_bubble",
+                        "region_id": f"{kind}-bubble",
+                    }
                 ],
                 "bubble_route_class": route_class,
                 "bubble_interior_mask": interior_path,
                 "protected_structure_mask": protected_path,
                 "ambiguous_structure_mask": zero_path,
-                "ownership_mask": interior_path,
+                "preserve_mask": zero_path,
+                "ownership_mask": ownership_path,
                 "claim_seed_mask": interior_path,
                 "corner_protect_mask": corner_path,
                 "existing_source_edit_mask": zero_path,
@@ -189,16 +200,45 @@ def build_synthetic_manifest(output_root: Path) -> dict[str, object]:
                 "target_extent_independent": True,
                 "target_inventory_independent": True,
                 "target_review_complete": True,
+                "annotation_frozen_before_candidate": True,
+                "candidate_seen": False,
+                "width": shape[1],
+                "height": shape[0],
+                "regions": [
+                    {
+                        "region_id": f"{kind}-bubble",
+                        "bubble_route_class": route_class,
+                        "bubble_interior_mask": interior_path,
+                        "ownership_mask": ownership_path,
+                        "protected_structure_mask": protected_path,
+                        "ambiguous_structure_mask": zero_path,
+                        "corner_protect_mask": corner_path,
+                    }
+                ],
             }
         )
+    manifest_path = output_root / "synthetic-fill-manifest-v4.json"
+    for page in pages:
+        page["annotation_basis"] = "synthetic_known_ground_truth_v4"
+        page["artifact_sha256"] = manifest_page_artifact_sha256(
+            manifest_path, page
+        )
+        page["source_sha256"] = page["artifact_sha256"]["path"]
+    page_ids = sorted(str(page["page_id"]) for page in pages)
     payload: dict[str, object] = {
-        "schema_version": "inpaint-detector-bakeoff-manifest-v3",
-        "corpus_id": "synthetic-fill-v3",
-        "split_role": "synthetic_known_background",
+        "schema_version": "inpaint-factorized-source-manifest-v4",
+        "corpus_id": "synthetic-fill-v4",
+        "split_role": "synthetic_known_ground_truth",
         "annotation_frozen_before_candidate": True,
+        "candidate_seen": False,
+        "target_extent_independent": True,
+        "target_inventory_independent": True,
+        "target_review_complete": True,
+        "page_count": len(page_ids),
+        "page_ids": page_ids,
+        "page_inventory_sha256": source_manifest_page_inventory_sha256(pages),
         "pages": pages,
     }
-    attach_artifact_hashes(payload)
     return payload
 
 
@@ -213,18 +253,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output_root = args.output_dir.resolve()
-    manifest = output_root / "synthetic-fill-manifest-v3.json"
+    if output_root.exists():
+        raise FileExistsError(
+            f"synthetic fill output directory must be fresh and absent: {output_root}"
+        )
+    output_root.mkdir(parents=True)
+    manifest = output_root / "synthetic-fill-manifest-v4.json"
     _write_json(manifest, build_synthetic_manifest(output_root))
-    validate_manifest(manifest)
     _write_json(
         manifest.with_suffix(manifest.suffix + ".seal.json"),
         {
-            "schema_version": "inpaint-factorized-manifest-seal-v3",
+            "schema_version": "inpaint-factorized-manifest-seal-v4-synthetic",
             "manifest": manifest.name,
             "manifest_sha256": _sha256(manifest),
+            "annotation_frozen_before_candidate": True,
+            "candidate_seen": False,
             "candidate_generated": False,
         },
     )
+    validate_source_only_manifest_v4(manifest)
     print(manifest)
     return 0
 
