@@ -88,6 +88,7 @@ from scripts.adjudicate_inpaint_balanced_preflight_v32 import (
 from scripts.adjudicate_inpaint_fill_preflight_v32 import (
     adjudicate_fill_preflight,
 )
+from scripts.adjudicate_inpaint_v32_final import adjudicate_final_selection
 from scripts.adjudicate_inpaint_relative_v32 import adjudicate_relative_product
 from scripts.build_inpaint_development_source_index_v4 import build_source_index
 from scripts.build_inpaint_independent_target_review_v4 import (
@@ -1196,6 +1197,48 @@ def test_fill_preflight_rejects_unsafe_pr6_mask_before_cuda(
         "product_summary_nonzero:protected_structure_changed_pixel_count_exact"
         in result["gate_failures"]
     )
+
+
+def test_v32_final_selection_keeps_pr6_when_both_candidates_fail(
+    tmp_path: Path,
+) -> None:
+    balanced = tmp_path / "balanced.json"
+    balanced.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-balanced-preflight-adjudication-v32",
+                "manifest_sha256": "a" * 64,
+                "balanced_candidate_admitted": False,
+                "gate_failures": ["semantic_provider_unavailable"],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    fill = tmp_path / "fill.json"
+    fill.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-fill-preflight-adjudication-v32",
+                "source_annotation_manifest_sha256": "a" * 64,
+                "fill_candidate_admitted": False,
+                "gate_failures": ["safety_nonzero:protected_structure_changed"],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = adjudicate_final_selection(
+        balanced_preflight_path=balanced,
+        fill_preflight_path=fill,
+    )
+
+    assert result["selected_candidate"] == "current_pr6"
+    assert result["relative_product_pass"] is False
+    assert result["product_pr_rebase_authorized"] is False
+    assert result["a5_authorized"] is False
+    assert result["a5_state"] == "unavailable"
 
 
 def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
