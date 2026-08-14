@@ -26,6 +26,7 @@ from .stage2 import attach_reconstruction_control, select_pareto_records
 from .contracts import FactorizedRunRecord
 from .stage1 import summarize as summarize_stage1_pages
 from .stage1 import (
+    broad_route_false_positive_pixels,
     load_page_masks,
     load_stage1_manifest,
     positive_edit_from_claim,
@@ -745,8 +746,10 @@ def _validate_factorized(payload: Mapping[str, object]) -> None:
     recomputed = {record.run_id: record for record in select_pareto_records(records)}
     for declared in records:
         expected = recomputed[declared.run_id]
-        if declared.status in {"pareto", "family_complete"} and not _factorized_hard_gate_passes(
-            declared.metrics
+        if (
+            declared.status in {"pareto", "family_complete"}
+            and not declared.oracle_only
+            and not _factorized_hard_gate_passes(declared.metrics)
         ):
             raise ValueError(
                 "factorized finalist status is not proved by fail-closed metrics"
@@ -2278,23 +2281,13 @@ def _validate_finalist_output_artifacts(
                             ),
                         }
                     )
-                clean_union = np.zeros(shape, np.uint8)
                 overlap_seen = np.zeros(shape, np.uint8)
                 overlap = np.zeros(shape, np.uint8)
                 for region in masks.regions:
                     overlap[(overlap_seen > 0) & (region.ownership > 0)] = 255
                     overlap_seen[region.ownership > 0] = 255
-                    if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
-                        clean_union[region.bubble_interior > 0] = 255
                 broad_only = cv2.bitwise_and(edit, cv2.bitwise_not(seed))
-                broad_false = (
-                    int(np.count_nonzero((broad_only > 0) & (clean_union == 0)))
-                    if masks.regions
-                    else int(np.count_nonzero(broad_only))
-                    if stage_page.bubble_route_class
-                    not in {"clean_flat", "clean_gradient"}
-                    else 0
-                )
+                broad_false = broad_route_false_positive_pixels(broad_only, masks)
                 overlap_edit = int(
                     np.count_nonzero((overlap > 0) & (edit > 0))
                 )

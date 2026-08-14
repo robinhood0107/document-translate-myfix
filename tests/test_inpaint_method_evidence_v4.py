@@ -1152,6 +1152,41 @@ def test_oracle_run_cannot_be_upgraded_to_pareto(tmp_path: Path) -> None:
         )
 
 
+def test_oracle_family_complete_is_not_rejected_by_product_hard_gate(
+    tmp_path: Path,
+) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _factorized_artifact(
+        tmp_path, manifest, status="family_complete", oracle_only=True
+    )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["pages"][payload["runs"][0]["run_id"]][0][
+        "canonical_statistics"
+    ]["required_skip"] = True
+    page = payload["pages"][payload["runs"][0]["run_id"]][0]
+    canonical = page["canonical_statistics"]
+    page["canonical_statistics_sha256"] = hashlib.sha256(
+        json.dumps(
+            canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    payload["runs"][0]["metrics"] = aggregate_factorized_page_statistics(
+        payload["pages"][payload["runs"][0]["run_id"]]
+    )
+    _write_json(artifact, payload)
+
+    with pytest.raises(ValueError, match="output artifact inventory"):
+        accounted_evidence_from_artifact(
+            _requirements(),
+            artifact_path=artifact,
+            scope_manifest_path=manifest,
+            family_id="current-ctd",
+            variant_ids=frozenset({"raw"}),
+            evaluation_scope="e1",
+            upstream_contract_path=tmp_path / "matrix.json",
+        )
+
+
 def test_minimal_factorized_metrics_cannot_claim_pareto(tmp_path: Path) -> None:
     manifest = _scope_manifest(tmp_path)
     artifact = _factorized_artifact(tmp_path, manifest, status="pareto")
