@@ -5193,7 +5193,22 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
         "schema_version"
     ] == "inpaint-factorized-page-statistics-v1"
     assert len(result["runs"][0]["metrics"]["output_mask_set_sha256"]) == 64
-    assert result["output_artifact_inventory"]["artifact_count"] == 4
+    assert result["output_artifact_inventory"]["artifact_count"] == 5
+    inventory = json.loads(
+        (output / "factorized-output-artifact-inventory.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert inventory["schema_version"] == (
+        "inpaint-factorized-output-artifact-inventory-v2"
+    )
+    assert {record["role"] for record in inventory["records"]} == {
+        "detector_seed_mask",
+        "effective_ownership_mask",
+        "edit_mask",
+        "final_mask",
+        "candidate_image",
+    }
     assert result["output_artifact_inventory"]["complete_run_ids"] == [run_id]
     runtime_binding = result["runtime_evidence_ledger"]
     assert runtime_binding["role"] == "runtime_evidence"

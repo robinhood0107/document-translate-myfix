@@ -697,6 +697,17 @@ def _seal_factorized_output_inventory(
                     ),
                     (
                         page_id,
+                        "effective_ownership_mask",
+                        run_root / "effective_ownership_masks" / f"{page_id}.png",
+                        str(
+                            canonical.get(
+                                "effective_ownership_mask_pixel_sha256"
+                            )
+                            or ""
+                        ),
+                    ),
+                    (
+                        page_id,
                         "edit_mask",
                         run_root / "edit_masks" / f"{page_id}.png",
                         str(canonical.get("output_edit_mask_pixel_sha256") or ""),
@@ -760,7 +771,7 @@ def _seal_factorized_output_inventory(
         "complete_run_ids": complete_run_ids,
     }
     inventory = {
-        "schema_version": "inpaint-factorized-output-artifact-inventory-v1",
+        "schema_version": "inpaint-factorized-output-artifact-inventory-v2",
         **canonical,
         "inventory_sha256": _canonical_sha256(canonical),
     }
@@ -1939,6 +1950,9 @@ def _run_combination(
             "peak_vram_allocated_mib": page_runtime["peak_vram_allocated_mib"],
             "peak_vram_reserved_mib": page_runtime["peak_vram_reserved_mib"],
             "detector_seed_mask_pixel_sha256": _pixel_sha256(detector_seed),
+            "effective_ownership_mask_pixel_sha256": _pixel_sha256(
+                broad_ownership
+            ),
             "output_edit_mask_pixel_sha256": _pixel_sha256(decision.edit_mask),
             "final_mask_pixel_sha256": _pixel_sha256(final_mask),
             "candidate_pixel_sha256": _pixel_sha256(candidate),
@@ -1986,6 +2000,10 @@ def _run_combination(
         )
         if retain_artifacts and (not required_only or not page.no_edit):
             _write_image(run_root / "detector_seed_masks" / f"{page.page_id}.png", detector_seed)
+            _write_image(
+                run_root / "effective_ownership_masks" / f"{page.page_id}.png",
+                broad_ownership,
+            )
             _write_image(run_root / "edit_masks" / f"{page.page_id}.png", decision.edit_mask)
             _write_image(run_root / "final_masks" / f"{page.page_id}.png", final_mask)
             _write_image(run_root / "candidate_images" / f"{page.page_id}.png", candidate)
