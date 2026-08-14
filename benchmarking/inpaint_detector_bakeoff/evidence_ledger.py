@@ -295,10 +295,51 @@ _FACTORIZED_FAMILY_IDS = frozenset(
 )
 
 
-def _factorized_variants(payload: Mapping[str, object], family_id: str) -> frozenset[str]:
+def _factorized_logical_rows(payload: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
     runs = payload.get("runs")
     if not isinstance(runs, list):
         raise ValueError("factorized result must contain runs")
+    physical_by_id = {
+        str(row.get("run_id") or ""): row
+        for row in runs
+        if isinstance(row, Mapping) and str(row.get("run_id") or "")
+    }
+    ledger = payload.get("closure_ledger")
+    if not isinstance(ledger, list):
+        raise ValueError("factorized result must contain closure ledger")
+    logical_rows: list[Mapping[str, object]] = []
+    role_fields = {
+        "detector": "detector_id",
+        "ownership": "ownership_id",
+        "silhouette": "silhouette_id",
+        "router": "router_id",
+        "expansion": "expansion_id",
+        "fill": "fill_id",
+    }
+    for entry in ledger:
+        if not isinstance(entry, Mapping):
+            continue
+        logical_id = str(entry.get("logical_id") or "")
+        source_id = (
+            str(entry.get("reused_from") or "")
+            if str(entry.get("closure_state") or "") == "reused_by_sha"
+            else logical_id
+        )
+        source = physical_by_id.get(source_id)
+        selection = entry.get("selection")
+        if source is None or not isinstance(selection, Mapping):
+            continue
+        logical = dict(source)
+        logical["run_id"] = logical_id
+        logical["selection"] = dict(selection)
+        for role, field in role_fields.items():
+            logical[field] = str(selection.get(role) or "")
+        logical_rows.append(logical)
+    return tuple(logical_rows)
+
+
+def _factorized_variants(payload: Mapping[str, object], family_id: str) -> frozenset[str]:
+    runs = _factorized_logical_rows(payload)
     field_and_map: dict[str, tuple[str, dict[str, str]]] = {
         "current-ctd": (
             "detector_id",
@@ -2623,9 +2664,13 @@ def _artifact_page_ids(payload: Mapping[str, object]) -> frozenset[str]:
 
 
 def _matching_runs(payload: Mapping[str, object], family_id: str, variant_id: str) -> list[Mapping[str, object]]:
-    runs = payload.get("runs")
-    if not isinstance(runs, list):
-        return []
+    if str(payload.get("schema_version") or "") == "inpaint-factorized-results-v3":
+        runs: Sequence[object] = _factorized_logical_rows(payload)
+    else:
+        raw_runs = payload.get("runs")
+        if not isinstance(raw_runs, list):
+            return []
+        runs = raw_runs
     matched: list[Mapping[str, object]] = []
     for row in runs:
         if not isinstance(row, Mapping):
