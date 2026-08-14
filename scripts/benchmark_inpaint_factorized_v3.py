@@ -1633,25 +1633,14 @@ def _run_combination(
             minimum_background_samples=int(router.get("minimum_background_samples", 32)),
             **route_masks,
         )
-        clean_annotation = page.bubble_route_class in {"clean_flat", "clean_gradient"}
         broad_only = cv2.bitwise_and(
             decision.edit_mask,
             cv2.bitwise_not(detector_seed),
         )
-        if page.regions:
-            source_clean = np.zeros(shape, np.uint8)
-            for region in masks.regions:
-                if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
-                    source_clean[region.bubble_interior > 0] = 255
-            broad_route_false_pixels = int(
-                np.count_nonzero((broad_only > 0) & (source_clean == 0))
-            )
-            broad_route_false = broad_route_false_pixels > 0
-        else:
-            broad_route_false_pixels = int(np.count_nonzero(broad_only)) if (
-                decision.decision == "broad" and not clean_annotation
-            ) else 0
-            broad_route_false = broad_route_false_pixels > 0
+        broad_route_false_pixels = broad_route_false_positive_pixels(
+            broad_only, masks
+        )
+        broad_route_false = broad_route_false_pixels > 0
         broad_false += broad_route_false_pixels
         if decision.decision == "skip" and not page.no_edit:
             required_skips += 1

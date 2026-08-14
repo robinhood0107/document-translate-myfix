@@ -4030,6 +4030,15 @@ def test_mixed_page_scores_broad_edit_only_outside_clean_regions() -> None:
     assert broad_route_false_positive_pixels(broad, masks) == 256
 
 
+def test_factorized_runner_uses_canonical_broad_route_scorer() -> None:
+    source = (
+        ROOT / "scripts" / "benchmark_inpaint_factorized_v3.py"
+    ).read_text(encoding="utf-8")
+
+    assert "broad_route_false_positive_pixels(\n            broad_only, masks\n        )" in source
+    assert "source_clean[region.bubble_interior > 0]" not in source
+
+
 def test_runner_cache_path_preserves_v4_region_and_preserve_masks(
     tmp_path: Path,
 ) -> None:
