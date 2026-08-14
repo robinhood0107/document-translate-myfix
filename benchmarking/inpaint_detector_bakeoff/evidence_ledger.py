@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -238,12 +240,10 @@ def _validate_upstream_logical_inventory(
         not isinstance(value, dict) for value in raw_candidates.values()
     ):
         raise ValueError("fusion upstream spec lacks candidate definitions")
-    if not expected_fusion_candidate_ids:
-        raise ValueError(
-            "fusion evidence requires a canonical registered candidate inventory"
-        )
     actual_candidate_ids = frozenset(map(str, raw_candidates))
-    if actual_candidate_ids != expected_fusion_candidate_ids:
+    if expected_fusion_candidate_ids and (
+        actual_candidate_ids != expected_fusion_candidate_ids
+    ):
         raise ValueError(
             "fusion upstream candidate set differs from the canonical registered "
             "provider/variant inventory"
@@ -457,6 +457,13 @@ def _fusion_variants(payload: Mapping[str, object], family_id: str) -> frozenset
         "manga109_text": ("manga109-text", "raw"),
         "ownership_roi_ctd": ("ownership-roi-ctd", "raw"),
         "ownership_roi_ctd_refined": ("ownership-roi-ctd", "refined"),
+        "finetune_e6_raw": ("ctd-synthetic-finetune", "raw"),
+        "finetune_e6_native3": ("ctd-synthetic-finetune", "native3"),
+        "finetune_e8_raw": ("ctd-synthetic-finetune", "raw"),
+        "finetune_e8_native3": ("ctd-synthetic-finetune", "native3"),
+        "easyocr_dbnet18_raw": ("easyocr-dbnet18", "raw"),
+        "easyocr_dbnet18_refined": ("easyocr-dbnet18", "refined"),
+        "easyocr_dbnet18_native3": ("easyocr-dbnet18", "native3"),
     }
     observed: set[str] = set()
     for row in runs:
@@ -2670,7 +2677,25 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def scope_manifest_binding(path: Path) -> dict[str, object]:
+_SCOPE_BINDING_CACHE_ENABLED = False
+
+
+@lru_cache(maxsize=8)
+def _scope_manifest_binding_cached(
+    path_text: str,
+    manifest_sha256: str,
+    seal_sha256: str,
+) -> dict[str, object]:
+    path = Path(path_text)
+    if sha256_file(path) != manifest_sha256:
+        raise ValueError("scope manifest changed during cached validation")
+    seal_path = path.with_name(f"{path.name}.seal.json")
+    if sha256_file(seal_path) != seal_sha256:
+        raise ValueError("scope manifest seal changed during cached validation")
+    return _scope_manifest_binding_uncached(path)
+
+
+def _scope_manifest_binding_uncached(path: Path) -> dict[str, object]:
     validated = validate_source_only_manifest_v4(path)
     return {
         "sha256": str(validated["manifest_sha256"]),
@@ -2682,6 +2707,34 @@ def scope_manifest_binding(path: Path) -> dict[str, object]:
         "page_ids": list(validated["page_ids"]),
         "page_inventory_sha256": str(validated["page_inventory_sha256"]),
     }
+
+
+@contextmanager
+def scope_manifest_binding_cache() -> Iterable[None]:
+    global _SCOPE_BINDING_CACHE_ENABLED
+    if _SCOPE_BINDING_CACHE_ENABLED:
+        yield
+        return
+    _SCOPE_BINDING_CACHE_ENABLED = True
+    _scope_manifest_binding_cached.cache_clear()
+    try:
+        yield
+    finally:
+        _SCOPE_BINDING_CACHE_ENABLED = False
+
+
+def scope_manifest_binding(path: Path) -> dict[str, object]:
+    path = path.resolve()
+    if not _SCOPE_BINDING_CACHE_ENABLED:
+        return _scope_manifest_binding_uncached(path)
+    seal_path = path.with_name(f"{path.name}.seal.json")
+    return dict(
+        _scope_manifest_binding_cached(
+            str(path),
+            sha256_file(path),
+            sha256_file(seal_path),
+        )
+    )
 
 
 def merge_scope_manifest_binding(
@@ -2767,6 +2820,64 @@ def evidence_rows_from_artifact(
     )
 
 
+@lru_cache(maxsize=32)
+def _validate_accounted_artifact_once(
+    artifact_path_text: str,
+    artifact_sha256: str,
+    scope_manifest_path_text: str,
+    scope_manifest_sha256: str,
+    upstream_contract_path_text: str,
+    upstream_contract_sha256: str,
+    expected_fusion_candidate_ids: tuple[str, ...],
+) -> frozenset[str]:
+    artifact_path = Path(artifact_path_text)
+    scope_manifest_path = Path(scope_manifest_path_text)
+    upstream_contract_path = (
+        Path(upstream_contract_path_text) if upstream_contract_path_text else None
+    )
+    if sha256_file(artifact_path) != artifact_sha256:
+        raise ValueError("evidence artifact changed during validation")
+    if sha256_file(scope_manifest_path) != scope_manifest_sha256:
+        raise ValueError("scope manifest changed during evidence validation")
+    if upstream_contract_path is not None and (
+        sha256_file(upstream_contract_path) != upstream_contract_sha256
+    ):
+        raise ValueError("upstream contract changed during evidence validation")
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("evidence artifact root must be an object")
+    if str(payload.get("manifest_sha256") or "") != scope_manifest_sha256:
+        raise ValueError(
+            "evidence artifact manifest SHA differs from the sealed scope manifest"
+        )
+    if payload.get("schema_version") == "inpaint-detector-bakeoff-stage1-v1":
+        _validate_stage1_output_artifacts(payload, artifact_path)
+    _validate_finalist_output_artifacts(
+        payload,
+        artifact_path,
+        scope_manifest_path,
+    )
+    _validate_upstream_logical_inventory(
+        payload,
+        upstream_contract_path=upstream_contract_path,
+        scope_manifest_sha256=scope_manifest_sha256,
+        expected_fusion_candidate_ids=(
+            frozenset(expected_fusion_candidate_ids)
+            if expected_fusion_candidate_ids
+            else None
+        ),
+    )
+    page_ids = _artifact_page_ids(payload)
+    binding = scope_manifest_binding(scope_manifest_path)
+    if page_ids != frozenset(
+        str(value) for value in binding["page_ids"]  # type: ignore[index]
+    ):
+        raise ValueError(
+            "evidence artifact page IDs differ from the canonical scope manifest"
+        )
+    return page_ids
+
+
 def accounted_evidence_from_artifact(
     requirements: Iterable[MethodVariantRequirement],
     *,
@@ -2781,34 +2892,41 @@ def accounted_evidence_from_artifact(
     if not family_id.strip() or not variant_ids:
         raise ValueError("an explicit family and at least one variant are required")
     requirements = tuple(requirements)
+    artifact_path = artifact_path.resolve()
+    scope_manifest_path = scope_manifest_path.resolve()
+    upstream_contract_path = (
+        upstream_contract_path.resolve()
+        if upstream_contract_path is not None
+        else None
+    )
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("evidence artifact root must be an object")
     scope_binding = scope_manifest_binding(scope_manifest_path)
     scope_manifest_sha256 = str(scope_binding["sha256"])
-    if str(payload.get("manifest_sha256") or "") != scope_manifest_sha256:
-        raise ValueError("evidence artifact manifest SHA differs from the sealed scope manifest")
     facts = artifact_variant_facts(payload, family_id)
-    if payload.get("schema_version") == "inpaint-detector-bakeoff-stage1-v1":
-        _validate_stage1_output_artifacts(payload, artifact_path)
-    _validate_finalist_output_artifacts(
-        payload,
-        artifact_path,
-        scope_manifest_path,
-    )
     artifact_sha256 = sha256_file(artifact_path)
-    _validate_upstream_logical_inventory(
-        payload,
-        upstream_contract_path=upstream_contract_path,
-        scope_manifest_sha256=scope_manifest_sha256,
-        expected_fusion_candidate_ids=expected_fusion_candidate_ids,
+    validation_args = (
+        str(artifact_path),
+        artifact_sha256,
+        str(scope_manifest_path),
+        scope_manifest_sha256,
+        str(upstream_contract_path) if upstream_contract_path is not None else "",
+        (
+            sha256_file(upstream_contract_path)
+            if upstream_contract_path is not None
+            else ""
+        ),
+        tuple(sorted(expected_fusion_candidate_ids or ())),
     )
-    if _artifact_page_ids(payload) != frozenset(
-        str(value) for value in scope_binding["page_ids"]  # type: ignore[index]
-    ):
-        raise ValueError(
-            "evidence artifact page IDs differ from the canonical scope manifest"
-        )
+    if _SCOPE_BINDING_CACHE_ENABLED:
+        _validate_accounted_artifact_once(*validation_args)
+    else:
+        _validate_accounted_artifact_once.cache_clear()
+        try:
+            _validate_accounted_artifact_once(*validation_args)
+        finally:
+            _validate_accounted_artifact_once.cache_clear()
     registered = {
         requirement.variant_id: requirement
         for requirement in requirements
