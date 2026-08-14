@@ -5,7 +5,13 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 from typing import Any, Mapping
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.validation_artifact_harness import select_managed_output_directory
 

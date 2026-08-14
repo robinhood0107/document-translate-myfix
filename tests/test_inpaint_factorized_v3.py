@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import time
 
 import cv2
@@ -862,6 +863,24 @@ def test_balanced_preflight_rejects_unavailable_semantic_provider(
     )
     assert admitted["strict_seed_eligible"] is False
     assert admitted["balanced_candidate_admitted"] is True
+
+
+def test_balanced_preflight_cli_imports_from_a_direct_script_process() -> None:
+    completed = subprocess.run(
+        [
+            str(ROOT / ".venv-win" / "Scripts" / "python.exe"),
+            "-B",
+            str(ROOT / "scripts" / "adjudicate_inpaint_balanced_preflight_v32.py"),
+            "--help",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Fail closed before spending CUDA" in completed.stdout
 
 
 def test_v32_three_case_sheet_omits_rejected_balanced_column(
