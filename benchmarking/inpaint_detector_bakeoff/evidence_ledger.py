@@ -1932,6 +1932,7 @@ def _validate_finalist_output_artifacts(
     payload: Mapping[str, object],
     artifact_path: Path,
     scope_manifest_path: Path,
+    upstream_contract_path: Path | None,
 ) -> None:
     """Re-open factorized/fusion output bytes before accepting finalist evidence."""
 
@@ -1973,7 +1974,16 @@ def _validate_finalist_output_artifacts(
         if schema == "inpaint-factorized-results-v3"
         else "inpaint-fusion-output-artifact-inventory-v1"
     )
-    if not isinstance(inventory, Mapping) or inventory.get("schema_version") != expected_schema:
+    inventory_schema = str(inventory.get("schema_version") or "")
+    allowed_inventory_schemas = (
+        {
+            "inpaint-factorized-output-artifact-inventory-v1",
+            "inpaint-factorized-output-artifact-inventory-v2",
+        }
+        if schema == "inpaint-factorized-results-v3"
+        else {expected_schema}
+    )
+    if not isinstance(inventory, Mapping) or inventory_schema not in allowed_inventory_schemas:
         raise ValueError("output artifact inventory schema differs")
     records = inventory.get("records")
     complete_values = inventory.get("complete_run_ids")
@@ -2034,13 +2044,16 @@ def _validate_finalist_output_artifacts(
         page_id = str(value.get("page_id") or "")
         role = str(value.get("role") or "")
         key = (run_id, page_id, role)
+        factorized_roles = {
+            "detector_seed_mask",
+            "edit_mask",
+            "final_mask",
+            "candidate_image",
+        }
+        if inventory_schema == "inpaint-factorized-output-artifact-inventory-v2":
+            factorized_roles.add("effective_ownership_mask")
         allowed_roles = (
-            {
-                "detector_seed_mask",
-                "edit_mask",
-                "final_mask",
-                "candidate_image",
-            }
+            factorized_roles
             if schema == "inpaint-factorized-results-v3"
             else {"claim_mask", "edit_mask"}
         )
@@ -2101,6 +2114,21 @@ def _validate_finalist_output_artifacts(
     stage_by_id = {
         page.page_id: page for page in load_stage1_manifest(scope_manifest_path)
     }
+    upstream_payload: Mapping[str, object] | None = None
+    if (
+        schema == "inpaint-factorized-results-v3"
+        and inventory_schema == "inpaint-factorized-output-artifact-inventory-v2"
+    ):
+        if upstream_contract_path is None:
+            raise ValueError(
+                "factorized ownership evidence requires its upstream matrix"
+            )
+        loaded_upstream = json.loads(
+            upstream_contract_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(loaded_upstream, Mapping):
+            raise ValueError("factorized upstream matrix root must be an object")
+        upstream_payload = loaded_upstream
 
     for run_id in finalists:
         page_rows = pages.get(run_id)
@@ -2109,11 +2137,19 @@ def _validate_finalist_output_artifacts(
         ):
             raise ValueError("complete output run lacks canonical page rows")
         expected_roles = (
-            (
+            tuple(
+                [
                 "detector_seed_mask",
+                *(
+                    ["effective_ownership_mask"]
+                    if inventory_schema
+                    == "inpaint-factorized-output-artifact-inventory-v2"
+                    else []
+                ),
                 "edit_mask",
                 "final_mask",
                 "candidate_image",
+                ]
             )
             if schema == "inpaint-factorized-results-v3"
             else ("claim_mask", "edit_mask")
@@ -2140,6 +2176,13 @@ def _validate_finalist_output_artifacts(
                         canonical_page.get("candidate_pixel_sha256") or ""
                     ),
                 }
+                if inventory_schema == "inpaint-factorized-output-artifact-inventory-v2":
+                    expected["effective_ownership_mask"] = str(
+                        canonical_page.get(
+                            "effective_ownership_mask_pixel_sha256"
+                        )
+                        or ""
+                    )
             else:
                 expected = {
                     "claim_mask": str(
@@ -2212,6 +2255,68 @@ def _validate_finalist_output_artifacts(
             }
             if schema == "inpaint-factorized-results-v3":
                 seed = decoded_values[(run_id, page_id, "detector_seed_mask")]
+                effective_ownership = (
+                    decoded_values[(run_id, page_id, "effective_ownership_mask")]
+                    if inventory_schema
+                    == "inpaint-factorized-output-artifact-inventory-v2"
+                    else (
+                        masks.broad_ownership
+                        if masks.broad_ownership is not None
+                        else masks.ownership
+                    )
+                )
+                if upstream_payload is not None:
+                    families = upstream_payload.get("families")
+                    ownership_families = (
+                        families.get("ownership")
+                        if isinstance(families, Mapping)
+                        else None
+                    )
+                    ownership_id = str(
+                        run_by_id[run_id].get("ownership_id") or ""
+                    )
+                    selected_family = (
+                        ownership_families.get(ownership_id)
+                        if isinstance(ownership_families, Mapping)
+                        else None
+                    )
+                    selected_pages = (
+                        selected_family.get("pages")
+                        if isinstance(selected_family, Mapping)
+                        else None
+                    )
+                    selected_page = (
+                        selected_pages.get(page_id)
+                        if isinstance(selected_pages, Mapping)
+                        else None
+                    )
+                    selected_path_value = (
+                        selected_page.get("broad_mask", selected_page.get("mask"))
+                        if isinstance(selected_page, Mapping)
+                        else None
+                    )
+                    if selected_path_value is None:
+                        expected_ownership = (
+                            masks.broad_ownership
+                            if masks.broad_ownership is not None
+                            else masks.ownership
+                        )
+                    else:
+                        selected_path = Path(str(selected_path_value))
+                        if not selected_path.is_absolute():
+                            selected_path = (
+                                upstream_contract_path.parent / selected_path
+                            )
+                        expected_ownership = _decode_scope_image(
+                            selected_path.resolve(), cv2.IMREAD_GRAYSCALE
+                        )
+                    if not np.array_equal(
+                        binary_mask(effective_ownership, shape),
+                        binary_mask(expected_ownership, shape),
+                    ):
+                        raise ValueError(
+                            "effective ownership output differs from upstream matrix"
+                        )
                 final_mask = decoded_values[(run_id, page_id, "final_mask")]
                 candidate = decoded_values[(run_id, page_id, "candidate_image")]
                 if seed.shape != shape or final_mask.shape != shape or candidate.shape[:2] != shape:
@@ -2331,17 +2436,7 @@ def _validate_finalist_output_artifacts(
                         "preserve_overlap"
                     ],
                     "ownership_leak_pixel_count": int(
-                        np.count_nonzero(
-                            (edit > 0)
-                            & (
-                                (
-                                    masks.broad_ownership
-                                    if masks.broad_ownership is not None
-                                    else masks.ownership
-                                )
-                                == 0
-                            )
-                        )
+                        np.count_nonzero((edit > 0) & (effective_ownership == 0))
                     ),
                     "corner_edit_overlap_pixel_count": int(
                         np.count_nonzero((edit > 0) & (masks.corner > 0))
@@ -2395,6 +2490,10 @@ def _validate_finalist_output_artifacts(
                         (run_id, page_id, "candidate_image")
                     ],
                 }
+                if inventory_schema == "inpaint-factorized-output-artifact-inventory-v2":
+                    factorized_facts[
+                        "effective_ownership_mask_pixel_sha256"
+                    ] = decoded_sha[(run_id, page_id, "effective_ownership_mask")]
                 for field, expected_value in factorized_facts.items():
                     _assert_recomputed_fact(canonical_page, field, expected_value)
             else:
@@ -2849,6 +2948,7 @@ def _validate_accounted_artifact_once(
         payload,
         artifact_path,
         scope_manifest_path,
+        upstream_contract_path,
     )
     _validate_upstream_logical_inventory(
         payload,

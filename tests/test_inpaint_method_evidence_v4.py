@@ -436,6 +436,7 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
             canonical = page["canonical_statistics"]
             edit = np.zeros((8, 10), np.uint8)
             edit[2:4, 3:5] = 255
+            effective_ownership = np.full((8, 10), 255, np.uint8)
             final = edit.copy()
             candidate = np.full((8, 10, 3), 200, np.uint8)
             for role, value, field in (
@@ -443,6 +444,11 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
                     "detector_seed_mask",
                     edit,
                     "detector_seed_mask_pixel_sha256",
+                ),
+                (
+                    "effective_ownership_mask",
+                    effective_ownership,
+                    "effective_ownership_mask_pixel_sha256",
                 ),
                 ("edit_mask", edit, "output_edit_mask_pixel_sha256"),
                 ("final_mask", final, "final_mask_pixel_sha256"),
@@ -511,7 +517,7 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
     records.sort(key=lambda row: (row["run_id"], row["page_id"], row["role"]))
     canonical_inventory = {"records": records, "complete_run_ids": complete}
     inventory = {
-        "schema_version": "inpaint-factorized-output-artifact-inventory-v1",
+        "schema_version": "inpaint-factorized-output-artifact-inventory-v2",
         **canonical_inventory,
         "inventory_sha256": hashlib.sha256(
             json.dumps(
@@ -1305,6 +1311,75 @@ def test_factorized_finalist_reopens_sealed_candidate_and_mask_bytes(
     )
     (artifact.parent / candidate["relative_path"]).write_bytes(b"tampered")
     with pytest.raises(ValueError, match="output artifact file SHA differs"):
+        accounted_evidence_from_artifact(
+            _requirements(),
+            artifact_path=artifact,
+            scope_manifest_path=manifest,
+            family_id="current-ctd",
+            variant_ids=frozenset({"raw"}),
+            evaluation_scope="e1",
+            upstream_contract_path=tmp_path / "matrix.json",
+        )
+
+
+def test_factorized_effective_ownership_must_match_upstream_matrix(
+    tmp_path: Path,
+) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _attach_factorized_output_inventory(
+        _factorized_artifact(tmp_path, manifest, status="pareto")
+    )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    binding = payload["output_artifact_inventory"]
+    inventory_path = artifact.parent / binding["relative_path"]
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    ownership = next(
+        row
+        for row in inventory["records"]
+        if row["role"] == "effective_ownership_mask"
+    )
+    ownership_path = artifact.parent / ownership["relative_path"]
+    assert cv2.imwrite(str(ownership_path), np.zeros((8, 10), np.uint8))
+    decoded = cv2.imread(str(ownership_path), cv2.IMREAD_GRAYSCALE)
+    assert decoded is not None
+    pixel_sha = hashlib.sha256(np.ascontiguousarray(decoded).tobytes()).hexdigest()
+    ownership.update(
+        {
+            "artifact_sha256": _sha(ownership_path),
+            "pixel_sha256": pixel_sha,
+            "foreground_pixel_count": 0,
+        }
+    )
+    run_id = payload["runs"][0]["run_id"]
+    canonical = payload["pages"][run_id][0]["canonical_statistics"]
+    canonical["effective_ownership_mask_pixel_sha256"] = pixel_sha
+    payload["pages"][run_id][0]["canonical_statistics_sha256"] = hashlib.sha256(
+        json.dumps(
+            canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    inventory_canonical = {
+        "records": inventory["records"],
+        "complete_run_ids": inventory["complete_run_ids"],
+    }
+    inventory["inventory_sha256"] = hashlib.sha256(
+        json.dumps(
+            inventory_canonical,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    _write_json(inventory_path, inventory)
+    binding.update(
+        {
+            "artifact_sha256": _sha(inventory_path),
+            "inventory_sha256": inventory["inventory_sha256"],
+        }
+    )
+    _write_json(artifact, payload)
+
+    with pytest.raises(ValueError, match="effective ownership.*upstream matrix"):
         accounted_evidence_from_artifact(
             _requirements(),
             artifact_path=artifact,
