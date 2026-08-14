@@ -1508,18 +1508,12 @@ def _run_combination(
         image_cache: dict[str, np.ndarray] = {}
         mask_cache: dict[str, np.ndarray] = {}
         entry = entries[page.page_id]
-        if fill_id == "mask_only":
-            height = int(entry.get("height") or 0)
-            width = int(entry.get("width") or 0)
-            if height <= 0 or width <= 0:
-                source = _read_image(page.source_image, image_cache)
-                shape = source.shape[:2]
-            else:
-                shape = (height, width)
-                source = np.zeros((height, width, 3), np.uint8)
-        else:
-            source = _read_image(page.source_image, image_cache)
-            shape = source.shape[:2]
+        # Mask-only is also the safety preflight for an existing product
+        # candidate.  It must compare that candidate with the real source;
+        # using a dimension-only zero placeholder turns every non-black pixel
+        # into a false structural change.
+        source = _read_image(page.source_image, image_cache)
+        shape = source.shape[:2]
         annotation = _annotation_masks(
             page,
             entry,

@@ -791,6 +791,98 @@ def test_relative_baseline_attachment_preserves_frozen_annotations(
     ] == str(baseline_mask.resolve())
 
 
+def test_mask_only_preflight_scores_the_real_source_image(
+    tmp_path: Path,
+) -> None:
+    shape = (24, 32)
+    source = np.full((*shape, 3), 180, np.uint8)
+    baseline = source.copy()
+    baseline[4:8, 5:10] = 230
+    target = np.zeros(shape, np.uint8)
+    target[4:8, 5:10] = 255
+    protected = np.zeros(shape, np.uint8)
+    protected[14:18, 20:26] = 255
+    full = np.full(shape, 255, np.uint8)
+    zero = np.zeros(shape, np.uint8)
+    source_path = _write_image(tmp_path / "source.png", source)
+    baseline_path = _write_image(tmp_path / "baseline.png", baseline)
+    target_path = _write_image(tmp_path / "target.png", target)
+    protected_path = _write_image(tmp_path / "protected.png", protected)
+    full_path = _write_image(tmp_path / "full.png", full)
+    zero_path = _write_image(tmp_path / "zero.png", zero)
+    manifest_path = tmp_path / "manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "path": source_path,
+                "baseline": baseline_path,
+                "baseline_mask": target_path,
+                "existing_source_edit_mask": target_path,
+                "regions": [{"region_id": "r"}],
+                "target_instances": [
+                    {"instance_id": "i", "region_id": "r", "priority": "required"}
+                ],
+            }
+        ]
+    }
+    _write_strict_source_manifest(manifest_path, payload)
+    page = payload["pages"][0]  # type: ignore[index]
+    page["baseline"] = baseline_path  # type: ignore[index]
+    page["baseline_mask"] = target_path  # type: ignore[index]
+    page["existing_source_edit_mask"] = target_path  # type: ignore[index]
+    page["protected_structure_mask"] = protected_path  # type: ignore[index]
+    page["ownership_mask"] = full_path  # type: ignore[index]
+    page["claim_seed_mask"] = target_path  # type: ignore[index]
+    page["corner_protect_mask"] = zero_path  # type: ignore[index]
+    page["artifact_sha256"] = manifest_page_artifact_sha256(  # type: ignore[index]
+        manifest_path, page  # type: ignore[arg-type]
+    )
+    payload["page_inventory_sha256"] = source_manifest_page_inventory_sha256(
+        payload["pages"]  # type: ignore[arg-type]
+    )
+    manifest_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    manifest_path.with_suffix(manifest_path.suffix + ".seal.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-manifest-seal-v4",
+                "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                "candidate_generated": False,
+                "candidate_seen": False,
+                "annotation_frozen_before_candidate": True,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    matrix = build_relative_matrix(manifest_path)
+    matrix_path = tmp_path / "matrix.json"
+    matrix_path.write_text(json.dumps(matrix, sort_keys=True), encoding="utf-8")
+    output = tmp_path / "output"
+
+    assert factorized_main(
+        [
+            "--manifest",
+            str(manifest_path),
+            "--matrix",
+            str(matrix_path),
+            "--output-dir",
+            str(output),
+            "--device",
+            "cpu",
+            "--limit",
+            "1",
+        ]
+    ) == 0
+    result = json.loads((output / "factorized-results.json").read_text("utf-8"))
+    run_id = result["runs"][0]["run_id"]
+    statistics = result["pages"][run_id][0]["canonical_statistics"]
+    assert statistics["protected_structure_changed_pixel_count"] == 0
+    assert result["pages"][run_id][0]["changed_pixel_count"] == int(
+        np.count_nonzero(target)
+    )
+
+
 def test_product_eval_manifest_is_a_lossless_source_only_view(
     tmp_path: Path,
 ) -> None:
