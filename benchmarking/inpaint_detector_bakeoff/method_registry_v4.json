@@ -177,8 +177,7 @@
         "planar_gradient",
         "telea",
         "conditional_hybrid",
-        "conditional_refill_existing",
-        "skip"
+        "conditional_refill_existing"
       ]
     },
     {

@@ -1945,7 +1945,6 @@ def test_v4_method_registry_covers_every_role_and_required_variant() -> None:
         "telea",
         "conditional_hybrid",
         "conditional_refill_existing",
-        "skip",
     }
 
 

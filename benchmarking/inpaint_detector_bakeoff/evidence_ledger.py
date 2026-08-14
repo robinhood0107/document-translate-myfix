@@ -374,7 +374,6 @@ def _factorized_variants(payload: Mapping[str, object], family_id: str) -> froze
                 "telea": "telea",
                 "conditional_hybrid": "conditional_hybrid",
                 "conditional_refill_existing": "conditional_refill_existing",
-                "skip": "skip",
             },
         ),
     }
@@ -3412,7 +3411,7 @@ def registry_evidence_adapter_gaps(
         "mask-expansion": frozenset({"raw", "refined", "native3", "content_component", "validated_interior", "lab_dilate1", "lab_dilate2", "lab_dilate3", "lab_dilate4"}),
         "exact-protection": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
         "exact-protection-historical": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
-        "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "conditional_refill_existing", "skip"}),
+        "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "conditional_refill_existing"}),
     }
     gaps = [
         {
