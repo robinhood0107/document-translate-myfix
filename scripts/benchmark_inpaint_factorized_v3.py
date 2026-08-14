@@ -69,6 +69,12 @@ def _route_fill_backend(
         if bubble_route_class == "clean_gradient":
             return "planar_gradient"
         return "current_lama"
+    if normalized == "conditional_refill_existing":
+        if bubble_route_class == "clean_flat":
+            return "robust_flat_median"
+        if bubble_route_class == "clean_gradient":
+            return "planar_gradient"
+        return "current_lama"
     return normalized
 
 
@@ -94,6 +100,7 @@ def _fill_conditional_hybrid_regions(
     background_exclude_mask: np.ndarray,
     lama_fill,
     narrow_claim: np.ndarray | None = None,
+    fill_policy: str = "conditional_hybrid",
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Fill each authoritative v4 region from one immutable page source."""
 
@@ -169,7 +176,7 @@ def _fill_conditional_hybrid_regions(
             )
         assigned[region_edit > 0] = 255
         backend = _route_fill_backend(
-            "conditional_hybrid",
+            fill_policy,
             route_decision,
             region.bubble_route_class,
         )
@@ -251,7 +258,7 @@ def _fill_conditional_hybrid_regions(
     if np.any(candidate[edit == 0] != original[edit == 0]):
         raise AssertionError("conditional hybrid changed immutable outside pixels")
     return np.ascontiguousarray(candidate), {
-        "backend": "conditional_hybrid",
+        "backend": fill_policy,
         "applied": bool(np.any(edit)),
         "edit_pixel_count": int(np.count_nonzero(edit)),
         "region_fills": diagnostics,
@@ -560,6 +567,14 @@ def aggregate_factorized_page_statistics(
             "protected_structure_changed_pixel_count"
         ),
         "preserve_edit_overlap": sum_pixels("preserve_edit_overlap_pixel_count"),
+        "ownership_leak_pixel_count": sum(
+            optional_nonnegative_integer(fact, "ownership_leak_pixel_count")
+            for fact in facts
+        ),
+        "corner_edit_overlap_pixel_count": sum(
+            optional_nonnegative_integer(fact, "corner_edit_overlap_pixel_count")
+            for fact in facts
+        ),
         "ambiguous_structure_overlap": sum_pixels(
             "ambiguous_structure_overlap_pixel_count"
         ),
@@ -1510,7 +1525,10 @@ def _run_combination(
             entry,
             shape,
             mask_cache,
-            sparse_evidence=fill_id != "conditional_hybrid",
+            sparse_evidence=fill_id not in {
+                "conditional_hybrid",
+                "conditional_refill_existing",
+            },
         )
         ownership = _read_mask(
             _page_artifact(ownership_family, page.page_id, "mask"), shape, mask_cache
@@ -1580,7 +1598,7 @@ def _run_combination(
         authoritative_overlap = _authoritative_region_overlap_mask(
             masks.regions, shape
         )
-        if fill_id == "conditional_hybrid" and np.any(authoritative_overlap):
+        if fill_id in {"conditional_hybrid", "conditional_refill_existing"} and np.any(authoritative_overlap):
             existing_unsafe = route_masks.get("unsafe_signal_mask")
             route_masks["unsafe_signal_mask"] = (
                 authoritative_overlap
@@ -1691,7 +1709,7 @@ def _run_combination(
             final_mask = cv2.bitwise_or(baseline_mask, decision.edit_mask)
             fill_diagnostics = {"backend": fill_id, "applied": False}
         else:
-            if fill_id == "conditional_hybrid" and masks.regions:
+            if fill_id in {"conditional_hybrid", "conditional_refill_existing"} and masks.regions:
                 generated, fill_diagnostics = _fill_conditional_hybrid_regions(
                     source,
                     decision.edit_mask,
@@ -1700,6 +1718,7 @@ def _run_combination(
                     background_exclude_mask=exclude,
                     lama_fill=lama_pool.fill,
                     narrow_claim=detector_seed,
+                    fill_policy=fill_id,
                 )
             else:
                 selected_fill = _route_fill_backend(
@@ -1864,6 +1883,26 @@ def _run_combination(
                     (decision.edit_mask > 0) & (masks.preserve > 0)
                 )
                 if masks.preserve is not None
+                else 0
+            ),
+            "ownership_leak_pixel_count": int(
+                np.count_nonzero(
+                    (decision.edit_mask > 0)
+                    & (
+                        (
+                            masks.broad_ownership
+                            if masks.broad_ownership is not None
+                            else masks.ownership
+                        )
+                        == 0
+                    )
+                )
+            ),
+            "corner_edit_overlap_pixel_count": int(
+                np.count_nonzero(
+                    (decision.edit_mask > 0) & (masks.corner > 0)
+                )
+                if masks.corner is not None
                 else 0
             ),
             "ambiguous_structure_overlap_pixel_count": int(

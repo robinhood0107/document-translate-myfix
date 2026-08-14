@@ -7,6 +7,15 @@ from .contracts import COMBINATION_CLOSURE_STATES, ROLE_NAMES, ROLE_STATES
 
 
 _CONTENT_IDENTITY_KINDS = frozenset({"exact_output", "artifact_record"})
+INVALID_REASON_CODES = frozenset(
+    {
+        "upstream_seed_not_admitted",
+        "upstream_semantic_gate_failed",
+        "upstream_product_mask_gate_failed",
+        "oracle_only_not_product",
+        "combination_incompatible",
+    }
+)
 
 
 def _is_sha256(value: str) -> bool:
@@ -54,6 +63,8 @@ class MethodVariantEvidence:
     content_identity_kind: str = ""
     reused_from: str = ""
     blocker_probe_sha256: str = ""
+    invalid_parent_record_id: str = ""
+    invalid_gate_facts_sha256: str = ""
 
     def __post_init__(self) -> None:
         MethodVariantRequirement(
@@ -80,6 +91,13 @@ class MethodVariantEvidence:
         if self.blocker_probe_sha256 and not _is_sha256(self.blocker_probe_sha256):
             raise ValueError(
                 "blocker probe SHA must be a lowercase 64-character hexadecimal digest"
+            )
+        if self.invalid_gate_facts_sha256 and not _is_sha256(
+            self.invalid_gate_facts_sha256
+        ):
+            raise ValueError(
+                "invalid gate facts SHA must be a lowercase 64-character "
+                "hexadecimal digest"
             )
 
         if self.closure_state in {"executed", "reused_by_sha"}:
@@ -113,6 +131,23 @@ class MethodVariantEvidence:
                 raise ValueError("blocked_asset evidence cannot claim an execution artifact")
         elif self.disposition == "blocked_asset":
             raise ValueError("blocked_asset disposition requires blocked_asset closure")
+        if self.closure_state == "invalid_with_reason":
+            if self.reason not in INVALID_REASON_CODES:
+                raise ValueError("invalid_with_reason requires a stable reason code")
+            if self.disposition != "dominated":
+                raise ValueError("invalid_with_reason requires dominated disposition")
+            if not self.artifact_sha256:
+                raise ValueError("invalid_with_reason requires a parent artifact SHA")
+            if not self.invalid_parent_record_id:
+                raise ValueError("invalid_with_reason requires a parent record id")
+            if not self.invalid_gate_facts_sha256:
+                raise ValueError("invalid_with_reason requires hashed parent gate facts")
+            if self.blocker_probe_sha256:
+                raise ValueError("invalid evidence cannot carry a blocker probe")
+        elif self.invalid_parent_record_id or self.invalid_gate_facts_sha256:
+            raise ValueError(
+                "only invalid_with_reason evidence may declare parent gate facts"
+            )
         if self.disposition == "pareto" and self.closure_state not in {
             "executed",
             "reused_by_sha",
@@ -220,6 +255,7 @@ def build_method_family_closure(
     information_limited_total = 0
     executed_total = 0
     reused_total = 0
+    invalid_total = 0
     for (family_id, role), variants in sorted(families.items()):
         variant_records: list[dict[str, object]] = []
         missing: list[str] = []
@@ -254,6 +290,7 @@ def build_method_family_closure(
             )
             executed_total += int(row.closure_state == "executed")
             reused_total += int(row.closure_state == "reused_by_sha")
+            invalid_total += int(row.closure_state == "invalid_with_reason")
             variant_records.append(
                 {
                     "variant_id": row.variant_id,
@@ -267,6 +304,8 @@ def build_method_family_closure(
                     "content_identity_kind": row.content_identity_kind,
                     "reused_from": row.reused_from,
                     "blocker_probe_sha256": row.blocker_probe_sha256,
+                    "invalid_parent_record_id": row.invalid_parent_record_id,
+                    "invalid_gate_facts_sha256": row.invalid_gate_facts_sha256,
                 }
             )
         unaccounted_total += len(missing)
@@ -327,6 +366,7 @@ def build_method_family_closure(
         "information_limited_variant_count": information_limited_total,
         "executed_variant_count": executed_total,
         "reused_variant_count": reused_total,
+        "invalid_variant_count": invalid_total,
         "all_requirements_accounted": all_accounted,
         "all_families_complete": all(
             bool(record["family_complete"]) for record in records
@@ -379,6 +419,12 @@ def evidence_from_records(
             content_identity_kind=str(row.get("content_identity_kind") or ""),
             reused_from=str(row.get("reused_from") or ""),
             blocker_probe_sha256=str(row.get("blocker_probe_sha256") or ""),
+            invalid_parent_record_id=str(
+                row.get("invalid_parent_record_id") or ""
+            ),
+            invalid_gate_facts_sha256=str(
+                row.get("invalid_gate_facts_sha256") or ""
+            ),
         )
         for row in records
     )

@@ -18,7 +18,7 @@ from .contracts import (
     binary_mask,
     mask_sha256,
 )
-from .method_closure import MethodVariantRequirement
+from .method_closure import INVALID_REASON_CODES, MethodVariantRequirement
 from .stage2 import _hard_gate_passes as _factorized_hard_gate_passes
 from .stage2 import attach_reconstruction_control, select_pareto_records
 from .contracts import FactorizedRunRecord
@@ -372,6 +372,7 @@ def _factorized_variants(payload: Mapping[str, object], family_id: str) -> froze
                 "planar_gradient": "planar_gradient",
                 "telea": "telea",
                 "conditional_hybrid": "conditional_hybrid",
+                "conditional_refill_existing": "conditional_refill_existing",
                 "skip": "skip",
             },
         ),
@@ -2329,6 +2330,24 @@ def _validate_finalist_output_artifacts(
                     "preserve_edit_overlap_pixel_count": common_facts[
                         "preserve_overlap"
                     ],
+                    "ownership_leak_pixel_count": int(
+                        np.count_nonzero(
+                            (edit > 0)
+                            & (
+                                (
+                                    masks.broad_ownership
+                                    if masks.broad_ownership is not None
+                                    else masks.ownership
+                                )
+                                == 0
+                            )
+                        )
+                    ),
+                    "corner_edit_overlap_pixel_count": int(
+                        np.count_nonzero((edit > 0) & (masks.corner > 0))
+                        if masks.corner is not None
+                        else 0
+                    ),
                     "ambiguous_structure_overlap_pixel_count": common_facts[
                         "ambiguous_overlap"
                     ],
@@ -2341,19 +2360,19 @@ def _validate_finalist_output_artifacts(
                     "broad_route_false_positive_pixel_count": broad_false,
                     "conditional_hybrid_overlap_conflict_pixel_count": overlap_edit
                     if str(run_by_id[run_id].get("fill_id") or "")
-                    == "conditional_hybrid"
+                    in {"conditional_hybrid", "conditional_refill_existing"}
                     else 0,
                     "authoritative_region_overlap_pixel_count": int(
                         np.count_nonzero(overlap)
                     )
                     if str(run_by_id[run_id].get("fill_id") or "")
-                    == "conditional_hybrid"
+                    in {"conditional_hybrid", "conditional_refill_existing"}
                     else 0,
                     "authoritative_overlap_narrow_verified": (
                         not np.any((overlap > 0) & (edit > 0) & (seed == 0))
                     )
                     if str(run_by_id[run_id].get("fill_id") or "")
-                    == "conditional_hybrid"
+                    in {"conditional_hybrid", "conditional_refill_existing"}
                     else False,
                     "residue_score": residue,
                     "baseline_residue_score": baseline_residue,
@@ -2977,6 +2996,180 @@ def blocked_asset_evidence(
     )
 
 
+_INVALID_PARENT_COLLECTIONS = {
+    "run": ("runs", "run_id"),
+    "policy": ("policies", "policy_id"),
+    "combination": ("closure_ledger", "logical_id"),
+}
+_INVALID_PARENT_SCHEMAS = {
+    "run": frozenset(
+        {"inpaint-detector-fusion-results-v4", "inpaint-factorized-results-v3"}
+    ),
+    "policy": frozenset({"inpaint-semantic-policy-results-v4"}),
+    "combination": frozenset(
+        {"inpaint-detector-fusion-results-v4", "inpaint-factorized-results-v3"}
+    ),
+}
+
+
+def _invalid_parent_record(
+    payload: Mapping[str, object],
+    *,
+    record_kind: str,
+    record_id: str,
+) -> Mapping[str, object]:
+    try:
+        collection_name, id_field = _INVALID_PARENT_COLLECTIONS[record_kind]
+    except KeyError as error:
+        raise ValueError("invalid evidence parent record kind is unsupported") from error
+    rows = payload.get(collection_name)
+    if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        raise ValueError("invalid evidence parent artifact lacks its record collection")
+    matches = [row for row in rows if str(row.get(id_field) or "") == record_id]
+    if len(matches) != 1:
+        raise ValueError("invalid evidence parent record must resolve exactly once")
+    return matches[0]
+
+
+def _invalid_gate_facts(
+    payload: Mapping[str, object],
+    record: Mapping[str, object],
+    *,
+    reason_code: str,
+    record_id: str,
+) -> Mapping[str, object]:
+    if reason_code == "upstream_seed_not_admitted":
+        admission = payload.get("seed_admission")
+        if not isinstance(admission, Mapping):
+            raise ValueError("seed admission invalid evidence lacks admission facts")
+        selected = admission.get("selected_run_ids")
+        if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected):
+            raise ValueError("seed admission invalid evidence has malformed selected runs")
+        if record_id in selected:
+            raise ValueError("selected seed run cannot prove upstream_seed_not_admitted")
+        return {"record": record, "seed_admission": admission}
+
+    status = str(record.get("status") or "")
+    oracle_only = bool(record.get("oracle_only", False))
+    metrics = record.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("invalid evidence parent record lacks gate metrics")
+    if reason_code == "upstream_semantic_gate_failed":
+        destructive = sum(
+            int(metrics.get(field, 0) or 0)
+            for field in (
+                "preserve_destructive_count",
+                "ambiguous_destructive_count",
+                "no_edit_false_translate_page_count",
+                "unavailable_instance_count",
+            )
+        )
+        if oracle_only or status not in {
+            "dominated",
+            "blocked_asset",
+            "information_limited",
+        } or destructive <= 0:
+            raise ValueError("parent policy does not prove a semantic gate failure")
+        return {"record": record}
+    if reason_code == "upstream_product_mask_gate_failed":
+        if status != "dominated" or str(record.get("closure_reason") or "") not in {
+            "hard_gate_failed",
+            "product_mask_hard_gate_failed",
+        }:
+            raise ValueError("parent run does not prove a product mask gate failure")
+        return {"record": record}
+    if reason_code == "oracle_only_not_product":
+        if not oracle_only:
+            raise ValueError("parent record is not oracle-only")
+        return {"record": record}
+    if reason_code == "combination_incompatible":
+        if str(record.get("closure_state") or "") != "invalid_with_reason":
+            raise ValueError("parent combination is not invalid_with_reason")
+        return {"record": record}
+    raise ValueError("invalid evidence reason code is unsupported")
+
+
+def invalid_with_reason_evidence(
+    requirements: Iterable[MethodVariantRequirement],
+    *,
+    scope_manifest_path: Path,
+    parent_artifact_path: Path,
+    parent_record_kind: str,
+    parent_record_id: str,
+    reason_code: str,
+    family_id: str,
+    variant_ids: frozenset[str],
+    evaluation_scope: str,
+) -> tuple[dict[str, object], ...]:
+    if reason_code not in INVALID_REASON_CODES:
+        raise ValueError("invalid evidence requires a stable reason code")
+    binding = scope_manifest_binding(scope_manifest_path)
+    scope_sha = str(binding["sha256"])
+    payload = json.loads(parent_artifact_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("invalid evidence parent artifact root must be an object")
+    if str(payload.get("schema_version") or "") not in _INVALID_PARENT_SCHEMAS.get(
+        parent_record_kind, frozenset()
+    ):
+        raise ValueError("invalid evidence parent artifact schema is unsupported")
+    validate_evidence_artifact(payload)
+    if str(payload.get("manifest_sha256") or "") != scope_sha:
+        raise ValueError("invalid evidence parent artifact manifest SHA mismatch")
+    if _artifact_page_ids(payload) != frozenset(
+        str(value) for value in binding["page_ids"]  # type: ignore[index]
+    ):
+        raise ValueError(
+            "invalid evidence parent page IDs differ from the canonical scope"
+        )
+    record = _invalid_parent_record(
+        payload,
+        record_kind=parent_record_kind,
+        record_id=parent_record_id,
+    )
+    facts = _invalid_gate_facts(
+        payload,
+        record,
+        reason_code=reason_code,
+        record_id=parent_record_id,
+    )
+    gate_facts_sha = _canonical_sha256(facts)
+    artifact_sha = sha256_file(parent_artifact_path)
+    registered = {
+        requirement.variant_id: requirement
+        for requirement in requirements
+        if requirement.family_id == family_id
+        and requirement.evaluation_scope == evaluation_scope
+    }
+    missing = sorted(variant_ids - set(registered))
+    if missing:
+        raise ValueError(
+            "invalid evidence variant is not registered for the requested "
+            f"family/scope: {missing[0]}"
+        )
+    return tuple(
+        {
+            "family_id": registered[variant_id].family_id,
+            "role": registered[variant_id].role,
+            "variant_id": variant_id,
+            "evaluation_scope": evaluation_scope,
+            "closure_state": "invalid_with_reason",
+            "disposition": "dominated",
+            "reason": reason_code,
+            "artifact_sha256": artifact_sha,
+            "artifact_schema_version": str(payload.get("schema_version") or ""),
+            "artifact_name": parent_artifact_path.name,
+            "scope_manifest_sha256": scope_sha,
+            "content_sha256": "",
+            "content_identity_kind": "",
+            "reused_from": "",
+            "blocker_probe_sha256": "",
+            "invalid_parent_record_id": parent_record_id,
+            "invalid_gate_facts_sha256": gate_facts_sha,
+        }
+        for variant_id in sorted(variant_ids)
+    )
+
+
 def registry_evidence_adapter_gaps(
     requirements: Iterable[MethodVariantRequirement],
 ) -> tuple[dict[str, str], ...]:
@@ -3008,7 +3201,7 @@ def registry_evidence_adapter_gaps(
         "mask-expansion": frozenset({"raw", "refined", "native3", "content_component", "validated_interior", "lab_dilate1", "lab_dilate2", "lab_dilate3", "lab_dilate4"}),
         "exact-protection": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
         "exact-protection-historical": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
-        "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "skip"}),
+        "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "conditional_refill_existing", "skip"}),
     }
     gaps = [
         {

@@ -14,6 +14,7 @@ from benchmarking.inpaint_detector_bakeoff.evidence_ledger import (
     _validate_runtime_evidence_ledger,
     accounted_evidence_from_artifact,
     blocked_asset_evidence,
+    invalid_with_reason_evidence,
     merge_method_evidence,
     registry_evidence_adapter_gaps,
     scope_manifest_binding,
@@ -43,6 +44,7 @@ from scripts.benchmark_inpaint_detector_fusions_v4 import (
 )
 from scripts.benchmark_inpaint_semantic_policies_v4 import (
     aggregate_semantic_page_statistics,
+    score_semantic_policies,
 )
 from modules.utils.download import ModelDownloader, ModelID
 
@@ -302,6 +304,8 @@ def _factorized_artifact(
         "protected_structure_overlap_pixel_count": 0,
         "protected_structure_changed_pixel_count": 0,
         "preserve_edit_overlap_pixel_count": 0,
+        "ownership_leak_pixel_count": 0,
+        "corner_edit_overlap_pixel_count": 0,
         "ambiguous_structure_overlap_pixel_count": 0,
         "ambiguous_structure_changed_pixel_count": 0,
         "outside_final_changed_pixel_count": 0,
@@ -2221,6 +2225,93 @@ def test_blocked_asset_rejects_empty_successful_or_unsupported_checks(
             blocker_probe_path=probe,
             family_id="sickzil",
             variant_ids=frozenset({"raw"}),
+            evaluation_scope="e1",
+        )
+
+
+def test_invalid_evidence_binds_parent_semantic_gate_facts(tmp_path: Path) -> None:
+    manifest = _scope_manifest(tmp_path)
+    parent = _write_json(
+        tmp_path / "semantic-results.json",
+        score_semantic_policies(manifest),
+    )
+    requirements = (
+        MethodVariantRequirement("router", "router", "R4", "e1"),
+    )
+    rows = invalid_with_reason_evidence(
+        requirements,
+        scope_manifest_path=manifest,
+        parent_artifact_path=parent,
+        parent_record_kind="policy",
+        parent_record_id="ocr_provenance_verifier",
+        reason_code="upstream_semantic_gate_failed",
+        family_id="router",
+        variant_ids=frozenset({"R4"}),
+        evaluation_scope="e1",
+    )
+    assert rows[0]["closure_state"] == "invalid_with_reason"
+    assert rows[0]["disposition"] == "dominated"
+    assert rows[0]["artifact_sha256"] == _sha(parent)
+    assert rows[0]["invalid_parent_record_id"] == "ocr_provenance_verifier"
+    assert len(str(rows[0]["invalid_gate_facts_sha256"])) == 64
+    MethodVariantEvidence(**{
+        key: value
+        for key, value in rows[0].items()
+        if key not in {"artifact_schema_version", "artifact_name"}
+    })
+
+
+def test_invalid_evidence_rejects_passing_or_resealed_parent_facts(
+    tmp_path: Path,
+) -> None:
+    manifest = _scope_manifest(tmp_path)
+    parent = _fusion_artifact(tmp_path, manifest)
+    payload = json.loads(parent.read_text(encoding="utf-8"))
+    run = payload["runs"][0]
+    run_id = run["run_id"]
+    run.update(
+        {
+            "seed_eligible": False,
+            "product_mask_hard_pass": False,
+            "seed_admitted": True,
+            "seed_admission_kind": "best_effort",
+        }
+    )
+    payload["seed_admission"] = {
+        "runtime_detector_limit": 2,
+        "selected_run_ids": [run_id],
+        "strict_seed_available": False,
+    }
+    _write_json(parent, payload)
+    requirements = (
+        MethodVariantRequirement("router", "router", "R4", "e1"),
+    )
+    with pytest.raises(ValueError, match="selected seed run"):
+        invalid_with_reason_evidence(
+            requirements,
+            scope_manifest_path=manifest,
+            parent_artifact_path=parent,
+            parent_record_kind="run",
+            parent_record_id=run_id,
+            reason_code="upstream_seed_not_admitted",
+            family_id="router",
+            variant_ids=frozenset({"R4"}),
+            evaluation_scope="e1",
+        )
+    payload = json.loads(parent.read_text(encoding="utf-8"))
+    payload["runs"][0]["status"] = "pareto"
+    payload["runs"][0]["closure_reason"] = ""
+    _write_json(parent, payload)
+    with pytest.raises(ValueError, match="declared status differs"):
+        invalid_with_reason_evidence(
+            requirements,
+            scope_manifest_path=manifest,
+            parent_artifact_path=parent,
+            parent_record_kind="run",
+            parent_record_id=run_id,
+            reason_code="upstream_product_mask_gate_failed",
+            family_id="router",
+            variant_ids=frozenset({"R4"}),
             evaluation_scope="e1",
         )
 
