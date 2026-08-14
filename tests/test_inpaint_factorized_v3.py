@@ -82,6 +82,9 @@ from scripts.build_inpaint_product_eval_manifest_v32 import (
     build_product_eval_manifest,
 )
 from scripts.build_inpaint_relative_matrix_v32 import build_relative_matrix
+from scripts.build_inpaint_minimal_closure_matrix_v32 import (
+    build_minimal_closure_matrix,
+)
 from scripts.adjudicate_inpaint_balanced_preflight_v32 import (
     adjudicate_balanced_preflight,
 )
@@ -1239,6 +1242,49 @@ def test_v32_final_selection_keeps_pr6_when_both_candidates_fail(
     assert result["product_pr_rebase_authorized"] is False
     assert result["a5_authorized"] is False
     assert result["a5_state"] == "unavailable"
+
+
+def test_minimal_closure_matrix_covers_every_non_oracle_role_variant() -> None:
+    controls = {
+        "detector": "d0",
+        "expansion": "e0",
+        "fill": "mask_only",
+        "ownership": "o0",
+        "router": "r0",
+        "silhouette": "s0",
+    }
+    source = {
+        "schema_version": "inpaint-factorized-matrix-v3",
+        "axes": {
+            "detector": ["d0", "oracle", "d1"],
+            "expansion": ["e0", "e1"],
+            "fill": ["mask_only"],
+            "ownership": ["o0", "o1"],
+            "router": ["r0", "r1"],
+            "silhouette": ["s0", "s1"],
+        },
+        "controls": controls,
+        "oracle_only": ["oracle"],
+        "explicit_combinations": [
+            {
+                "detector": "d1",
+                "expansion": "e1",
+                "fill": "mask_only",
+                "ownership": "o1",
+                "router": "r1",
+                "silhouette": "s1",
+            }
+        ],
+    }
+
+    result = build_minimal_closure_matrix(source)
+
+    assert result["closure_reduction"]["coverage_complete"] is True
+    assert result["closure_reduction"]["selected_combination_count"] == 2
+    rows = result["explicit_combinations"]
+    for role in ("detector", "expansion", "ownership", "router", "silhouette"):
+        expected = set(source["axes"][role]) - {"oracle"}
+        assert {row[role] for row in rows} == expected
 
 
 def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
