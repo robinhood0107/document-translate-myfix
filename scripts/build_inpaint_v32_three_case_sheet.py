@@ -39,7 +39,10 @@ def build_three_case_sheet(spec: dict[str, object]) -> Image.Image:
     if tuple(str(row.get("case_id") or "") for row in rows) != ROW_IDS:
         raise ValueError(f"v3.2 contact sheet rows must be ordered as {ROW_IDS}")
     balanced_available = spec.get("balanced_available") is True
-    headers = ["source", "PR6", "fill-only"]
+    fill_only_available = spec.get("fill_only_available", True) is True
+    headers = ["source", "PR6"]
+    if fill_only_available:
+        headers.append("fill-only")
     if balanced_available:
         headers.append("balanced")
     headers.append("edit / protect")
@@ -64,8 +67,9 @@ def build_three_case_sheet(spec: dict[str, object]) -> Image.Image:
         images = [
             source,
             _read_bgr(row.get("control")),
-            _read_bgr(row.get("fill_only")),
         ]
+        if fill_only_available:
+            images.append(_read_bgr(row.get("fill_only")))
         if balanced_available:
             images.append(_read_bgr(row.get("balanced")))
         if any(image.shape != source.shape for image in images):
@@ -124,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
                 metadata={
                     "spec": spec_path.name,
                     "row_count": 3,
+                    "fill_only_available": spec.get("fill_only_available", True)
+                    is True,
                     "balanced_available": spec.get("balanced_available") is True,
                 }
             )

@@ -85,6 +85,9 @@ from scripts.build_inpaint_relative_matrix_v32 import build_relative_matrix
 from scripts.adjudicate_inpaint_balanced_preflight_v32 import (
     adjudicate_balanced_preflight,
 )
+from scripts.adjudicate_inpaint_fill_preflight_v32 import (
+    adjudicate_fill_preflight,
+)
 from scripts.adjudicate_inpaint_relative_v32 import adjudicate_relative_product
 from scripts.build_inpaint_development_source_index_v4 import build_source_index
 from scripts.build_inpaint_independent_target_review_v4 import (
@@ -1083,6 +1086,116 @@ def test_v32_three_case_sheet_omits_rejected_balanced_column(
         }
     )
     assert sheet.size == (320, 304)
+
+
+def test_v32_three_case_sheet_omits_all_rejected_candidate_columns(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "image.png"
+    mask = tmp_path / "mask.png"
+    assert cv2.imwrite(str(image), np.full((20, 30, 3), 180, np.uint8))
+    assert cv2.imwrite(str(mask), np.zeros((20, 30), np.uint8))
+    sheet = build_three_case_sheet(
+        {
+            "schema_version": "inpaint-v32-three-case-contact-sheet-v1",
+            "fill_only_available": False,
+            "balanced_available": False,
+            "cell_width": 80,
+            "cell_height": 60,
+            "rows": [
+                {
+                    "case_id": case_id,
+                    "source": str(image),
+                    "control": str(image),
+                    "edit_mask": str(mask),
+                    "protect_mask": str(mask),
+                    "crop_xyxy": [0, 0, 30, 20],
+                }
+                for case_id in ("japan-i_102", "japan-p_015", "japan-096")
+            ],
+        }
+    )
+    assert sheet.size == (240, 304)
+
+
+def test_fill_preflight_rejects_unsafe_pr6_mask_before_cuda(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source.json"
+    source_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "page_count": 1,
+                "source_annotation_manifest_sha256": "a" * 64,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    metrics = _relative_metrics(coverage=0.9, residue=0.2, mask_sha="b" * 64)
+    metrics.update(
+        {
+            "page_count": 1,
+            "protected_structure_changed": 7,
+            "no_edit_false_edit": 9,
+        }
+    )
+    factorized = tmp_path / "factorized.json"
+    factorized.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-results-v3",
+                "manifest_sha256": hashlib.sha256(
+                    source_manifest.read_bytes()
+                ).hexdigest(),
+                "runs": [{"run_id": "b0", "metrics": metrics}],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "manifest_corpora": {
+                    "e1": {"parent_manifest_sha256": "a" * 64}
+                },
+                "success_count": 1,
+                "failure_count": 0,
+                "cpu_fallback_count": 0,
+                "required_skipped_block_count": 0,
+                "protected_structure_changed_pixel_count_exact": 7,
+                "ambiguous_structure_changed_pixel_count_exact": 0,
+                "changed_outside_final_mask_pixel_count_exact": 0,
+                "unexpected_none_edit_count": 1,
+                "inpainter_runtime": {
+                    "actual_device": "cuda",
+                    "actual_precision": "bf16",
+                    "cpu_fallback_used": False,
+                },
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = adjudicate_fill_preflight(
+        factorized_path=factorized,
+        run_id="b0",
+        source_manifest_path=source_manifest,
+        product_summary_path=summary,
+    )
+
+    assert result["fill_candidate_admitted"] is False
+    assert result["cuda_stage2_authorized"] is False
+    assert "safety_nonzero:protected_structure_changed" in result["gate_failures"]
+    assert "safety_nonzero:no_edit_false_edit" in result["gate_failures"]
+    assert (
+        "product_summary_nonzero:protected_structure_changed_pixel_count_exact"
+        in result["gate_failures"]
+    )
 
 
 def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
