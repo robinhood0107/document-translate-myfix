@@ -1637,8 +1637,17 @@ def _run_combination(
             decision.edit_mask,
             cv2.bitwise_not(detector_seed),
         )
+        streamed_clean_ownership = np.zeros(shape, np.uint8)
+        for region in page.regions:
+            if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
+                streamed_clean_ownership = cv2.bitwise_or(
+                    streamed_clean_ownership,
+                    _read_mask(region.ownership_mask, shape, mask_cache),
+                )
         broad_route_false_pixels = broad_route_false_positive_pixels(
-            broad_only, masks
+            broad_only,
+            masks,
+            clean_region_mask=streamed_clean_ownership,
         )
         broad_route_false = broad_route_false_pixels > 0
         broad_false += broad_route_false_pixels

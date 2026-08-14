@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -4028,6 +4029,13 @@ def test_mixed_page_scores_broad_edit_only_outside_clean_regions() -> None:
 
     assert broad_route_false_positive_pixels(broad & left, masks) == 0
     assert broad_route_false_positive_pixels(broad, masks) == 256
+    sparse_masks = replace(masks, regions=())
+    assert (
+        broad_route_false_positive_pixels(
+            broad, sparse_masks, clean_region_mask=left
+        )
+        == 256
+    )
 
 
 def test_factorized_runner_uses_canonical_broad_route_scorer() -> None:
@@ -4035,7 +4043,7 @@ def test_factorized_runner_uses_canonical_broad_route_scorer() -> None:
         ROOT / "scripts" / "benchmark_inpaint_factorized_v3.py"
     ).read_text(encoding="utf-8")
 
-    assert "broad_route_false_positive_pixels(\n            broad_only, masks\n        )" in source
+    assert "clean_region_mask=streamed_clean_ownership" in source
     assert "source_clean[region.bubble_interior > 0]" not in source
 
 
