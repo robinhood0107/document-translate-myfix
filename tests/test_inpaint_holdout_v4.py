@@ -284,8 +284,14 @@ def test_holdout_claim_is_atomic_across_copied_prerequisite(
     copied_dir.mkdir()
     copied = copied_dir / "renamed-prerequisites.json"
     copied.write_bytes(prerequisites.read_bytes())
-    original_lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
-    copied_lock = canonical_holdout_lock_path(copied, payload["holdout_id"])
+    source_inventory_sha256 = payload["execution_binding"][
+        "source_inventory_sha256"
+    ]
+    original_lock = canonical_holdout_lock_path(
+        prerequisites,
+        source_inventory_sha256,
+    )
+    copied_lock = canonical_holdout_lock_path(copied, source_inventory_sha256)
 
     assert original_lock == copied_lock
     claim_holdout_once(
@@ -297,6 +303,27 @@ def test_holdout_claim_is_atomic_across_copied_prerequisite(
             prerequisites_path=copied,
             prerequisites=payload,
         )
+
+
+def test_holdout_lock_identity_does_not_change_with_caller_holdout_id(
+    tmp_path: Path,
+) -> None:
+    payload = _prerequisites(tmp_path)
+    source_inventory_sha256 = payload["execution_binding"][
+        "source_inventory_sha256"
+    ]
+
+    first = canonical_holdout_lock_path(
+        tmp_path / "a5-first.json",
+        source_inventory_sha256,
+    )
+    payload["holdout_id"] = "a5-renamed-by-caller"
+    second = canonical_holdout_lock_path(
+        tmp_path / "a5-second.json",
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
+
+    assert first == second
 
 
 def test_holdout_claim_binds_the_exact_prerequisite_file(tmp_path: Path) -> None:
@@ -331,7 +358,10 @@ def test_holdout_gate_failure_does_not_create_lock(tmp_path: Path) -> None:
     payload["e1_cuda_gate_passed"] = False
     prerequisites = tmp_path / "prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
 
     with pytest.raises(ValueError, match="e1_cuda_gate_passed"):
         holdout_main(
@@ -375,7 +405,10 @@ def test_holdout_runner_rejects_checkout_commit_mismatch_before_claim(
     payload["code_commit"] = "a" * 40
     prerequisites = tmp_path / "prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
 
     class _Completed:
         stdout = "b" * 40 + "\n"
@@ -399,7 +432,10 @@ def test_holdout_runner_rejects_alternate_lock_and_arbitrary_script(
     payload = _prerequisites(tmp_path)
     prerequisites = tmp_path / "prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
     alternate_lock = tmp_path / "alternate.lock.json"
 
     with pytest.raises(SystemExit) as alternate_lock_error:
@@ -449,7 +485,10 @@ def test_holdout_rejects_wrong_execution_provider_or_model_binding(
     )
     prerequisites = tmp_path / "prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
 
     with pytest.raises(ValueError, match=f"execution binding {field} does not match"):
         claim_holdout_once(
@@ -470,7 +509,10 @@ def test_holdout_runner_rejects_noncanonical_flags(
     payload = _prerequisites(tmp_path)
     prerequisites = tmp_path / "prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
     command = _command(payload)
     flag = "--provider" if mutation == "provider" else "--model-sha256"
     if mutation == "missing":
@@ -499,7 +541,10 @@ def test_holdout_runner_uses_canonical_lock_and_runs_exactly_once(
     payload["code_commit"] = "a" * 40
     prerequisites = tmp_path / "prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
     candidate_runs: list[list[str]] = []
 
     class _Completed:
@@ -594,7 +639,10 @@ def test_holdout_rejects_legacy_manifest_schema_before_lock(tmp_path: Path) -> N
     _refresh_execution_binding(payload)
     prerequisites = tmp_path / "legacy-prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
 
     with pytest.raises(ValueError, match="strict source-only manifest v4"):
         claim_holdout_once(prerequisites_path=prerequisites, prerequisites=payload)
@@ -608,7 +656,10 @@ def test_holdout_rejects_prerequisite_source_inventory_mismatch(
     payload["holdout_source_sha256"] = [_sha("different-holdout-source")]
     prerequisites = tmp_path / "inventory-prerequisites.json"
     prerequisites.write_text(json.dumps(payload), encoding="utf-8")
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
 
     with pytest.raises(ValueError, match="source inventory differs from manifest"):
         claim_holdout_once(prerequisites_path=prerequisites, prerequisites=payload)
@@ -631,7 +682,10 @@ def test_a5_candidate_rejects_tampered_lock_execution_identity(
     execution = payload["execution_binding"]
     assert isinstance(execution, dict)
     prerequisites = _claim_for_candidate(tmp_path, payload)
-    lock = canonical_holdout_lock_path(prerequisites, payload["holdout_id"])
+    lock = canonical_holdout_lock_path(
+        prerequisites,
+        payload["execution_binding"]["source_inventory_sha256"],
+    )
     lock_payload = json.loads(lock.read_text(encoding="utf-8"))
     lock_payload[field] = "0" * (40 if field == "code_commit" else 64)
     lock.write_text(json.dumps(lock_payload), encoding="utf-8")

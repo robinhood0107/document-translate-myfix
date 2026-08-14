@@ -43,6 +43,7 @@ from benchmarking.inpaint_detector_bakeoff.stage2 import (
     assert_complete_closure_ledger,
     build_combination_closure_ledger,
     build_factorized_matrix,
+    evaluate_relative_product_gate,
     fill_factorized_mask,
     reconstruction_error,
     select_pareto_records,
@@ -71,6 +72,15 @@ from scripts.benchmark_inpaint_factorized_v3 import (
 )
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
 from scripts.build_inpaint_factorized_manifest_v4 import build_manifest as build_manifest_v4
+from scripts.attach_inpaint_relative_baseline_v32 import (
+    main as attach_relative_baseline_main,
+)
+from scripts.seal_inpaint_product_baseline_v32 import seal_product_baseline
+from scripts.build_inpaint_relative_matrix_v32 import build_relative_matrix
+from scripts.adjudicate_inpaint_balanced_preflight_v32 import (
+    adjudicate_balanced_preflight,
+)
+from scripts.adjudicate_inpaint_relative_v32 import adjudicate_relative_product
 from scripts.build_inpaint_development_source_index_v4 import build_source_index
 from scripts.build_inpaint_independent_target_review_v4 import (
     build_independent_target_review,
@@ -95,6 +105,7 @@ from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_fill_oracle_matrix_v3 import build_fill_matrix
 from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
+from scripts.build_inpaint_v32_three_case_sheet import build_three_case_sheet
 from scripts.export_inpaint_silhouette_router_v3 import export_candidates
 from scripts.merge_inpaint_factorized_v3 import merge_results
 from scripts.export_inpaint_silhouette_consensus_v4 import consensus_masks
@@ -113,6 +124,244 @@ from scripts.build_inpaint_generalization_synthetic_v4 import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _relative_metrics(
+    *,
+    coverage: float,
+    residue: float,
+    mask_sha: str,
+) -> dict[str, object]:
+    return {
+        "aggregate_target_coverage": coverage,
+        "aggregate_residue_score": residue,
+        "protected_structure_overlap": 0,
+        "protected_structure_changed": 0,
+        "ambiguous_structure_overlap": 0,
+        "ambiguous_structure_changed": 0,
+        "preserve_edit_overlap": 0,
+        "ownership_leak_pixel_count": 0,
+        "corner_edit_overlap_pixel_count": 0,
+        "outside_final_changed": 0,
+        "broad_route_false_positive": 0,
+        "no_edit_false_edit": 0,
+        "required_skip_count": 0,
+        "cpu_fallback_count": 0,
+        "runtime_telemetry_complete": True,
+        "maximum_positive_lama_inference_per_page": 0,
+        "positive_lama_inference_count": 0,
+        "lama_runtime_provider": "",
+        "lama_runtime_precision": "",
+        "target_instance_seed_recall": 0.99,
+        "missed_target_instance_count": 1,
+        "output_mask_set_sha256": mask_sha,
+    }
+
+
+def _relative_pages(
+    *,
+    first: float,
+    second: float,
+    residue: float,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "page_id": "page-001",
+            "residue_score": residue,
+            "target_instance_edit_scores": [
+                {"instance_id": "first", "coverage": first},
+                {"instance_id": "second", "coverage": second},
+            ],
+        }
+    ]
+
+
+def test_relative_product_gate_admits_safe_best_effort_improvement() -> None:
+    result = evaluate_relative_product_gate(
+        baseline_metrics=_relative_metrics(
+            coverage=0.90, residue=0.50, mask_sha="a" * 64
+        ),
+        candidate_metrics=_relative_metrics(
+            coverage=0.91, residue=0.40, mask_sha="b" * 64
+        ),
+        baseline_pages=_relative_pages(first=0.99, second=0.50, residue=0.50),
+        candidate_pages=_relative_pages(first=0.99, second=0.52, residue=0.40),
+        candidate_kind="balanced",
+    )
+
+    assert result["relative_product_pass"] is True
+    assert result["strict_seed_eligible"] is False
+    assert result["candidate_98_instance_count"] == 1
+    assert result["gate_failures"] == []
+
+
+def test_relative_product_gate_keeps_destructive_safety_absolute() -> None:
+    candidate = _relative_metrics(
+        coverage=0.91, residue=0.40, mask_sha="b" * 64
+    )
+    candidate["preserve_edit_overlap"] = 1
+
+    result = evaluate_relative_product_gate(
+        baseline_metrics=_relative_metrics(
+            coverage=0.90, residue=0.50, mask_sha="a" * 64
+        ),
+        candidate_metrics=candidate,
+        baseline_pages=_relative_pages(first=0.99, second=0.50, residue=0.50),
+        candidate_pages=_relative_pages(first=0.99, second=0.52, residue=0.40),
+        candidate_kind="balanced",
+    )
+
+    assert result["relative_product_pass"] is False
+    assert "safety_nonzero:preserve_edit_overlap" in result["gate_failures"]
+
+
+def test_relative_product_gate_rejects_fractional_counts_and_non_bf16_lama() -> None:
+    baseline = _relative_metrics(coverage=0.90, residue=0.50, mask_sha="a" * 64)
+    pages_before = _relative_pages(first=0.99, second=0.50, residue=0.50)
+    pages_after = _relative_pages(first=0.99, second=0.52, residue=0.40)
+    fractional = _relative_metrics(
+        coverage=0.91,
+        residue=0.40,
+        mask_sha="b" * 64,
+    )
+    fractional["preserve_edit_overlap"] = 0.5
+    fractional["maximum_positive_lama_inference_per_page"] = 0.5
+    fractional["positive_lama_inference_count"] = 0.5
+
+    rejected = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=fractional,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="balanced",
+    )
+
+    assert "safety_nonzero:preserve_edit_overlap" in rejected["gate_failures"]
+    assert "positive_lama_page_call_limit" in rejected["gate_failures"]
+    assert "positive_lama_inference_count_invalid" in rejected["gate_failures"]
+
+    wrong_precision = dict(fractional)
+    wrong_precision["preserve_edit_overlap"] = 0
+    wrong_precision["maximum_positive_lama_inference_per_page"] = 1
+    wrong_precision["positive_lama_inference_count"] = 1
+    wrong_precision["lama_runtime_provider"] = "cuda:0"
+    wrong_precision["lama_runtime_precision"] = "fp32"
+    rejected = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=wrong_precision,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="balanced",
+    )
+
+    assert "positive_lama_not_cuda" in rejected["gate_failures"]
+
+
+def test_relative_product_gate_requires_fill_only_mask_identity_and_lower_residue() -> None:
+    baseline = _relative_metrics(coverage=0.90, residue=0.50, mask_sha="a" * 64)
+    candidate = _relative_metrics(coverage=0.90, residue=0.40, mask_sha="a" * 64)
+    pages_before = _relative_pages(first=0.99, second=0.50, residue=0.50)
+    pages_after = _relative_pages(first=0.99, second=0.50, residue=0.40)
+
+    accepted = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=candidate,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="fill_only",
+    )
+    assert accepted["relative_product_pass"] is True
+
+    candidate["output_mask_set_sha256"] = "b" * 64
+    rejected = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=candidate,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="fill_only",
+    )
+    assert rejected["relative_product_pass"] is False
+    assert "fill_only_edit_mask_changed" in rejected["gate_failures"]
+
+
+def test_balanced_relative_adjudication_requires_admitted_preflight(
+    tmp_path: Path,
+) -> None:
+    manifest_sha = "c" * 64
+
+    def _result(path: Path, run_id: str, *, improved: bool) -> Path:
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "inpaint-factorized-results-v3",
+                    "manifest_sha256": manifest_sha,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "selection": {
+                                "detector": "best-fusion",
+                                "router": "R0",
+                                "fill": "conditional_refill_existing",
+                            },
+                            "metrics": _relative_metrics(
+                                coverage=0.91 if improved else 0.90,
+                                residue=0.40 if improved else 0.50,
+                                mask_sha=("b" if improved else "a") * 64,
+                            ),
+                        }
+                    ],
+                    "pages": {
+                        run_id: _relative_pages(
+                            first=0.99,
+                            second=0.52 if improved else 0.50,
+                            residue=0.40 if improved else 0.50,
+                        )
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    baseline = _result(tmp_path / "baseline.json", "b0", improved=False)
+    candidate = _result(tmp_path / "candidate.json", "b2", improved=True)
+    with pytest.raises(ValueError, match="requires a sealed preflight"):
+        adjudicate_relative_product(
+            baseline_path=baseline,
+            baseline_run_id="b0",
+            candidate_path=candidate,
+            candidate_run_id="b2",
+            candidate_kind="balanced",
+        )
+
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-balanced-preflight-adjudication-v32",
+                "manifest_sha256": manifest_sha,
+                "semantic_provider": "ocr_provenance_verifier",
+                "seed_admitted": True,
+                "balanced_candidate_admitted": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = adjudicate_relative_product(
+        baseline_path=baseline,
+        baseline_run_id="b0",
+        candidate_path=candidate,
+        candidate_run_id="b2",
+        candidate_kind="balanced",
+        balanced_preflight_path=preflight,
+    )
+
+    assert result["relative_product_pass"] is True
+    assert result["seed_admitted"] is True
+    assert result["provenance"]["semantic_provider"] == "ocr_provenance_verifier"
+    assert result["balanced_preflight_sha256"] == hashlib.sha256(
+        preflight.read_bytes()
+    ).hexdigest()
 
 
 def _write_image(path: Path, image: np.ndarray) -> str:
@@ -443,6 +692,207 @@ def test_v4_runners_reject_tampered_source_artifact_before_outputs(
             ]
         )
     assert not (tmp_path / "must-not-exist").exists()
+
+
+def test_relative_baseline_attachment_preserves_frozen_annotations(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source-manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "regions": [
+                    {"region_id": "r", "proposal": {"text_class": "text_bubble"}}
+                ],
+                "target_instances": [
+                    {
+                        "instance_id": "i",
+                        "region_id": "r",
+                        "semantic_role": "dialogue_bubble",
+                        "processing_action": "translate_inpaint",
+                        "priority": "required",
+                    }
+                ],
+            }
+        ]
+    }
+    _write_strict_source_manifest(source_manifest, payload)
+    source_page = payload["pages"][0]  # type: ignore[index]
+    source_path = Path(str(source_page["path"]))  # type: ignore[index]
+    source_image = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
+    assert source_image is not None
+    corpus_dir = tmp_path / "corpus"
+    (corpus_dir / "cleaned_images").mkdir(parents=True)
+    (corpus_dir / "final_masks").mkdir(parents=True)
+    baseline_image = corpus_dir / "cleaned_images" / "p_cleaned.png"
+    baseline_mask = corpus_dir / "final_masks" / "p_final_mask.png"
+    assert cv2.imwrite(str(baseline_image), source_image)
+    edit = np.zeros(source_image.shape[:2], np.uint8)
+    edit[2:4, 2:4] = 255
+    assert cv2.imwrite(str(baseline_mask), edit)
+    metrics_pages = tmp_path / "pages.jsonl"
+    metrics_pages.write_text(
+        json.dumps(
+            {
+                "page_id": "p",
+                "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                "cleaned_sha256": hashlib.sha256(baseline_image.read_bytes()).hexdigest(),
+                "final_mask_sha256": hashlib.sha256(baseline_mask.read_bytes()).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    baseline_manifest = tmp_path / "baseline-manifest.json"
+    baseline_manifest.write_text(
+        json.dumps(
+            seal_product_baseline(
+                source_manifest_path=source_manifest,
+                corpus_artifact_dir=corpus_dir,
+                metrics_pages_path=metrics_pages,
+                product_commit="a" * 40,
+            ),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "relative-manifest.json"
+    assert attach_relative_baseline_main(
+        [
+            "--source-manifest",
+            str(source_manifest),
+            "--baseline-manifest",
+            str(baseline_manifest),
+            "--output",
+            str(output),
+        ]
+    ) == 0
+    attached = json.loads(output.read_text(encoding="utf-8"))
+    attached_page = attached["pages"][0]
+    assert attached_page["target_instances"] == source_page["target_instances"]
+    assert attached_page["baseline"] == str(baseline_image.resolve())
+    assert attached_page["baseline_mask"] == str(baseline_mask.resolve())
+    assert attached_page["existing_source_edit_mask"] == str(
+        baseline_mask.resolve()
+    )
+    matrix = build_relative_matrix(output)
+    assert [
+        row["fill"] for row in matrix["explicit_combinations"]
+    ] == ["mask_only", "conditional_refill_existing"]
+    assert matrix["families"]["detector"]["pr6_baseline_edit"]["pages"]["p"][
+        "raw"
+    ] == str(baseline_mask.resolve())
+
+
+def test_balanced_preflight_rejects_unavailable_semantic_provider(
+    tmp_path: Path,
+) -> None:
+    manifest_sha = "a" * 64
+    fusion = tmp_path / "fusion.json"
+    fusion.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-detector-fusion-results-v4",
+                "manifest_sha256": manifest_sha,
+                "runs": [
+                    {
+                        "run_id": "best",
+                        "seed_admitted": True,
+                        "metrics": {
+                            "missed_target_instance_count": 6,
+                            "target_instance_seed_recall": 653 / 659,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-semantic-policy-results-v4",
+                "manifest_sha256": manifest_sha,
+                "policies": [
+                    {
+                        "policy_id": "ocr_provenance_verifier",
+                        "status": "blocked_asset",
+                        "oracle_only": False,
+                        "metrics": {
+                            "preserve_destructive_count": 0,
+                            "ambiguous_destructive_count": 0,
+                            "no_edit_false_translate_page_count": 0,
+                            "unavailable_instance_count": 809,
+                            "required_translate_recall": 0.0,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = adjudicate_balanced_preflight(
+        fusion_path=fusion,
+        fusion_run_id="best",
+        semantic_path=semantic,
+        semantic_policy_id="ocr_provenance_verifier",
+    )
+    assert result["strict_seed_eligible"] is False
+    assert result["seed_admitted"] is True
+    assert result["balanced_candidate_admitted"] is False
+    assert "semantic_provider_unavailable" in result["gate_failures"]
+    assert (
+        "semantic_gate_nonzero:unavailable_instance_count"
+        in result["gate_failures"]
+    )
+    semantic_payload = json.loads(semantic.read_text(encoding="utf-8"))
+    policy = semantic_payload["policies"][0]
+    policy["status"] = "dominated"
+    policy["metrics"]["unavailable_instance_count"] = 0
+    policy["metrics"]["required_translate_recall"] = 0.99
+    semantic.write_text(json.dumps(semantic_payload), encoding="utf-8")
+    admitted = adjudicate_balanced_preflight(
+        fusion_path=fusion,
+        fusion_run_id="best",
+        semantic_path=semantic,
+        semantic_policy_id="ocr_provenance_verifier",
+    )
+    assert admitted["strict_seed_eligible"] is False
+    assert admitted["balanced_candidate_admitted"] is True
+
+
+def test_v32_three_case_sheet_omits_rejected_balanced_column(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "image.png"
+    mask = tmp_path / "mask.png"
+    assert cv2.imwrite(str(image), np.full((20, 30, 3), 180, np.uint8))
+    assert cv2.imwrite(str(mask), np.zeros((20, 30), np.uint8))
+    rows = [
+        {
+            "case_id": case_id,
+            "source": str(image),
+            "control": str(image),
+            "fill_only": str(image),
+            "edit_mask": str(mask),
+            "protect_mask": str(mask),
+            "crop_xyxy": [0, 0, 30, 20],
+        }
+        for case_id in ("japan-i_102", "japan-p_015", "japan-096")
+    ]
+    sheet = build_three_case_sheet(
+        {
+            "schema_version": "inpaint-v32-three-case-contact-sheet-v1",
+            "balanced_available": False,
+            "cell_width": 80,
+            "cell_height": 60,
+            "rows": rows,
+        }
+    )
+    assert sheet.size == (320, 304)
 
 
 def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
@@ -862,8 +1312,11 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
                         "evaluation_scope": "e1",
                         "closure_state": "invalid_with_reason",
                         "disposition": "dominated",
-                        "reason": "not_supported_by_reference",
+                        "reason": "combination_incompatible",
+                        "artifact_sha256": "e" * 64,
                         "scope_manifest_sha256": "1" * 64,
+                        "invalid_parent_record_id": "dilated-combination",
+                        "invalid_gate_facts_sha256": "f" * 64,
                     },
                     {
                         "family_id": "exact-protection",
@@ -1098,6 +1551,7 @@ def test_v4_method_registry_covers_every_role_and_required_variant() -> None:
         "planar_gradient",
         "telea",
         "conditional_hybrid",
+        "conditional_refill_existing",
         "skip",
     }
 
@@ -3664,6 +4118,22 @@ def test_route_hybrid_uses_lama_only_for_narrow_and_flat_for_broad() -> None:
         _route_fill_backend("conditional_hybrid", "narrow", "clean_flat")
         == "current_lama"
     )
+    assert (
+        _route_fill_backend(
+            "conditional_refill_existing", "narrow", "clean_flat"
+        )
+        == "robust_flat_median"
+    )
+    assert (
+        _route_fill_backend(
+            "conditional_refill_existing", "narrow", "clean_gradient"
+        )
+        == "planar_gradient"
+    )
+    assert (
+        _route_fill_backend("conditional_refill_existing", "narrow", "line_art")
+        == "current_lama"
+    )
 
 
 def test_oracle_background_reconstruction_scores_fill_independently() -> None:
@@ -3980,6 +4450,8 @@ def _complete_hard_gate_metrics(**updates: object) -> dict[str, object]:
         "no_edit_false_edit": 0,
         "required_skip_count": 0,
         "preserve_edit_overlap": 0,
+        "ownership_leak_pixel_count": 0,
+        "corner_edit_overlap_pixel_count": 0,
         "missed_target_instance_count": 0,
         "page_residue_worsened_count": 0,
     }
@@ -4972,7 +5444,7 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
     matrix = build_fill_matrix(manifest_path)
 
     assert matrix["oracle_experiment"] is True
-    assert len(matrix["explicit_combinations"]) == 11
+    assert len(matrix["explicit_combinations"]) == 13
     assert {
         row["fill"] for row in matrix["explicit_combinations"]
     } == {
@@ -4981,6 +5453,7 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
         "telea",
         "current_lama",
         "ballons_lama",
+        "conditional_refill_existing",
         "conditional_hybrid",
     }
     pages = matrix["families"]["router"]["clean_route_oracle"]["pages"]
@@ -4994,7 +5467,7 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
         matrix=matrix,
         manifest_sha256="f" * 64,
     )
-    assert len(physical) == 11
+    assert len(physical) == 13
     assert {row.closure_state for row in ledger} == {"executed"}
 
 
@@ -5056,6 +5529,24 @@ def test_conditional_hybrid_uses_authoritative_mixed_region_routes() -> None:
     assert all(row["applied"] is True for row in diagnostics["region_fills"])
     assert np.array_equal(candidate[edit == 0], source[edit == 0])
     assert np.max(np.abs(candidate[edit > 0].astype(int) - truth[edit > 0])) <= 1
+
+    refill, refill_diagnostics = _fill_conditional_hybrid_regions(
+        source,
+        edit,
+        masks,
+        route_decision="narrow",
+        background_exclude_mask=zero,
+        lama_fill=unexpected_lama,
+        fill_policy="conditional_refill_existing",
+    )
+    assert refill_diagnostics["backend"] == "conditional_refill_existing"
+    assert refill_diagnostics["positive_lama_inference_count"] == 0
+    assert [row["backend"] for row in refill_diagnostics["region_fills"]] == [
+        "robust_flat_median",
+        "planar_gradient",
+    ]
+    assert np.array_equal(refill[edit == 0], source[edit == 0])
+    assert np.max(np.abs(refill[edit > 0].astype(int) - truth[edit > 0])) <= 1
 
 
 def test_conditional_hybrid_broad_region_samples_exclude_only_narrow_seed() -> None:

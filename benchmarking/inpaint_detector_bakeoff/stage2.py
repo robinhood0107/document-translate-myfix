@@ -15,6 +15,237 @@ from .stage1 import PageMasks
 FillCallable = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
 
+RELATIVE_PRODUCT_SAFETY_ZERO_FIELDS = (
+    "protected_structure_overlap",
+    "protected_structure_changed",
+    "ambiguous_structure_overlap",
+    "ambiguous_structure_changed",
+    "preserve_edit_overlap",
+    "ownership_leak_pixel_count",
+    "corner_edit_overlap_pixel_count",
+    "outside_final_changed",
+    "broad_route_false_positive",
+    "no_edit_false_edit",
+    "required_skip_count",
+    "cpu_fallback_count",
+)
+
+
+def _relative_page_map(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    label: str,
+) -> dict[str, Mapping[str, object]]:
+    mapped: dict[str, Mapping[str, object]] = {}
+    for row in rows:
+        page_id = str(row.get("page_id") or "").strip()
+        if not page_id or page_id in mapped:
+            raise ValueError(f"{label} page rows require unique page ids")
+        mapped[page_id] = row
+    if not mapped:
+        raise ValueError(f"{label} page rows must not be empty")
+    return mapped
+
+
+def _relative_instance_coverages(
+    pages: Mapping[str, Mapping[str, object]],
+) -> dict[tuple[str, str], float]:
+    values: dict[tuple[str, str], float] = {}
+    for page_id, row in pages.items():
+        scores = row.get("target_instance_edit_scores")
+        if not isinstance(scores, list) or any(
+            not isinstance(score, Mapping) for score in scores
+        ):
+            raise ValueError("relative product page lacks target instance scores")
+        for score in scores:
+            instance_id = str(score.get("instance_id") or "").strip()
+            coverage = score.get("coverage")
+            key = (page_id, instance_id)
+            if (
+                not instance_id
+                or key in values
+                or not _finite_number(coverage)
+                or not 0.0 <= float(coverage) <= 1.0
+            ):
+                raise ValueError("relative product instance score is invalid")
+            values[key] = float(coverage)
+    return values
+
+
+def evaluate_relative_product_gate(
+    *,
+    baseline_metrics: Mapping[str, object],
+    candidate_metrics: Mapping[str, object],
+    baseline_pages: Sequence[Mapping[str, object]],
+    candidate_pages: Sequence[Mapping[str, object]],
+    candidate_kind: str,
+    residue_tolerance: float = 1e-9,
+    instance_delta: float = 0.01,
+) -> dict[str, object]:
+    """Compare one product candidate with a stronger sealed baseline.
+
+    The existing strict 98%/100% research gate remains unchanged.  This gate
+    admits a best-relative product only when every destructive-safety metric is
+    zero and the candidate improves at least one quality axis without losing a
+    baseline-good target instance.
+    """
+
+    kind = str(candidate_kind).strip().lower()
+    if kind not in {"balanced", "fill_only"}:
+        raise ValueError("candidate_kind must be balanced or fill_only")
+    if (
+        not _finite_number(residue_tolerance)
+        or float(residue_tolerance) < 0.0
+        or not _finite_number(instance_delta)
+        or not 0.0 < float(instance_delta) <= 1.0
+    ):
+        raise ValueError("relative gate tolerances are invalid")
+
+    failures: list[str] = []
+    for field in RELATIVE_PRODUCT_SAFETY_ZERO_FIELDS:
+        value = candidate_metrics.get(field)
+        if not _finite_number(value) or float(value) != 0.0:
+            failures.append(f"safety_nonzero:{field}")
+    if candidate_metrics.get("runtime_telemetry_complete") is not True:
+        failures.append("runtime_telemetry_incomplete")
+    maximum_calls = candidate_metrics.get("maximum_positive_lama_inference_per_page")
+    if not _finite_number(maximum_calls) or float(maximum_calls) not in {0.0, 1.0}:
+        failures.append("positive_lama_page_call_limit")
+    inference_count = candidate_metrics.get("positive_lama_inference_count")
+    if (
+        not _finite_number(inference_count)
+        or float(inference_count) < 0.0
+        or not float(inference_count).is_integer()
+    ):
+        failures.append("positive_lama_inference_count_invalid")
+    elif int(inference_count) > 0:
+        provider = str(candidate_metrics.get("lama_runtime_provider") or "").lower()
+        precision = str(candidate_metrics.get("lama_runtime_precision") or "").lower()
+        if not provider.startswith("cuda") or precision != "bf16":
+            failures.append("positive_lama_not_cuda")
+
+    baseline_by_page = _relative_page_map(baseline_pages, label="baseline")
+    candidate_by_page = _relative_page_map(candidate_pages, label="candidate")
+    if set(baseline_by_page) != set(candidate_by_page):
+        raise ValueError("relative product page inventories differ")
+    baseline_instances = _relative_instance_coverages(baseline_by_page)
+    candidate_instances = _relative_instance_coverages(candidate_by_page)
+    if set(baseline_instances) != set(candidate_instances):
+        raise ValueError("relative product target instance inventories differ")
+
+    baseline_coverage = baseline_metrics.get("aggregate_target_coverage")
+    candidate_coverage = candidate_metrics.get("aggregate_target_coverage")
+    if not _finite_number(baseline_coverage) or not _finite_number(candidate_coverage):
+        raise ValueError("relative product aggregate coverage is unavailable")
+    baseline_coverage_value = float(baseline_coverage)
+    candidate_coverage_value = float(candidate_coverage)
+    if candidate_coverage_value + 1e-12 < baseline_coverage_value:
+        failures.append("aggregate_target_coverage_regressed")
+
+    newly_missed = 0
+    regressed_from_98 = 0
+    improved = 0
+    regressed = 0
+    baseline_98 = candidate_98 = 0
+    delta = float(instance_delta)
+    for key, baseline_value in baseline_instances.items():
+        candidate_value = candidate_instances[key]
+        baseline_98 += int(baseline_value >= 0.98)
+        candidate_98 += int(candidate_value >= 0.98)
+        newly_missed += int(baseline_value > 0.0 and candidate_value <= 0.0)
+        regressed_from_98 += int(baseline_value >= 0.98 and candidate_value < 0.98)
+        improved += int(candidate_value - baseline_value >= delta)
+        regressed += int(baseline_value - candidate_value >= delta)
+    if newly_missed:
+        failures.append("newly_missed_required_instance")
+    if regressed_from_98:
+        failures.append("baseline_98_instance_regressed")
+    if regressed and improved <= regressed:
+        failures.append("instance_improvement_not_greater_than_regression")
+
+    page_residue_worsened = 0
+    baseline_residue_sum = candidate_residue_sum = 0.0
+    residue_page_count = 0
+    tolerance = float(residue_tolerance)
+    for page_id in sorted(baseline_by_page):
+        baseline_residue = baseline_by_page[page_id].get("residue_score")
+        candidate_residue = candidate_by_page[page_id].get("residue_score")
+        if baseline_residue is None and candidate_residue is None:
+            continue
+        if not _finite_number(baseline_residue) or not _finite_number(candidate_residue):
+            failures.append(f"page_residue_unavailable:{page_id}")
+            continue
+        baseline_value = float(baseline_residue)
+        candidate_value = float(candidate_residue)
+        baseline_residue_sum += baseline_value
+        candidate_residue_sum += candidate_value
+        residue_page_count += 1
+        page_residue_worsened += int(candidate_value > baseline_value + tolerance)
+    if page_residue_worsened:
+        failures.append("required_page_residue_worsened")
+
+    baseline_residue = baseline_metrics.get("aggregate_residue_score")
+    candidate_residue = candidate_metrics.get("aggregate_residue_score")
+    residue_comparable = _finite_number(baseline_residue) and _finite_number(
+        candidate_residue
+    )
+    residue_improved = bool(
+        residue_comparable
+        and float(candidate_residue) < float(baseline_residue) - tolerance
+    )
+    residue_nonworse = bool(
+        residue_comparable
+        and float(candidate_residue) <= float(baseline_residue) + tolerance
+    )
+    if residue_page_count and not residue_nonworse:
+        failures.append("aggregate_residue_regressed")
+
+    mask_identity_preserved = (
+        str(baseline_metrics.get("output_mask_set_sha256") or "")
+        == str(candidate_metrics.get("output_mask_set_sha256") or "")
+        and bool(str(baseline_metrics.get("output_mask_set_sha256") or ""))
+    )
+    coverage_improved = candidate_coverage_value > baseline_coverage_value + 1e-12
+    instance_98_improved = candidate_98 > baseline_98
+    if kind == "fill_only":
+        if not mask_identity_preserved:
+            failures.append("fill_only_edit_mask_changed")
+        if not residue_improved:
+            failures.append("fill_only_residue_not_improved")
+    elif not (coverage_improved or instance_98_improved or residue_improved):
+        failures.append("no_strict_relative_improvement")
+
+    strict_seed_eligible = (
+        _finite_number(candidate_metrics.get("target_instance_seed_recall"))
+        and float(candidate_metrics["target_instance_seed_recall"]) >= 1.0
+        and _finite_number(candidate_metrics.get("missed_target_instance_count"))
+        and float(candidate_metrics["missed_target_instance_count"]) == 0.0
+    )
+    return {
+        "candidate_kind": kind,
+        "relative_product_pass": not failures,
+        "strict_seed_eligible": bool(strict_seed_eligible),
+        "gate_failures": sorted(set(failures)),
+        "baseline_aggregate_target_coverage": baseline_coverage_value,
+        "candidate_aggregate_target_coverage": candidate_coverage_value,
+        "baseline_98_instance_count": baseline_98,
+        "candidate_98_instance_count": candidate_98,
+        "newly_missed_required_instance_count": newly_missed,
+        "regressed_from_98_instance_count": regressed_from_98,
+        "improved_instance_count": improved,
+        "regressed_instance_count": regressed,
+        "page_residue_worsened_count": page_residue_worsened,
+        "baseline_aggregate_residue_score": (
+            float(baseline_residue) if _finite_number(baseline_residue) else None
+        ),
+        "candidate_aggregate_residue_score": (
+            float(candidate_residue) if _finite_number(candidate_residue) else None
+        ),
+        "residue_improved": residue_improved,
+        "edit_mask_identity_preserved": mask_identity_preserved,
+    }
+
+
 def restrict_candidate_to_final_mask(
     source: np.ndarray,
     candidate: np.ndarray,
@@ -257,7 +488,13 @@ def validate_factorized_selection(
         "CONTROL_R0",
     }:
         return "broad_expansion_requires_broad_router", "invalid_with_reason"
-    if fill in {"robust_flat_median", "planar_gradient", "telea", "conditional_hybrid"} and (
+    if fill in {
+        "robust_flat_median",
+        "planar_gradient",
+        "telea",
+        "conditional_hybrid",
+        "conditional_refill_existing",
+    } and (
         not silhouette or "empty" in silhouette
     ):
         return "bubble_fill_requires_silhouette", "invalid_with_reason"
@@ -376,6 +613,8 @@ def _hard_gate_passes(metrics: Mapping[str, object]) -> bool:
         "no_edit_false_edit",
         "required_skip_count",
         "preserve_edit_overlap",
+        "ownership_leak_pixel_count",
+        "corner_edit_overlap_pixel_count",
         "missed_target_instance_count",
         "page_residue_worsened_count",
     )

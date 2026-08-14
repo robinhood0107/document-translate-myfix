@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from benchmarking.inpaint_detector_bakeoff.evidence_ledger import (  # noqa: E402
     blocked_asset_evidence,
     evidence_rows_from_artifact,
+    invalid_with_reason_evidence,
     merge_method_evidence,
     merge_scope_manifest_binding,
     scope_manifest_binding,
@@ -69,6 +70,9 @@ def update_evidence(
     evaluation_scope: str,
     upstream_contract_path: Path | None = None,
     blocker_probe_path: Path | None = None,
+    invalid_reason: str | None = None,
+    invalid_parent_record_kind: str | None = None,
+    invalid_parent_record_id: str | None = None,
     allow_replace: bool = False,
 ) -> dict[str, object]:
     registry = _read_json(registry_path)
@@ -104,10 +108,28 @@ def update_evidence(
     if blocker_probe_path is not None:
         if artifact_path is not None:
             raise ValueError("blocked asset evidence cannot also declare an artifact")
+        if invalid_reason is not None:
+            raise ValueError("blocked asset and invalid evidence are mutually exclusive")
         updates = blocked_asset_evidence(
             requirements,
             scope_manifest_path=scope_manifest_path,
             blocker_probe_path=blocker_probe_path,
+            family_id=family_id,
+            variant_ids=variant_ids,
+            evaluation_scope=evaluation_scope,
+        )
+    elif invalid_reason is not None:
+        if artifact_path is None:
+            raise ValueError("invalid evidence requires a parent artifact")
+        if not invalid_parent_record_kind or not invalid_parent_record_id:
+            raise ValueError("invalid evidence requires parent record kind and id")
+        updates = invalid_with_reason_evidence(
+            requirements,
+            scope_manifest_path=scope_manifest_path,
+            parent_artifact_path=artifact_path,
+            parent_record_kind=invalid_parent_record_kind,
+            parent_record_id=invalid_parent_record_id,
+            reason_code=invalid_reason,
             family_id=family_id,
             variant_ids=variant_ids,
             evaluation_scope=evaluation_scope,
@@ -175,6 +197,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--invalid-reason",
+        choices=(
+            "upstream_seed_not_admitted",
+            "upstream_semantic_gate_failed",
+            "upstream_product_mask_gate_failed",
+            "oracle_only_not_product",
+            "combination_incompatible",
+        ),
+        help="Stable reason code for a stage-gated invalid requirement.",
+    )
+    parser.add_argument(
+        "--invalid-parent-kind",
+        choices=("run", "policy", "combination"),
+        help="Record collection in the parent artifact used by invalid evidence.",
+    )
+    parser.add_argument(
+        "--invalid-parent-id",
+        help="Exact parent run/policy/combination id whose gate facts are bound.",
+    )
+    parser.add_argument(
         "--replace",
         action="store_true",
         help="Explicitly replace an existing family/role/variant/scope proof.",
@@ -194,6 +236,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
         blocker_probe_path=(
             args.blocked_asset_probe.resolve() if args.blocked_asset_probe else None
+        ),
+        invalid_reason=(str(args.invalid_reason) if args.invalid_reason else None),
+        invalid_parent_record_kind=(
+            str(args.invalid_parent_kind) if args.invalid_parent_kind else None
+        ),
+        invalid_parent_record_id=(
+            str(args.invalid_parent_id) if args.invalid_parent_id else None
         ),
         allow_replace=bool(args.replace),
     )
