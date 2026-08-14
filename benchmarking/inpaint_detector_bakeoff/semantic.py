@@ -36,6 +36,48 @@ def default_detector_decision(region: Mapping[str, object]) -> SemanticDecision:
     return SemanticDecision("ambiguous", REVIEW)
 
 
+def product_semantic_decision(region: Mapping[str, object]) -> SemanticDecision:
+    """Resolve the product action without turning geometry into edit pixels.
+
+    An explicit processing action is authoritative.  Without one, known text
+    classes provide the default and missing or unknown evidence abstains.  The
+    caller may use the owning region as a gate, but the region must never create
+    a detector claim by itself.
+    """
+
+    proposal = region.get("proposal")
+    evidence = proposal if isinstance(proposal, Mapping) else region
+    explicit_action = str(
+        evidence.get("processing_action")
+        or region.get("processing_action")
+        or ""
+    ).strip().lower()
+    explicit_role = str(
+        evidence.get("semantic_role")
+        or region.get("semantic_role")
+        or ""
+    ).strip().lower()
+    fallback = default_detector_decision(evidence)
+
+    if not explicit_action:
+        return fallback
+    if explicit_action not in {TRANSLATE, PRESERVE, REVIEW}:
+        return SemanticDecision(
+            "ambiguous",
+            REVIEW,
+            available=False,
+            reason="invalid_processing_action",
+        )
+    role = explicit_role or fallback.role
+    if explicit_action == REVIEW:
+        return SemanticDecision(
+            role or "ambiguous",
+            REVIEW,
+            reason="explicit_review",
+        )
+    return SemanticDecision(role or "ambiguous", explicit_action)
+
+
 def explicit_decision(
     region: Mapping[str, object],
     *,
