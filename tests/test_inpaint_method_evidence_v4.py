@@ -1145,6 +1145,59 @@ def test_factorized_artifact_rejects_truncated_ledger_pages_and_counts(tmp_path:
         )
 
 
+def test_factorized_artifact_counts_logical_reuse_variant(tmp_path: Path) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _factorized_artifact(tmp_path, manifest)
+    matrix_path = tmp_path / "matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    reused_selection = dict(matrix["controls"])
+    reused_selection["detector"] = "manga109_text"
+    matrix["axes"]["detector"].append("manga109_text")
+    matrix["families"]["detector"]["manga109_text"] = {}
+    matrix["factorized"] = False
+    matrix["explicit_combinations"] = [reused_selection]
+    _write_json(matrix_path, matrix)
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    executed = payload["closure_ledger"][0]
+    logical_id = "manga109_text__raw__current_lama__control_text_prior__control_r0__pr2_validated"
+    payload["closure_ledger"].append(
+        {
+            "logical_id": logical_id,
+            "selection": reused_selection,
+            "closure_state": "reused_by_sha",
+            "reason": "",
+            "content_sha256": executed["content_sha256"],
+            "reused_from": executed["logical_id"],
+        }
+    )
+    payload["matrix_sha256"] = _sha(matrix_path)
+    payload["logical_combination_count"] = 2
+    payload["logical_inventory_sha256"] = hashlib.sha256(
+        json.dumps(
+            [
+                {"logical_id": row["logical_id"], "selection": row["selection"]}
+                for row in payload["closure_ledger"]
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    _write_json(artifact, payload)
+
+    rows = accounted_evidence_from_artifact(
+        _requirements("manga109-text", ("raw",)),
+        artifact_path=artifact,
+        scope_manifest_path=manifest,
+        family_id="manga109-text",
+        variant_ids=frozenset({"raw"}),
+        evaluation_scope="e1",
+        upstream_contract_path=matrix_path,
+    )
+    assert rows[0]["variant_id"] == "raw"
+    assert rows[0]["disposition"] == "dominated"
+
+
 def test_oracle_run_cannot_be_upgraded_to_pareto(tmp_path: Path) -> None:
     manifest = _scope_manifest(tmp_path)
     artifact = _factorized_artifact(
