@@ -14,11 +14,16 @@ from modules.inpainting.lama_torch_network import load_lama_mpe
 from modules.source_parity_vendor.utils.imgproc_utils import enlarge_window, resize_keepasp
 from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMaTextBlock
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
-from modules.utils.bubble_erase import ERASE_MODE_BUBBLE_LAMA_FALLBACK, erase_text_bubble_regions
+from modules.utils.bubble_erase import (
+    BubbleEraseBlockStats,
+    ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+    erase_text_bubble_regions,
+    set_block_erase_metadata,
+)
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.gpu_handoff import estimate_torch_cuda_storage_mb
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
-from modules.utils.mask_roi import normalize_xyxy
+from modules.utils.mask_roi import normalize_xyxy, resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
     INPAINT_RETRY_POLICY_VERSION,
@@ -512,24 +517,151 @@ def _split_bubble_source_mask(
     mask: np.ndarray,
     blocks: list[TextBlock],
     image_shape: tuple[int, ...],
-) -> tuple[np.ndarray, list[TextBlock], list[TextBlock]]:
+) -> tuple[
+    np.ndarray,
+    list[TextBlock],
+    list[TextBlock],
+    np.ndarray,
+    np.ndarray,
+    list[TextBlock],
+    np.ndarray,
+]:
     source_mask = normalize_edit_mask(mask, image_shape)
     bubble_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    lama_priority_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    bubble_protected_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    missing_bubble_mask = np.zeros(image_shape[:2], dtype=np.uint8)
     bubble_blocks: list[TextBlock] = []
     lama_blocks: list[TextBlock] = []
+    missing_bubble_blocks: list[TextBlock] = []
     for block in list(blocks or []):
-        if getattr(block, "text_class", "") != "text_bubble":
-            lama_blocks.append(block)
+        if getattr(block, "text_class", "") == "text_bubble":
             continue
-        bubble_blocks.append(block)
-        roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
-        if roi is None:
-            roi = normalize_xyxy(getattr(block, "xyxy", None), image_shape)
+        lama_blocks.append(block)
+        roi = resolve_inpaint_text_xyxy(block, image_shape)
         if roi is None:
             continue
         x1, y1, x2, y2 = roi
+        owned = source_mask[y1:y2, x1:x2]
+        lama_priority_mask[y1:y2, x1:x2] = np.where(
+            (lama_priority_mask[y1:y2, x1:x2] > 0)
+            | (owned > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        bubble_protection = owned
+        if (
+            getattr(block, "text_class", "") == "text_free"
+            and np.any(owned)
+        ):
+            bubble_protection = cv2.dilate(
+                owned,
+                cv2.getStructuringElement(
+                    cv2.MORPH_RECT,
+                    (5, 5),
+                ),
+                iterations=1,
+            )
+        bubble_protected_mask[y1:y2, x1:x2] = np.where(
+            (bubble_protected_mask[y1:y2, x1:x2] > 0)
+            | (bubble_protection > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+    for block in list(blocks or []):
+        if getattr(block, "text_class", "") != "text_bubble":
+            continue
+        roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+        if roi is None:
+            missing_bubble_blocks.append(block)
+            priority_roi = resolve_inpaint_text_xyxy(block, image_shape)
+            owned_pixel_count = 0
+            if priority_roi is not None:
+                x1, y1, x2, y2 = priority_roi
+                owned = np.where(
+                    (source_mask[y1:y2, x1:x2] > 0)
+                    & (lama_priority_mask[y1:y2, x1:x2] <= 0),
+                    255,
+                    0,
+                ).astype(np.uint8)
+                lama_priority_mask[y1:y2, x1:x2] = np.where(
+                    (lama_priority_mask[y1:y2, x1:x2] > 0)
+                    | (owned > 0),
+                    255,
+                    0,
+                ).astype(np.uint8)
+                missing_bubble_mask[y1:y2, x1:x2] = np.where(
+                    (missing_bubble_mask[y1:y2, x1:x2] > 0)
+                    | (owned > 0),
+                    255,
+                    0,
+                ).astype(np.uint8)
+                bubble_protected_mask[y1:y2, x1:x2] = np.where(
+                    (bubble_protected_mask[y1:y2, x1:x2] > 0)
+                    | (owned > 0),
+                    255,
+                    0,
+                ).astype(np.uint8)
+                owned_pixel_count = int(np.count_nonzero(owned))
+            set_block_erase_metadata(
+                block,
+                BubbleEraseBlockStats(
+                    mode=ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+                    edit_pixel_count=owned_pixel_count,
+                    skipped_reason="missing_bubble_roi",
+                ),
+            )
+            continue
+        bubble_blocks.append(block)
+        x1, y1, x2, y2 = roi
         bubble_mask[y1:y2, x1:x2] = np.where(source_mask[y1:y2, x1:x2] > 0, 255, bubble_mask[y1:y2, x1:x2])
-    return bubble_mask, bubble_blocks, lama_blocks
+    bubble_mask = np.where(
+        (bubble_mask > 0) & (lama_priority_mask <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    active_bubble_blocks: list[TextBlock] = []
+    for block in bubble_blocks:
+        bubble_roi = normalize_xyxy(
+            getattr(block, "bubble_xyxy", None),
+            image_shape,
+        )
+        if bubble_roi is None:
+            active_bubble_blocks.append(block)
+            continue
+        x1, y1, x2, y2 = bubble_roi
+        source_owned = source_mask[y1:y2, x1:x2] > 0
+        owned_pixel_count = int(np.count_nonzero(source_owned))
+        priority_owned_pixel_count = int(
+            np.count_nonzero(
+                source_owned
+                & (lama_priority_mask[y1:y2, x1:x2] > 0)
+            )
+        )
+        if (
+            owned_pixel_count <= 0
+            or priority_owned_pixel_count != owned_pixel_count
+        ):
+            active_bubble_blocks.append(block)
+            continue
+        set_block_erase_metadata(
+            block,
+            BubbleEraseBlockStats(
+                mode=ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+                edit_pixel_count=owned_pixel_count,
+                skipped_reason="lama_priority_owned",
+            ),
+        )
+    bubble_blocks = active_bubble_blocks
+    return (
+        bubble_mask,
+        bubble_blocks,
+        lama_blocks,
+        lama_priority_mask,
+        missing_bubble_mask,
+        missing_bubble_blocks,
+        bubble_protected_mask,
+    )
 
 
 def _run_lama_or_fallback(
@@ -550,9 +682,133 @@ def _run_lama_or_fallback(
         diagnostic_block_indices,
     )
     if not source_blocks:
-        result = inpainter(image, mask, config)
+        inpainter_key = str(getattr(inpainter, "name", "") or "")
+        requested_device = str(
+            getattr(
+                inpainter,
+                "runtime_device",
+                getattr(inpainter, "device", ""),
+            )
+            or ""
+        )
+        requested_precision = str(
+            getattr(inpainter, "precision", "fp32") or "fp32"
+        )
+        diagnostics = {
+            **inspect_learned_inpainter_runtime(
+                inpainter,
+                inpainter_key=inpainter_key,
+                requested_device=requested_device,
+                requested_precision=requested_precision,
+            ),
+            **runtime_mask_diagnostics(mask, image.shape),
+            "retry_policy": INPAINT_RETRY_POLICY_VERSION,
+            "oom_retry_count": 0,
+            "oom_retry_roi": None,
+            "status": "running",
+            "phase": "generic",
+            "block_index": None,
+            "is_inference": True,
+        }
+        started = perf_counter()
+
+        def append_memory_diagnostics() -> None:
+            diagnostics["elapsed_seconds"] = float(
+                perf_counter() - started
+            )
+            try:
+                if is_cuda_device(requested_device):
+                    if not torch.cuda.is_available():
+                        diagnostics[
+                            "cuda_memory_diagnostics_unavailable"
+                        ] = True
+                    else:
+                        device = torch.device(requested_device)
+                        diagnostics["cuda_memory_allocated_mb"] = float(
+                            torch.cuda.memory_allocated(device)
+                            / (1024 * 1024)
+                        )
+                        diagnostics["cuda_memory_reserved_mb"] = float(
+                            torch.cuda.memory_reserved(device)
+                            / (1024 * 1024)
+                        )
+                        diagnostics[
+                            "page_peak_vram_allocated_mb"
+                        ] = float(
+                            torch.cuda.max_memory_allocated(device)
+                            / (1024 * 1024)
+                        )
+                        diagnostics[
+                            "page_peak_vram_reserved_mb"
+                        ] = float(
+                            torch.cuda.max_memory_reserved(device)
+                            / (1024 * 1024)
+                        )
+                        diagnostics[
+                            "cuda_memory_diagnostics_available"
+                        ] = True
+            except Exception:
+                diagnostics["cuda_memory_diagnostics_unavailable"] = True
+
+        try:
+            result = inpainter(image, mask, config)
+        except Exception as exc:
+            if is_cuda_device(requested_device) and is_cuda_oom_error(exc):
+                retry_roi = bounded_retry_roi(mask, image.shape)
+                diagnostics["oom_retry_count"] = 1
+                diagnostics["oom_retry_roi"] = (
+                    retry_roi.as_list() if retry_roi is not None else None
+                )
+                diagnostics["first_error"] = type(exc).__name__
+                if retry_roi is None:
+                    diagnostics["status"] = "failed_no_smaller_roi"
+                    append_memory_diagnostics()
+                    raise InpaintingCudaOOMError(
+                        inpaint_cuda_oom_message(),
+                        diagnostics=diagnostics,
+                    ) from exc
+                torch.cuda.empty_cache()
+                x1, y1, x2, y2 = retry_roi.as_list()
+                retry_image = np.ascontiguousarray(image[y1:y2, x1:x2])
+                retry_mask = np.ascontiguousarray(mask[y1:y2, x1:x2])
+                try:
+                    retry_result = inpainter(
+                        retry_image,
+                        retry_mask,
+                        config,
+                    )
+                except Exception as retry_exc:
+                    diagnostics["retry_error"] = type(retry_exc).__name__
+                    if not is_cuda_oom_error(retry_exc):
+                        diagnostics["status"] = "failed_during_roi_retry"
+                        append_memory_diagnostics()
+                        raise InpaintingCudaOOMError(
+                            inpaint_cuda_oom_message(),
+                            diagnostics=diagnostics,
+                        ) from retry_exc
+                    diagnostics["status"] = "failed_after_roi_retry"
+                    append_memory_diagnostics()
+                    raise InpaintingCudaOOMError(
+                        inpaint_cuda_oom_message(),
+                        diagnostics=diagnostics,
+                    ) from retry_exc
+                result = np.asarray(image).copy()
+                result[y1:y2, x1:x2] = composite_with_edit_mask(
+                    retry_image,
+                    imk.convert_scale_abs(retry_result),
+                    retry_mask,
+                )
+                diagnostics["status"] = "completed_after_roi_retry"
+            else:
+                diagnostics["status"] = "failed"
+                diagnostics["first_error"] = type(exc).__name__
+                append_memory_diagnostics()
+                raise
+        else:
+            diagnostics["status"] = "completed"
+        append_memory_diagnostics()
         converted = imk.convert_scale_abs(result)
-        return composite_with_edit_mask(image, converted, mask), []
+        return composite_with_edit_mask(image, converted, mask), [diagnostics]
 
     device = str(getattr(inpainter, "runtime_device", getattr(inpainter, "device", "cuda")) or "cuda")
     precision = str(getattr(inpainter, "precision", "bf16") or "bf16")
@@ -670,16 +926,24 @@ def source_lama_blockwise_inpaint(
         )
 
     source_mask = normalize_edit_mask(mask, image.shape)
+    has_bubble_candidates = any(
+        getattr(block, "text_class", "") == "text_bubble"
+        for block in block_list
+    )
     original_block_indices = {
         id(block): index
         for index, block in enumerate(block_list)
     }
-    bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(
-        source_mask,
-        block_list,
-        image.shape,
-    )
-    if not bubble_blocks:
+    (
+        bubble_mask,
+        bubble_blocks,
+        lama_blocks,
+        lama_priority_mask,
+        missing_bubble_mask,
+        missing_bubble_blocks,
+        bubble_protected_mask,
+    ) = _split_bubble_source_mask(source_mask, block_list, image.shape)
+    if not has_bubble_candidates:
         cleaned, diagnostics = _run_lama_or_fallback(
             image,
             source_mask,
@@ -703,10 +967,26 @@ def source_lama_blockwise_inpaint(
             return_diagnostics=return_diagnostics,
         )
 
-    lama_mask = np.where((source_mask > 0) & (bubble_mask <= 0), 255, 0).astype(np.uint8)
+    lama_mask = np.where(
+        (source_mask > 0)
+        & (bubble_mask <= 0)
+        & (missing_bubble_mask <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    lama_owned_mask = np.where(
+        (lama_mask > 0) & (lama_priority_mask > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    lama_unowned_mask = np.where(
+        (lama_mask > 0) & (lama_priority_mask <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
     cleaned, diagnostics = _run_lama_or_fallback(
         image,
-        lama_mask,
+        lama_owned_mask,
         lama_blocks,
         inpainter,
         config,
@@ -716,7 +996,43 @@ def source_lama_blockwise_inpaint(
             for block in lama_blocks
         ],
     )
-    bubble_result = erase_text_bubble_regions(image, cleaned, bubble_mask, bubble_blocks, config)
+    if np.any(lama_unowned_mask):
+        unowned_result, unowned_diagnostics = _run_lama_or_fallback(
+            cleaned,
+            lama_unowned_mask,
+            [],
+            inpainter,
+            config,
+            check_need_inpaint=False,
+        )
+        cleaned = composite_with_edit_mask(
+            cleaned,
+            unowned_result,
+            lama_unowned_mask,
+        )
+        diagnostics.extend(unowned_diagnostics)
+    if np.any(missing_bubble_mask):
+        cleaned, missing_diagnostics = _run_lama_or_fallback(
+            cleaned,
+            missing_bubble_mask,
+            missing_bubble_blocks,
+            inpainter,
+            config,
+            check_need_inpaint=False,
+            diagnostic_block_indices=[
+                original_block_indices.get(id(block))
+                for block in missing_bubble_blocks
+            ],
+        )
+        diagnostics.extend(missing_diagnostics)
+    bubble_result = erase_text_bubble_regions(
+        image,
+        cleaned,
+        bubble_mask,
+        bubble_blocks,
+        config,
+        protected_edit_mask=bubble_protected_mask,
+    )
     for item in list(bubble_result.stats.get("blocks", []) or []):
         try:
             bubble_index = int(item.get("index", -1))
@@ -759,7 +1075,14 @@ def source_lama_blockwise_inpaint(
         )
         diagnostics.extend(fallback_diagnostics)
         result_image = composite_with_edit_mask(result_image, fallback_result, fallback_mask)
-    combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0) | (fallback_mask > 0), 255, 0).astype(np.uint8)
+    combined_mask = np.where(
+        (lama_mask > 0)
+        | (missing_bubble_mask > 0)
+        | (bubble_result.edit_mask > 0)
+        | (fallback_mask > 0),
+        255,
+        0,
+    ).astype(np.uint8)
     result = composite_with_edit_mask(image, result_image, combined_mask)
     result, combined_mask = _apply_protected_corner_guard(
         image,

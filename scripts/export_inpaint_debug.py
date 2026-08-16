@@ -140,7 +140,9 @@ SAFE_PROCESSING_CAUSE_CODES = frozenset(
         "manifest_unreadable",
     }
 )
-SAFE_RUNTIME_PHASES = frozenset({"block", "bubble_erase", "full"})
+SAFE_RUNTIME_PHASES = frozenset(
+    {"block", "bubble_erase", "full", "generic"}
+)
 SAFE_RUNTIME_STATUSES = frozenset(
     {
         "completed",
@@ -183,6 +185,20 @@ QUALITY_GATE_REQUIRED_FIELDS = (
     "protected_structure_changed_pixel_count_exact",
     "residue_pass_truncated_block_count",
     "residue_target_is_annotation",
+    "erase_mode_distribution",
+    "erase_skipped_reason_distribution",
+)
+REQUIRED_ERASE_SKIP_REASONS = frozenset(
+    {
+        "bubble_interior_cap_source_seed_unavailable",
+        "bubble_interior_cap_source_seed_partially_suppressed",
+        "bubble_protected_source_seed_unavailable",
+        "bubble_residual_source_seed_unavailable",
+        "line_art_source_seed_unavailable",
+        "microtexture_source_seed_unavailable",
+        "microtexture_source_seed_partially_suppressed",
+        "text_prior_unavailable_source_seed_unavailable",
+    }
 )
 
 
@@ -723,6 +739,11 @@ def _process_image(
         str(getattr(block, "_erase_mode", "") or "unassigned")
         for block in blocks
     )
+    erase_skipped_reason_distribution = Counter(
+        str(getattr(block, "_erase_skipped_reason", "") or "")
+        for block in blocks
+        if str(getattr(block, "_erase_skipped_reason", "") or "")
+    )
     resolved_runtime_device = str(
         runtime_device
         or getattr(inpainter, "runtime_device", getattr(inpainter, "device", ""))
@@ -778,6 +799,9 @@ def _process_image(
                 and float(item.get("elapsed_seconds", 0.0) or 0.0) >= 0.0
             ],
             "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
+            "erase_skipped_reason_distribution": dict(
+                sorted(erase_skipped_reason_distribution.items())
+            ),
             "residue_pass_truncated_block_count": int(
                 cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
             ),
@@ -961,6 +985,9 @@ def _process_image(
         "block_runtime_seconds": list(metadata["block_runtime_seconds"]),
         "pipeline_elapsed_seconds": pipeline_elapsed_seconds,
         "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
+        "erase_skipped_reason_distribution": dict(
+            sorted(erase_skipped_reason_distribution.items())
+        ),
         "residue_pass_truncated_block_count": int(
             cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
         ),
@@ -1299,6 +1326,24 @@ def _required_gate_failures(
                     coverage = record.get("residue_target_coverage")
                     if coverage is None or float(coverage) < 0.98:
                         failures.append(f"{page_name}:target_coverage_below_98pct")
+                if (
+                    str(record.get("expected_edit", "required") or "required")
+                    == "required"
+                    and sum(
+                        int(
+                            dict(
+                                record.get(
+                                    "erase_skipped_reason_distribution"
+                                )
+                                or {}
+                            ).get(reason, 0)
+                            or 0
+                        )
+                        for reason in REQUIRED_ERASE_SKIP_REASONS
+                    )
+                    > 0
+                ):
+                    failures.append(f"{page_name}:required_bubble_erase_skipped")
 
     if require_baseline_parity:
         for corpus_name, records in records_by_corpus.items():
@@ -1418,6 +1463,7 @@ def _write_page_metrics_jsonl(
         "cleanup_block_count",
         "residue_pass_truncated_block_count",
         "erase_mode_distribution",
+        "erase_skipped_reason_distribution",
         "stage_timings_seconds",
         "block_runtime_seconds",
         "pipeline_elapsed_seconds",
@@ -1904,9 +1950,13 @@ def main() -> int:
             for record in records
         ]
         erase_mode_distribution: Counter[str] = Counter()
+        erase_skipped_reason_distribution: Counter[str] = Counter()
         block_timings: list[float] = []
         for record in all_records:
             erase_mode_distribution.update(record.get("erase_mode_distribution", {}))
+            erase_skipped_reason_distribution.update(
+                record.get("erase_skipped_reason_distribution", {})
+            )
             block_timings.extend(
                 float(item.get("elapsed_seconds", 0.0) or 0.0)
                 for item in record.get("block_runtime_seconds", [])
@@ -2047,6 +2097,25 @@ def main() -> int:
                 for record in all_records
             ),
             "erase_mode_distribution": dict(sorted(erase_mode_distribution.items())),
+            "erase_skipped_reason_distribution": dict(
+                sorted(erase_skipped_reason_distribution.items())
+            ),
+            "required_skipped_block_count": sum(
+                sum(
+                    int(
+                        dict(
+                            record.get(
+                                "erase_skipped_reason_distribution"
+                            )
+                            or {}
+                        ).get(reason, 0)
+                        or 0
+                    )
+                    for reason in REQUIRED_ERASE_SKIP_REASONS
+                )
+                for record in all_records
+                if record["expected_edit"] == "required"
+            ),
             "page_processing_seconds_total": sum(
                 float(record["pipeline_elapsed_seconds"])
                 for record in all_records
