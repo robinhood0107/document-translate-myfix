@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import numpy as np
@@ -43,6 +44,104 @@ def test_positive_claim_provider_fails_closed_on_provider_fallback(monkeypatch) 
             ["CUDAExecutionProvider", "CPUExecutionProvider"],
             1280,
         )
+
+
+def test_release_positive_claim_cache_reports_cpu_and_cuda_sessions() -> None:
+    ctd_positive_claim._SESSION_CACHE.clear()
+    cuda_session = _FakeSession(
+        ("CUDAExecutionProvider", "CPUExecutionProvider")
+    )
+    cpu_session = _FakeSession(("CPUExecutionProvider",))
+    ctd_positive_claim._SESSION_CACHE.update(
+        {
+            ("cuda.onnx", ("CUDAExecutionProvider",), 1280): cuda_session,
+            ("cpu.onnx", ("CPUExecutionProvider",), 1280): cpu_session,
+        }
+    )
+
+    report = ctd_positive_claim.release_ctd_positive_claim_cache()
+
+    assert report == {
+        "cache_entry_count": 2,
+        "cuda_session_count": 1,
+        "cpu_session_count": 1,
+        "unknown_session_count": 0,
+        "expected_process_reclaim_mb": 0.0,
+        "untracked_gpu_resource_count": 1,
+        "gpu_release_expected": True,
+    }
+    assert ctd_positive_claim._SESSION_CACHE == {}
+
+
+def test_release_positive_claim_cache_fails_closed_for_unknown_session() -> None:
+    class _UnknownSession:
+        def get_providers(self):
+            raise RuntimeError("provider query failed")
+
+    ctd_positive_claim._SESSION_CACHE.clear()
+    ctd_positive_claim._SESSION_CACHE[
+        ("unknown.onnx", ("CUDAExecutionProvider",), 1280)
+    ] = _UnknownSession()
+
+    report = ctd_positive_claim.release_ctd_positive_claim_cache()
+
+    assert report["unknown_session_count"] == 1
+    assert report["untracked_gpu_resource_count"] == 1
+    assert report["gpu_release_expected"] is True
+    assert ctd_positive_claim._SESSION_CACHE == {}
+
+
+def test_release_positive_claim_cache_serializes_with_session_creation(
+    monkeypatch,
+) -> None:
+    ctd_positive_claim._SESSION_CACHE.clear()
+    creation_started = Event()
+    allow_creation = Event()
+    release_started = Event()
+    release_finished = Event()
+    session = _FakeSession()
+    result: dict[str, object] = {}
+
+    def make_blocked_session(*_args, **_kwargs):
+        creation_started.set()
+        assert allow_creation.wait(timeout=5.0)
+        return session
+
+    def release_cache() -> None:
+        release_started.set()
+        result["release"] = (
+            ctd_positive_claim.release_ctd_positive_claim_cache()
+        )
+        release_finished.set()
+
+    monkeypatch.setattr(ctd_positive_claim, "make_session", make_blocked_session)
+
+    creator = Thread(
+        target=lambda: result.setdefault(
+            "session",
+            ctd_positive_claim._cached_session(
+                "model.onnx",
+                ["CUDAExecutionProvider", "CPUExecutionProvider"],
+                1280,
+            ),
+        )
+    )
+    releaser = Thread(target=release_cache)
+
+    creator.start()
+    assert creation_started.wait(timeout=5.0)
+    releaser.start()
+    assert release_started.wait(timeout=5.0)
+    assert not release_finished.wait(timeout=0.05)
+    allow_creation.set()
+    creator.join(timeout=5.0)
+    releaser.join(timeout=5.0)
+
+    assert not creator.is_alive()
+    assert not releaser.is_alive()
+    assert result["session"] is session
+    assert result["release"]["cache_entry_count"] == 1
+    assert ctd_positive_claim._SESSION_CACHE == {}
 
 
 def test_positive_claim_provider_returns_binary_full_page_mask(monkeypatch) -> None:
