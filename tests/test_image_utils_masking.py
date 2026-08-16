@@ -18,6 +18,109 @@ from modules.utils.textblock import TextBlock
 
 
 class ImageUtilsMaskingTests(unittest.TestCase):
+    def test_generate_mask_preserves_full_page_positive_claim_separately(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([4, 4, 12, 12]),
+            text_class="text_bubble",
+            detector_origin="direct_text",
+            detector_text_bbox=[4, 4, 12, 12],
+        )
+        base_mask = np.zeros((32, 32), dtype=np.uint8)
+        base_mask[6:8, 6:8] = 255
+        full_page_raw = np.zeros_like(base_mask)
+        full_page_raw[20:24, 20:24] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.CTDPositiveClaimProvider") as provider_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=np.zeros_like(base_mask),
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            provider_cls.return_value.infer.return_value = SimpleNamespace(
+                raw_mask=full_page_raw,
+                providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+                detect_size=1280,
+                model_sha256="model-sha",
+                model_opset=12,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 0,
+                },
+                return_details=True,
+            )
+
+        self.assertTrue(np.array_equal(details["raw_mask"], base_mask))
+        self.assertTrue(
+            np.array_equal(details["positive_claim_raw_mask"], full_page_raw)
+        )
+        self.assertEqual(details["positive_claim_runtime"]["status"], "completed")
+        self.assertEqual(details["positive_claim_runtime"]["model_opset"], 12)
+        self.assertEqual(int(np.count_nonzero(details["final_mask"])), 4)
+
+    def test_positive_claim_provider_failure_does_not_change_base_mask(self) -> None:
+        image = np.zeros((24, 24, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([4, 4, 12, 12]),
+            text_class="text_bubble",
+            detector_origin="direct_text",
+            detector_text_bbox=[4, 4, 12, 12],
+        )
+        base_mask = np.zeros((24, 24), dtype=np.uint8)
+        base_mask[6:8, 6:8] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.CTDPositiveClaimProvider",
+                side_effect=RuntimeError("provider unavailable"),
+            ),
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=np.zeros_like(base_mask),
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 0,
+                },
+                return_details=True,
+            )
+
+        self.assertTrue(np.array_equal(details["final_mask"], base_mask))
+        self.assertEqual(
+            int(np.count_nonzero(details["positive_claim_raw_mask"])),
+            0,
+        )
+        self.assertEqual(details["positive_claim_runtime"]["status"], "failed")
+
     def test_explicit_added_mask_releases_automatic_corner_protection(self) -> None:
         automatic = np.zeros((12, 12), dtype=np.uint8)
         automatic[5:7, 5:7] = 255

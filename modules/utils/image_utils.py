@@ -15,6 +15,7 @@ from modules.masking import (
     build_protect_mask,
 )
 from modules.masking.protect_mask import ProtectMaskSettings
+from modules.masking.ctd_positive_claim import CTDPositiveClaimProvider
 from modules.utils.bubble_silhouette import extract_bubble_interior_cap_crop
 from modules.utils.inpaint_composite import normalize_edit_mask
 from modules.utils.inpainting_runtime import normalized_mask_refiner_settings
@@ -428,6 +429,42 @@ def _ctd_details(
         255,
         0,
     ).astype(np.uint8)
+    positive_claim_raw_mask = np.zeros(img.shape[:2], dtype=np.uint8)
+    positive_claim_runtime: dict[str, Any] = {
+        "status": "disabled",
+        "provider": "ctd_fixed1280_onnx",
+    }
+    has_detector_provenance = any(
+        str(getattr(block, "detector_origin", "") or "")
+        in {"direct_text", "bubble_text_rescue"}
+        for block in block_list
+    )
+    if bool(cfg.get("positive_text_evidence_enabled", True)) and has_detector_provenance:
+        try:
+            positive_provider = CTDPositiveClaimProvider(
+                device=str(cfg.get("ctd_device", "cuda") or "cuda"),
+                detect_size=int(cfg.get("positive_claim_detect_size", 1280) or 1280),
+                max_batch_size=int(
+                    cfg.get("ctd_det_rearrange_max_batches", 4) or 4
+                ),
+            )
+            positive_result = positive_provider.infer(img)
+            positive_claim_raw_mask = positive_result.raw_mask
+            positive_claim_runtime = {
+                "status": "completed",
+                "provider": "ctd_fixed1280_onnx",
+                "providers": list(positive_result.providers),
+                "detect_size": int(positive_result.detect_size),
+                "model_sha256": positive_result.model_sha256,
+                "model_opset": int(positive_result.model_opset),
+                "pixel_count": int(np.count_nonzero(positive_result.raw_mask)),
+            }
+        except Exception as exc:
+            positive_claim_runtime = {
+                "status": "failed",
+                "provider": "ctd_fixed1280_onnx",
+                "error_type": type(exc).__name__,
+            }
     protect_mask = build_protect_mask(
         img,
         block_list,
@@ -481,6 +518,8 @@ def _ctd_details(
 
     details = {
         "raw_mask": raw_mask,
+        "positive_claim_raw_mask": positive_claim_raw_mask,
+        "positive_claim_runtime": positive_claim_runtime,
         "refined_mask": refined_mask,
         "protect_mask": np.where(np.asarray(protect_mask) > 0, 255, 0).astype(np.uint8),
         "ctd_or_mask_pixel_count": int(np.count_nonzero(ctd_or_mask)),
@@ -568,6 +607,11 @@ def generate_mask(
         details = dict(legacy_details)
         empty_mask = np.zeros(img.shape[:2], dtype=np.uint8)
         details["raw_mask"] = empty_mask.copy()
+        details["positive_claim_raw_mask"] = empty_mask.copy()
+        details["positive_claim_runtime"] = {
+            "status": "unavailable",
+            "provider": "ctd_fixed1280_onnx",
+        }
         details["refined_mask"] = empty_mask.copy()
         details["protect_mask"] = empty_mask.copy()
         details["final_mask_pre_expand"] = empty_mask.copy()
