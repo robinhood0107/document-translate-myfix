@@ -17,6 +17,7 @@ from modules.utils.inpaint_cleanup import (
     fill_duplicate_bubble_inner_regions,
     refine_bubble_residue_inpaint,
 )
+from modules.utils.bubble_erase import ERASE_MODE_BUBBLE_LAMA_FALLBACK
 from modules.utils.mask_roi import resolve_block_ctd_roi
 from modules.utils.textblock import TextBlock
 
@@ -218,6 +219,29 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(filled[duplicate_mask == 0] != image[duplicate_mask == 0])), 0)
         self.assertIsNot(merged_stats, cleanup_stats)
 
+    def test_duplicate_bubble_inner_fill_fails_closed_without_samples(
+        self,
+    ) -> None:
+        image = np.full((32, 32, 3), 150, dtype=np.uint8)
+        duplicate_mask = np.full((32, 32), 255, dtype=np.uint8)
+        base_mask = np.zeros((32, 32), dtype=np.uint8)
+
+        filled, merged_mask, merged_stats = apply_duplicate_bubble_inner_fill(
+            image,
+            base_mask,
+            {"duplicate_bubble_inner_mask": duplicate_mask},
+            {},
+        )
+
+        np.testing.assert_array_equal(filled, image)
+        np.testing.assert_array_equal(merged_mask, base_mask)
+        fill_stats = merged_stats["duplicate_bubble_inner_fill"]
+        self.assertFalse(fill_stats["applied"])
+        self.assertEqual(
+            fill_stats["duplicate_bubble_inner_fill_backend"],
+            ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+        )
+
     def test_residue_cleanup_skips_text_free_blocks(self) -> None:
         image = np.zeros((24, 24, 3), dtype=np.uint8)
         mask = np.zeros((24, 24), dtype=np.uint8)
@@ -270,6 +294,44 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         self.assertGreater(stats["pass2_bubble_candidate_count"], 0)
         self.assertEqual(stats["pass2_text_free_candidate_count"], 0)
         self.assertEqual(stats["pass2_text_free_kept_count"], 0)
+
+    def test_residue_cleanup_does_not_merge_failed_fill_mask(self) -> None:
+        image = np.zeros((24, 24, 3), dtype=np.uint8)
+        mask = np.zeros((24, 24), dtype=np.uint8)
+        mask[2:8, 2:8] = 255
+        bubble = _bubble_block(
+            xyxy=[2, 2, 8, 8],
+            bubble_xyxy=[0, 0, 10, 10],
+        )
+
+        with (
+            mock.patch(
+                "modules.utils.inpaint_cleanup.detect_content_in_bbox",
+                return_value=[(2, 2, 4, 4)],
+            ),
+            mock.patch(
+                "modules.utils.inpaint_cleanup.fill_bubble_edit_mask",
+                side_effect=lambda input_image, _edit_mask: (
+                    input_image.copy(),
+                    ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+                ),
+            ),
+        ):
+            cleaned, merged_mask, stats = refine_bubble_residue_inpaint(
+                image,
+                mask,
+                [bubble],
+                None,
+                object(),
+            )
+
+        np.testing.assert_array_equal(cleaned, image)
+        np.testing.assert_array_equal(merged_mask, mask)
+        self.assertFalse(stats["applied"])
+        self.assertEqual(
+            stats["pass2_backend"],
+            ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+        )
 
 
 if __name__ == "__main__":
