@@ -71,6 +71,25 @@ def resolve_inpaint_text_xyxy(
     return tuple(anchor) if anchor is not None else None
 
 
+def resolve_source_lama_crop_xyxy(
+    block,
+    image_shape: tuple[int, int] | tuple[int, int, int],
+) -> tuple[int, int, int, int] | None:
+    """Resolve the immutable source anchor used by SourceLaMa block crops.
+
+    A valid text anchor is authoritative. Geometry-poor bubble fallbacks may
+    still use the bubble ROI as a context envelope; edit ownership continues to
+    come exclusively from the exact source mask.
+    """
+
+    text_anchor = resolve_inpaint_text_xyxy(block, image_shape)
+    if text_anchor is not None:
+        return text_anchor
+    if str(getattr(block, "text_class", "") or "") == "text_bubble":
+        return normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+    return None
+
+
 def _expand_bbox(
     text_xyxy,
     image_shape: tuple[int, int] | tuple[int, int, int],
