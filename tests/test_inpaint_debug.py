@@ -301,6 +301,8 @@ class InpaintDebugTests(unittest.TestCase):
             translation="",
             source_lang="ja",
             inpaint_bboxes=None,
+            _erase_mode="bubble_skipped",
+            _erase_skipped_reason="microtexture_source_seed_unavailable",
         )
         detector = SimpleNamespace(
             detect=lambda _image: [block],
@@ -443,12 +445,18 @@ class InpaintDebugTests(unittest.TestCase):
                 prewrite_mask_pixel_sha = module.pixel_sha256(mask)
 
         self.assertTrue(run_lama.call_args.kwargs["return_diagnostics"])
+        self.assertIs(run_lama.call_args.kwargs["check_need_inpaint"], True)
         duplicate_fill.assert_called_once()
         self.assertEqual(record["hd_strategy"], "Original")
         self.assertEqual(record["refiner_device"], "cuda")
         self.assertEqual(record["inpaint_runtime_inference_call_count"], 1)
         self.assertEqual(record["inpaint_runtime_cpu_fallback_count"], 0)
         self.assertEqual(record["residue_pass_truncated_block_count"], 2)
+        self.assertEqual(record["erase_mode_distribution"], {"bubble_skipped": 1})
+        self.assertEqual(
+            record["erase_skipped_reason_distribution"],
+            {"microtexture_source_seed_unavailable": 1},
+        )
         self.assertEqual(record["peak_vram_allocated_mb"], 123.0)
         self.assertEqual(record["peak_vram_reserved_mb"], 234.0)
         self.assertTrue(record["peak_vram_metrics_available"])
@@ -499,9 +507,10 @@ class InpaintDebugTests(unittest.TestCase):
             _legacy_mask_pixel_count=4,
             _rescue_mask_pixel_count=2,
             _final_mask_pixel_count=6,
-            _erase_mode="bubble_flat_fill",
+            _erase_mode="bubble_skipped",
             _erase_edit_pixel_count=12,
             _erase_protect_pixel_count=3,
+            _erase_skipped_reason="microtexture_source_seed_unavailable",
             ui_panel_mode="preserve_original",
             ui_panel_preview_path="previews/page_block_0.png",
             mask_decision="review",
@@ -595,9 +604,13 @@ class InpaintDebugTests(unittest.TestCase):
             metadata["blocks"][0]["render_normalization_reasons"],
             ["quote-to-ascii", "heart-dropped"],
         )
-        self.assertEqual(metadata["blocks"][0]["erase_mode"], "bubble_flat_fill")
+        self.assertEqual(metadata["blocks"][0]["erase_mode"], "bubble_skipped")
         self.assertEqual(metadata["blocks"][0]["erase_edit_pixel_count"], 12)
         self.assertEqual(metadata["blocks"][0]["erase_protect_pixel_count"], 3)
+        self.assertEqual(
+            metadata["blocks"][0]["erase_skipped_reason"],
+            "microtexture_source_seed_unavailable",
+        )
         self.assertTrue(metadata["duplicate_bubble_inner_fill_applied"])
         self.assertEqual(metadata["duplicate_bubble_inner_fill_pixel_count"], 25)
         self.assertEqual(metadata["duplicate_bubble_inner_fill_backend"], "bubble_flat_fill")
