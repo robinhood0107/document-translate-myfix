@@ -11,9 +11,13 @@ import numpy as np
 import pytest
 
 from benchmarking.inpaint_detector_bakeoff.evidence_ledger import (
+    _validate_accounted_artifact_once,
+    _scope_manifest_binding_cached,
+    artifact_declared_variants,
     _validate_runtime_evidence_ledger,
     accounted_evidence_from_artifact,
     blocked_asset_evidence,
+    invalid_with_reason_evidence,
     merge_method_evidence,
     registry_evidence_adapter_gaps,
     scope_manifest_binding,
@@ -31,6 +35,7 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
 )
 from scripts.build_inpaint_method_closure_v4 import build_closure
 from scripts.update_inpaint_method_evidence_v4 import update_evidence
+from scripts.batch_update_inpaint_method_evidence_v4 import main as batch_update_main
 from scripts.benchmark_inpaint_factorized_v3 import (
     aggregate_factorized_page_statistics,
     _declared_combinations,
@@ -43,6 +48,7 @@ from scripts.benchmark_inpaint_detector_fusions_v4 import (
 )
 from scripts.benchmark_inpaint_semantic_policies_v4 import (
     aggregate_semantic_page_statistics,
+    score_semantic_policies,
 )
 from modules.utils.download import ModelDownloader, ModelID
 
@@ -302,6 +308,8 @@ def _factorized_artifact(
         "protected_structure_overlap_pixel_count": 0,
         "protected_structure_changed_pixel_count": 0,
         "preserve_edit_overlap_pixel_count": 0,
+        "ownership_leak_pixel_count": 0,
+        "corner_edit_overlap_pixel_count": 0,
         "ambiguous_structure_overlap_pixel_count": 0,
         "ambiguous_structure_changed_pixel_count": 0,
         "outside_final_changed_pixel_count": 0,
@@ -428,6 +436,7 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
             canonical = page["canonical_statistics"]
             edit = np.zeros((8, 10), np.uint8)
             edit[2:4, 3:5] = 255
+            effective_ownership = np.full((8, 10), 255, np.uint8)
             final = edit.copy()
             candidate = np.full((8, 10, 3), 200, np.uint8)
             for role, value, field in (
@@ -435,6 +444,11 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
                     "detector_seed_mask",
                     edit,
                     "detector_seed_mask_pixel_sha256",
+                ),
+                (
+                    "effective_ownership_mask",
+                    effective_ownership,
+                    "effective_ownership_mask_pixel_sha256",
                 ),
                 ("edit_mask", edit, "output_edit_mask_pixel_sha256"),
                 ("final_mask", final, "final_mask_pixel_sha256"),
@@ -503,7 +517,7 @@ def _attach_factorized_output_inventory(artifact: Path) -> Path:
     records.sort(key=lambda row: (row["run_id"], row["page_id"], row["role"]))
     canonical_inventory = {"records": records, "complete_run_ids": complete}
     inventory = {
-        "schema_version": "inpaint-factorized-output-artifact-inventory-v1",
+        "schema_version": "inpaint-factorized-output-artifact-inventory-v2",
         **canonical_inventory,
         "inventory_sha256": hashlib.sha256(
             json.dumps(
@@ -1131,6 +1145,59 @@ def test_factorized_artifact_rejects_truncated_ledger_pages_and_counts(tmp_path:
         )
 
 
+def test_factorized_artifact_counts_logical_reuse_variant(tmp_path: Path) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _factorized_artifact(tmp_path, manifest)
+    matrix_path = tmp_path / "matrix.json"
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    reused_selection = dict(matrix["controls"])
+    reused_selection["detector"] = "manga109_text"
+    matrix["axes"]["detector"].append("manga109_text")
+    matrix["families"]["detector"]["manga109_text"] = {}
+    matrix["factorized"] = False
+    matrix["explicit_combinations"] = [reused_selection]
+    _write_json(matrix_path, matrix)
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    executed = payload["closure_ledger"][0]
+    logical_id = "manga109_text__raw__current_lama__control_text_prior__control_r0__pr2_validated"
+    payload["closure_ledger"].append(
+        {
+            "logical_id": logical_id,
+            "selection": reused_selection,
+            "closure_state": "reused_by_sha",
+            "reason": "",
+            "content_sha256": executed["content_sha256"],
+            "reused_from": executed["logical_id"],
+        }
+    )
+    payload["matrix_sha256"] = _sha(matrix_path)
+    payload["logical_combination_count"] = 2
+    payload["logical_inventory_sha256"] = hashlib.sha256(
+        json.dumps(
+            [
+                {"logical_id": row["logical_id"], "selection": row["selection"]}
+                for row in payload["closure_ledger"]
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    _write_json(artifact, payload)
+
+    rows = accounted_evidence_from_artifact(
+        _requirements("manga109-text", ("raw",)),
+        artifact_path=artifact,
+        scope_manifest_path=manifest,
+        family_id="manga109-text",
+        variant_ids=frozenset({"raw"}),
+        evaluation_scope="e1",
+        upstream_contract_path=matrix_path,
+    )
+    assert rows[0]["variant_id"] == "raw"
+    assert rows[0]["disposition"] == "dominated"
+
+
 def test_oracle_run_cannot_be_upgraded_to_pareto(tmp_path: Path) -> None:
     manifest = _scope_manifest(tmp_path)
     artifact = _factorized_artifact(
@@ -1141,6 +1208,41 @@ def test_oracle_run_cannot_be_upgraded_to_pareto(tmp_path: Path) -> None:
             _requirements(), artifact_path=artifact, scope_manifest_path=manifest,
             family_id="current-ctd", variant_ids=frozenset({"raw"}), evaluation_scope="e1"
             , upstream_contract_path=tmp_path / "matrix.json"
+        )
+
+
+def test_oracle_family_complete_is_not_rejected_by_product_hard_gate(
+    tmp_path: Path,
+) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _factorized_artifact(
+        tmp_path, manifest, status="family_complete", oracle_only=True
+    )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["pages"][payload["runs"][0]["run_id"]][0][
+        "canonical_statistics"
+    ]["required_skip"] = True
+    page = payload["pages"][payload["runs"][0]["run_id"]][0]
+    canonical = page["canonical_statistics"]
+    page["canonical_statistics_sha256"] = hashlib.sha256(
+        json.dumps(
+            canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    payload["runs"][0]["metrics"] = aggregate_factorized_page_statistics(
+        payload["pages"][payload["runs"][0]["run_id"]]
+    )
+    _write_json(artifact, payload)
+
+    with pytest.raises(ValueError, match="output artifact inventory"):
+        accounted_evidence_from_artifact(
+            _requirements(),
+            artifact_path=artifact,
+            scope_manifest_path=manifest,
+            family_id="current-ctd",
+            variant_ids=frozenset({"raw"}),
+            evaluation_scope="e1",
+            upstream_contract_path=tmp_path / "matrix.json",
         )
 
 
@@ -1262,6 +1364,75 @@ def test_factorized_finalist_reopens_sealed_candidate_and_mask_bytes(
     )
     (artifact.parent / candidate["relative_path"]).write_bytes(b"tampered")
     with pytest.raises(ValueError, match="output artifact file SHA differs"):
+        accounted_evidence_from_artifact(
+            _requirements(),
+            artifact_path=artifact,
+            scope_manifest_path=manifest,
+            family_id="current-ctd",
+            variant_ids=frozenset({"raw"}),
+            evaluation_scope="e1",
+            upstream_contract_path=tmp_path / "matrix.json",
+        )
+
+
+def test_factorized_effective_ownership_must_match_upstream_matrix(
+    tmp_path: Path,
+) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _attach_factorized_output_inventory(
+        _factorized_artifact(tmp_path, manifest, status="pareto")
+    )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    binding = payload["output_artifact_inventory"]
+    inventory_path = artifact.parent / binding["relative_path"]
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    ownership = next(
+        row
+        for row in inventory["records"]
+        if row["role"] == "effective_ownership_mask"
+    )
+    ownership_path = artifact.parent / ownership["relative_path"]
+    assert cv2.imwrite(str(ownership_path), np.zeros((8, 10), np.uint8))
+    decoded = cv2.imread(str(ownership_path), cv2.IMREAD_GRAYSCALE)
+    assert decoded is not None
+    pixel_sha = hashlib.sha256(np.ascontiguousarray(decoded).tobytes()).hexdigest()
+    ownership.update(
+        {
+            "artifact_sha256": _sha(ownership_path),
+            "pixel_sha256": pixel_sha,
+            "foreground_pixel_count": 0,
+        }
+    )
+    run_id = payload["runs"][0]["run_id"]
+    canonical = payload["pages"][run_id][0]["canonical_statistics"]
+    canonical["effective_ownership_mask_pixel_sha256"] = pixel_sha
+    payload["pages"][run_id][0]["canonical_statistics_sha256"] = hashlib.sha256(
+        json.dumps(
+            canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    inventory_canonical = {
+        "records": inventory["records"],
+        "complete_run_ids": inventory["complete_run_ids"],
+    }
+    inventory["inventory_sha256"] = hashlib.sha256(
+        json.dumps(
+            inventory_canonical,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    _write_json(inventory_path, inventory)
+    binding.update(
+        {
+            "artifact_sha256": _sha(inventory_path),
+            "inventory_sha256": inventory["inventory_sha256"],
+        }
+    )
+    _write_json(artifact, payload)
+
+    with pytest.raises(ValueError, match="effective ownership.*upstream matrix"):
         accounted_evidence_from_artifact(
             _requirements(),
             artifact_path=artifact,
@@ -1621,6 +1792,18 @@ def test_fusion_finalist_reopens_sealed_edit_mask_bytes(tmp_path: Path) -> None:
         expected_fusion_candidate_ids=frozenset({"manga109_text"}),
     )
     assert rows[0]["disposition"] == "family_complete"
+
+    scoped_rows = accounted_evidence_from_artifact(
+        requirements,
+        artifact_path=artifact,
+        scope_manifest_path=manifest,
+        family_id="manga109-text",
+        variant_ids=frozenset({"raw"}),
+        evaluation_scope="e1",
+        upstream_contract_path=tmp_path / "fusion-spec.json",
+        expected_fusion_candidate_ids=None,
+    )
+    assert scoped_rows[0]["variant_id"] == "raw"
 
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     binding = payload["output_artifact_inventory"]
@@ -2004,6 +2187,7 @@ def test_semantic_disposition_is_artifact_derived_and_blocked_needs_probe(tmp_pa
         "current_default",
         "detector_explicit_role",
         "ocr_semantic_hint",
+        "ocr_provenance_verifier",
         "explicit_role_consensus",
         "human_oracle",
     )
@@ -2029,16 +2213,20 @@ def test_semantic_disposition_is_artifact_derived_and_blocked_needs_probe(tmp_pa
             "available": True,
             "reason": "",
         }
-        metrics = aggregate_semantic_page_statistics(
-            [{"page_id": "p", "decisions": [decision]}]
-        )
+        page = {
+            "page_id": "p",
+            "no_edit": False,
+            "decisions": [decision],
+            "region_decisions": [],
+        }
+        metrics = aggregate_semantic_page_statistics([page])
         return {
             "policy_id": policy_id,
             "oracle_only": policy_id == "human_oracle",
             "status": "dominated" if is_current else "family_complete",
             "closure_reason": "semantic_hard_gate_failed" if is_current else "",
             "metrics": metrics,
-            "page": {"page_id": "p", "decisions": [decision]},
+            "page": page,
         }
 
     artifact = _write_json(
@@ -2094,6 +2282,7 @@ def test_minimal_semantic_metrics_cannot_claim_pareto(tmp_path: Path) -> None:
                             "current_default",
                             "detector_explicit_role",
                             "ocr_semantic_hint",
+                            "ocr_provenance_verifier",
                             "explicit_role_consensus",
                             "human_oracle",
                         )
@@ -2219,6 +2408,93 @@ def test_blocked_asset_rejects_empty_successful_or_unsupported_checks(
         )
 
 
+def test_invalid_evidence_binds_parent_semantic_gate_facts(tmp_path: Path) -> None:
+    manifest = _scope_manifest(tmp_path)
+    parent = _write_json(
+        tmp_path / "semantic-results.json",
+        score_semantic_policies(manifest),
+    )
+    requirements = (
+        MethodVariantRequirement("router", "router", "R4", "e1"),
+    )
+    rows = invalid_with_reason_evidence(
+        requirements,
+        scope_manifest_path=manifest,
+        parent_artifact_path=parent,
+        parent_record_kind="policy",
+        parent_record_id="ocr_provenance_verifier",
+        reason_code="upstream_semantic_gate_failed",
+        family_id="router",
+        variant_ids=frozenset({"R4"}),
+        evaluation_scope="e1",
+    )
+    assert rows[0]["closure_state"] == "invalid_with_reason"
+    assert rows[0]["disposition"] == "dominated"
+    assert rows[0]["artifact_sha256"] == _sha(parent)
+    assert rows[0]["invalid_parent_record_id"] == "ocr_provenance_verifier"
+    assert len(str(rows[0]["invalid_gate_facts_sha256"])) == 64
+    MethodVariantEvidence(**{
+        key: value
+        for key, value in rows[0].items()
+        if key not in {"artifact_schema_version", "artifact_name"}
+    })
+
+
+def test_invalid_evidence_rejects_passing_or_resealed_parent_facts(
+    tmp_path: Path,
+) -> None:
+    manifest = _scope_manifest(tmp_path)
+    parent = _fusion_artifact(tmp_path, manifest)
+    payload = json.loads(parent.read_text(encoding="utf-8"))
+    run = payload["runs"][0]
+    run_id = run["run_id"]
+    run.update(
+        {
+            "seed_eligible": False,
+            "product_mask_hard_pass": False,
+            "seed_admitted": True,
+            "seed_admission_kind": "best_effort",
+        }
+    )
+    payload["seed_admission"] = {
+        "runtime_detector_limit": 2,
+        "selected_run_ids": [run_id],
+        "strict_seed_available": False,
+    }
+    _write_json(parent, payload)
+    requirements = (
+        MethodVariantRequirement("router", "router", "R4", "e1"),
+    )
+    with pytest.raises(ValueError, match="selected seed run"):
+        invalid_with_reason_evidence(
+            requirements,
+            scope_manifest_path=manifest,
+            parent_artifact_path=parent,
+            parent_record_kind="run",
+            parent_record_id=run_id,
+            reason_code="upstream_seed_not_admitted",
+            family_id="router",
+            variant_ids=frozenset({"R4"}),
+            evaluation_scope="e1",
+        )
+    payload = json.loads(parent.read_text(encoding="utf-8"))
+    payload["runs"][0]["status"] = "pareto"
+    payload["runs"][0]["closure_reason"] = ""
+    _write_json(parent, payload)
+    with pytest.raises(ValueError, match="declared status differs"):
+        invalid_with_reason_evidence(
+            requirements,
+            scope_manifest_path=manifest,
+            parent_artifact_path=parent,
+            parent_record_kind="run",
+            parent_record_id=run_id,
+            reason_code="upstream_product_mask_gate_failed",
+            family_id="router",
+            variant_ids=frozenset({"R4"}),
+            evaluation_scope="e1",
+        )
+
+
 def test_merge_rejects_duplicate_and_scope_rebinding_even_on_replace() -> None:
     row = {"family_id": "x", "role": "seed", "variant_id": "raw",
            "evaluation_scope": "e1", "scope_manifest_sha256": SHA_A}
@@ -2252,6 +2528,92 @@ def test_update_binds_scope_once_and_rejects_mixed_manifest_revision(tmp_path: P
             variant_ids=frozenset({"raw"}), evaluation_scope="e1", allow_replace=True
             , upstream_contract_path=tmp_path / "matrix.json"
         )
+
+
+def test_batch_update_validates_one_shared_artifact_once(tmp_path: Path) -> None:
+    manifest = _scope_manifest(tmp_path)
+    artifact = _factorized_artifact(tmp_path, manifest)
+    registry = _write_json(
+        tmp_path / "registry.json",
+        {
+            "schema_version": "inpaint-method-family-registry-v4",
+            "families": [
+                {
+                    "family_id": "current-ctd",
+                    "role": "seed",
+                    "evaluation_scopes": ["e1"],
+                    "variants": ["raw"],
+                },
+                {
+                    "family_id": "ownership",
+                    "role": "ownership",
+                    "evaluation_scopes": ["e1"],
+                    "variants": ["block_region"],
+                },
+            ],
+        },
+    )
+    evidence = tmp_path / "evidence.json"
+    matrix = tmp_path / "matrix.json"
+    plan = _write_json(
+        tmp_path / "batch.json",
+        {
+            "schema_version": "inpaint-method-evidence-batch-plan-v1",
+            "operations": [
+                {
+                    "artifact": str(artifact),
+                    "scope_manifest": str(manifest),
+                    "family": family,
+                    "variants": variants,
+                    "scope": "e1",
+                    "upstream_contract": str(matrix),
+                }
+                for family, variants in (
+                    ("current-ctd", ["raw"]),
+                    ("ownership", ["block_region"]),
+                )
+            ],
+        },
+    )
+    _validate_accounted_artifact_once.cache_clear()
+    _scope_manifest_binding_cached.cache_clear()
+    assert batch_update_main(
+        [
+            "--registry",
+            str(registry),
+            "--evidence",
+            str(evidence),
+            "--plan",
+            str(plan),
+        ]
+    ) == 0
+    cache = _validate_accounted_artifact_once.cache_info()
+    assert cache.misses == 1
+    assert cache.hits == 1
+    scope_cache = _scope_manifest_binding_cached.cache_info()
+    assert scope_cache.misses == 1
+    assert scope_cache.hits >= 3
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert len(payload["evidence"]) == 2
+
+
+def test_fusion_single_runs_prove_finetune_and_dbnet_variants() -> None:
+    payload = {
+        "schema_version": "inpaint-detector-fusion-results-v4",
+        "runs": [
+            {"fusion": "single", "primary": "finetune_e6_raw"},
+            {"fusion": "single", "primary": "finetune_e6_native3"},
+            {"fusion": "single", "primary": "easyocr_dbnet18_raw"},
+            {"fusion": "single", "primary": "easyocr_dbnet18_refined"},
+            {"fusion": "single", "primary": "easyocr_dbnet18_native3"},
+        ],
+    }
+    assert artifact_declared_variants(
+        payload, "ctd-synthetic-finetune"
+    ) == frozenset({"raw", "native3"})
+    assert artifact_declared_variants(
+        payload, "easyocr-dbnet18"
+    ) == frozenset({"raw", "refined", "native3"})
 
 
 def test_build_closure_records_input_hashes_and_scope_binding(tmp_path: Path) -> None:
@@ -2387,20 +2749,45 @@ def test_generic_role_result_cannot_self_attest_unverified_upstream(
         )
 
 
-def test_registry_reports_unimplemented_generic_role_adapters_as_gaps() -> None:
+def test_factorized_artifact_proves_exact_handoff_and_named_ownership_roles() -> None:
+    selection = {
+        "detector": "control_source_edit",
+        "ownership": "rtdetr_pixel",
+        "silhouette": "control_empty_silhouette",
+        "router": "control_r0",
+        "expansion": "raw",
+        "fill": "mask_only",
+    }
+    payload = {
+        "schema_version": "inpaint-factorized-results-v3",
+        "runs": [{
+            "run_id": "run",
+            "selection": selection,
+            "ownership_id": "rtdetr_pixel",
+        }],
+        "closure_ledger": [{
+            "logical_id": "run",
+            "selection": selection,
+            "closure_state": "executed",
+        }],
+    }
+    assert artifact_declared_variants(payload, "ownership") == frozenset(
+        {"rtdetr_pixel"}
+    )
+    assert artifact_declared_variants(payload, "exact-protection") == frozenset(
+        {"pr4_exact"}
+    )
+    assert artifact_declared_variants(payload, "exact-composite") == frozenset(
+        {"immutable_original_exact_mask"}
+    )
+
+
+def test_registry_has_evidence_adapters_for_every_registered_role() -> None:
     registry = json.loads(
         (ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "method_registry_v4.json").read_text(encoding="utf-8")
     )
     gaps = registry_evidence_adapter_gaps(requirements_from_registry(registry))
-    assert {
-        (row["family_id"], row["variant_id"])
-        for row in gaps
-    } == {
-        ("ownership", "rtdetr_pixel"),
-        ("ownership", "c13_reconciliation"),
-        ("exact-protection", "pr4_exact"),
-        ("exact-composite", "immutable_original_exact_mask"),
-    }
+    assert gaps == ()
 
 
 def test_scope_manifest_requires_canonical_identity(tmp_path: Path) -> None:

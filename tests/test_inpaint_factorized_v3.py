@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import time
 
 import cv2
@@ -43,6 +45,7 @@ from benchmarking.inpaint_detector_bakeoff.stage2 import (
     assert_complete_closure_ledger,
     build_combination_closure_ledger,
     build_factorized_matrix,
+    evaluate_relative_product_gate,
     fill_factorized_mask,
     reconstruction_error,
     select_pareto_records,
@@ -71,6 +74,26 @@ from scripts.benchmark_inpaint_factorized_v3 import (
 )
 from scripts.build_inpaint_factorized_manifest_v3 import build_manifest
 from scripts.build_inpaint_factorized_manifest_v4 import build_manifest as build_manifest_v4
+from scripts.attach_inpaint_relative_baseline_v32 import (
+    main as attach_relative_baseline_main,
+)
+from scripts.seal_inpaint_product_baseline_v32 import seal_product_baseline
+from scripts.build_inpaint_product_eval_manifest_v32 import (
+    _canonical_manifest_sha256,
+    build_product_eval_manifest,
+)
+from scripts.build_inpaint_relative_matrix_v32 import build_relative_matrix
+from scripts.build_inpaint_minimal_closure_matrix_v32 import (
+    build_minimal_closure_matrix,
+)
+from scripts.adjudicate_inpaint_balanced_preflight_v32 import (
+    adjudicate_balanced_preflight,
+)
+from scripts.adjudicate_inpaint_fill_preflight_v32 import (
+    adjudicate_fill_preflight,
+)
+from scripts.adjudicate_inpaint_v32_final import adjudicate_final_selection
+from scripts.adjudicate_inpaint_relative_v32 import adjudicate_relative_product
 from scripts.build_inpaint_development_source_index_v4 import build_source_index
 from scripts.build_inpaint_independent_target_review_v4 import (
     build_independent_target_review,
@@ -95,12 +118,14 @@ from scripts.build_inpaint_factorized_matrix_v3 import build_matrix
 from scripts.build_inpaint_fill_synthetic_v3 import build_synthetic_manifest
 from scripts.build_inpaint_fill_oracle_matrix_v3 import build_fill_matrix
 from scripts.build_inpaint_v3_contact_sheet import build_contact_sheet
+from scripts.build_inpaint_v32_three_case_sheet import build_three_case_sheet
 from scripts.export_inpaint_silhouette_router_v3 import export_candidates
 from scripts.merge_inpaint_factorized_v3 import merge_results
 from scripts.export_inpaint_silhouette_consensus_v4 import consensus_masks
 from scripts.benchmark_inpaint_detector_fusions_v4 import (
     _logical_runs as detector_fusion_runs,
     run_fusion_matrix,
+    select_seed_admission_run_ids,
 )
 from scripts.benchmark_inpaint_semantic_policies_v4 import score_semantic_policies
 from scripts.audit_inpaint_detector_ceiling_v4 import audit_detector_ceiling
@@ -112,6 +137,244 @@ from scripts.build_inpaint_generalization_synthetic_v4 import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _relative_metrics(
+    *,
+    coverage: float,
+    residue: float,
+    mask_sha: str,
+) -> dict[str, object]:
+    return {
+        "aggregate_target_coverage": coverage,
+        "aggregate_residue_score": residue,
+        "protected_structure_overlap": 0,
+        "protected_structure_changed": 0,
+        "ambiguous_structure_overlap": 0,
+        "ambiguous_structure_changed": 0,
+        "preserve_edit_overlap": 0,
+        "ownership_leak_pixel_count": 0,
+        "corner_edit_overlap_pixel_count": 0,
+        "outside_final_changed": 0,
+        "broad_route_false_positive": 0,
+        "no_edit_false_edit": 0,
+        "required_skip_count": 0,
+        "cpu_fallback_count": 0,
+        "runtime_telemetry_complete": True,
+        "maximum_positive_lama_inference_per_page": 0,
+        "positive_lama_inference_count": 0,
+        "lama_runtime_provider": "",
+        "lama_runtime_precision": "",
+        "target_instance_seed_recall": 0.99,
+        "missed_target_instance_count": 1,
+        "output_mask_set_sha256": mask_sha,
+    }
+
+
+def _relative_pages(
+    *,
+    first: float,
+    second: float,
+    residue: float,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "page_id": "page-001",
+            "residue_score": residue,
+            "target_instance_edit_scores": [
+                {"instance_id": "first", "coverage": first},
+                {"instance_id": "second", "coverage": second},
+            ],
+        }
+    ]
+
+
+def test_relative_product_gate_admits_safe_best_effort_improvement() -> None:
+    result = evaluate_relative_product_gate(
+        baseline_metrics=_relative_metrics(
+            coverage=0.90, residue=0.50, mask_sha="a" * 64
+        ),
+        candidate_metrics=_relative_metrics(
+            coverage=0.91, residue=0.40, mask_sha="b" * 64
+        ),
+        baseline_pages=_relative_pages(first=0.99, second=0.50, residue=0.50),
+        candidate_pages=_relative_pages(first=0.99, second=0.52, residue=0.40),
+        candidate_kind="balanced",
+    )
+
+    assert result["relative_product_pass"] is True
+    assert result["strict_seed_eligible"] is False
+    assert result["candidate_98_instance_count"] == 1
+    assert result["gate_failures"] == []
+
+
+def test_relative_product_gate_keeps_destructive_safety_absolute() -> None:
+    candidate = _relative_metrics(
+        coverage=0.91, residue=0.40, mask_sha="b" * 64
+    )
+    candidate["preserve_edit_overlap"] = 1
+
+    result = evaluate_relative_product_gate(
+        baseline_metrics=_relative_metrics(
+            coverage=0.90, residue=0.50, mask_sha="a" * 64
+        ),
+        candidate_metrics=candidate,
+        baseline_pages=_relative_pages(first=0.99, second=0.50, residue=0.50),
+        candidate_pages=_relative_pages(first=0.99, second=0.52, residue=0.40),
+        candidate_kind="balanced",
+    )
+
+    assert result["relative_product_pass"] is False
+    assert "safety_nonzero:preserve_edit_overlap" in result["gate_failures"]
+
+
+def test_relative_product_gate_rejects_fractional_counts_and_non_bf16_lama() -> None:
+    baseline = _relative_metrics(coverage=0.90, residue=0.50, mask_sha="a" * 64)
+    pages_before = _relative_pages(first=0.99, second=0.50, residue=0.50)
+    pages_after = _relative_pages(first=0.99, second=0.52, residue=0.40)
+    fractional = _relative_metrics(
+        coverage=0.91,
+        residue=0.40,
+        mask_sha="b" * 64,
+    )
+    fractional["preserve_edit_overlap"] = 0.5
+    fractional["maximum_positive_lama_inference_per_page"] = 0.5
+    fractional["positive_lama_inference_count"] = 0.5
+
+    rejected = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=fractional,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="balanced",
+    )
+
+    assert "safety_nonzero:preserve_edit_overlap" in rejected["gate_failures"]
+    assert "positive_lama_page_call_limit" in rejected["gate_failures"]
+    assert "positive_lama_inference_count_invalid" in rejected["gate_failures"]
+
+    wrong_precision = dict(fractional)
+    wrong_precision["preserve_edit_overlap"] = 0
+    wrong_precision["maximum_positive_lama_inference_per_page"] = 1
+    wrong_precision["positive_lama_inference_count"] = 1
+    wrong_precision["lama_runtime_provider"] = "cuda:0"
+    wrong_precision["lama_runtime_precision"] = "fp32"
+    rejected = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=wrong_precision,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="balanced",
+    )
+
+    assert "positive_lama_not_cuda" in rejected["gate_failures"]
+
+
+def test_relative_product_gate_requires_fill_only_mask_identity_and_lower_residue() -> None:
+    baseline = _relative_metrics(coverage=0.90, residue=0.50, mask_sha="a" * 64)
+    candidate = _relative_metrics(coverage=0.90, residue=0.40, mask_sha="a" * 64)
+    pages_before = _relative_pages(first=0.99, second=0.50, residue=0.50)
+    pages_after = _relative_pages(first=0.99, second=0.50, residue=0.40)
+
+    accepted = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=candidate,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="fill_only",
+    )
+    assert accepted["relative_product_pass"] is True
+
+    candidate["output_mask_set_sha256"] = "b" * 64
+    rejected = evaluate_relative_product_gate(
+        baseline_metrics=baseline,
+        candidate_metrics=candidate,
+        baseline_pages=pages_before,
+        candidate_pages=pages_after,
+        candidate_kind="fill_only",
+    )
+    assert rejected["relative_product_pass"] is False
+    assert "fill_only_edit_mask_changed" in rejected["gate_failures"]
+
+
+def test_balanced_relative_adjudication_requires_admitted_preflight(
+    tmp_path: Path,
+) -> None:
+    manifest_sha = "c" * 64
+
+    def _result(path: Path, run_id: str, *, improved: bool) -> Path:
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "inpaint-factorized-results-v3",
+                    "manifest_sha256": manifest_sha,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "selection": {
+                                "detector": "best-fusion",
+                                "router": "R0",
+                                "fill": "conditional_refill_existing",
+                            },
+                            "metrics": _relative_metrics(
+                                coverage=0.91 if improved else 0.90,
+                                residue=0.40 if improved else 0.50,
+                                mask_sha=("b" if improved else "a") * 64,
+                            ),
+                        }
+                    ],
+                    "pages": {
+                        run_id: _relative_pages(
+                            first=0.99,
+                            second=0.52 if improved else 0.50,
+                            residue=0.40 if improved else 0.50,
+                        )
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    baseline = _result(tmp_path / "baseline.json", "b0", improved=False)
+    candidate = _result(tmp_path / "candidate.json", "b2", improved=True)
+    with pytest.raises(ValueError, match="requires a sealed preflight"):
+        adjudicate_relative_product(
+            baseline_path=baseline,
+            baseline_run_id="b0",
+            candidate_path=candidate,
+            candidate_run_id="b2",
+            candidate_kind="balanced",
+        )
+
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-balanced-preflight-adjudication-v32",
+                "manifest_sha256": manifest_sha,
+                "semantic_provider": "ocr_provenance_verifier",
+                "seed_admitted": True,
+                "balanced_candidate_admitted": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = adjudicate_relative_product(
+        baseline_path=baseline,
+        baseline_run_id="b0",
+        candidate_path=candidate,
+        candidate_run_id="b2",
+        candidate_kind="balanced",
+        balanced_preflight_path=preflight,
+    )
+
+    assert result["relative_product_pass"] is True
+    assert result["seed_admitted"] is True
+    assert result["provenance"]["semantic_provider"] == "ocr_provenance_verifier"
+    assert result["balanced_preflight_sha256"] == hashlib.sha256(
+        preflight.read_bytes()
+    ).hexdigest()
 
 
 def _write_image(path: Path, image: np.ndarray) -> str:
@@ -305,8 +568,10 @@ def _write_strict_source_manifest(
                 else ambiguous_union
             )
             destination[mask > 0] = 255
-        target_path = _write_image(
-            path.parent / f"{page_id}-target.png", required_union
+        target_path = (
+            _write_image(path.parent / f"{page_id}-target.png", required_union)
+            if np.any(required_union)
+            else None
         )
         preserve_path = _write_image(
             path.parent / f"{page_id}-preserve.png", preserve_union
@@ -442,6 +707,587 @@ def test_v4_runners_reject_tampered_source_artifact_before_outputs(
     assert not (tmp_path / "must-not-exist").exists()
 
 
+def test_relative_baseline_attachment_preserves_frozen_annotations(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source-manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "regions": [
+                    {"region_id": "r", "proposal": {"text_class": "text_bubble"}}
+                ],
+                "target_instances": [
+                    {
+                        "instance_id": "i",
+                        "region_id": "r",
+                        "semantic_role": "dialogue_bubble",
+                        "processing_action": "translate_inpaint",
+                        "priority": "required",
+                    }
+                ],
+            }
+        ]
+    }
+    _write_strict_source_manifest(source_manifest, payload)
+    source_page = payload["pages"][0]  # type: ignore[index]
+    source_path = Path(str(source_page["path"]))  # type: ignore[index]
+    source_image = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
+    assert source_image is not None
+    corpus_dir = tmp_path / "corpus"
+    (corpus_dir / "cleaned_images").mkdir(parents=True)
+    (corpus_dir / "final_masks").mkdir(parents=True)
+    baseline_image = corpus_dir / "cleaned_images" / "p_cleaned.png"
+    baseline_mask = corpus_dir / "final_masks" / "p_final_mask.png"
+    assert cv2.imwrite(str(baseline_image), source_image)
+    edit = np.zeros(source_image.shape[:2], np.uint8)
+    edit[2:4, 2:4] = 255
+    assert cv2.imwrite(str(baseline_mask), edit)
+    metrics_pages = tmp_path / "pages.jsonl"
+    metrics_pages.write_text(
+        json.dumps(
+            {
+                "page_id": "p",
+                "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                "cleaned_sha256": hashlib.sha256(baseline_image.read_bytes()).hexdigest(),
+                "final_mask_sha256": hashlib.sha256(baseline_mask.read_bytes()).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    baseline_manifest = tmp_path / "baseline-manifest.json"
+    baseline_manifest.write_text(
+        json.dumps(
+            seal_product_baseline(
+                source_manifest_path=source_manifest,
+                corpus_artifact_dir=corpus_dir,
+                metrics_pages_path=metrics_pages,
+                product_commit="a" * 40,
+            ),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "relative-manifest.json"
+    assert attach_relative_baseline_main(
+        [
+            "--source-manifest",
+            str(source_manifest),
+            "--baseline-manifest",
+            str(baseline_manifest),
+            "--output",
+            str(output),
+        ]
+    ) == 0
+    attached = json.loads(output.read_text(encoding="utf-8"))
+    attached_page = attached["pages"][0]
+    assert attached_page["target_instances"] == source_page["target_instances"]
+    assert attached_page["baseline"] == str(baseline_image.resolve())
+    assert attached_page["baseline_mask"] == str(baseline_mask.resolve())
+    assert attached_page["existing_source_edit_mask"] == str(
+        baseline_mask.resolve()
+    )
+    matrix = build_relative_matrix(output)
+    assert [
+        row["fill"] for row in matrix["explicit_combinations"]
+    ] == ["mask_only", "conditional_refill_existing"]
+    assert matrix["families"]["detector"]["pr6_baseline_edit"]["pages"]["p"][
+        "raw"
+    ] == str(baseline_mask.resolve())
+
+
+def test_mask_only_preflight_scores_the_real_source_image(
+    tmp_path: Path,
+) -> None:
+    shape = (24, 32)
+    source = np.full((*shape, 3), 180, np.uint8)
+    baseline = source.copy()
+    baseline[4:8, 5:10] = 230
+    target = np.zeros(shape, np.uint8)
+    target[4:8, 5:10] = 255
+    protected = np.zeros(shape, np.uint8)
+    protected[14:18, 20:26] = 255
+    full = np.full(shape, 255, np.uint8)
+    zero = np.zeros(shape, np.uint8)
+    source_path = _write_image(tmp_path / "source.png", source)
+    baseline_path = _write_image(tmp_path / "baseline.png", baseline)
+    target_path = _write_image(tmp_path / "target.png", target)
+    protected_path = _write_image(tmp_path / "protected.png", protected)
+    full_path = _write_image(tmp_path / "full.png", full)
+    zero_path = _write_image(tmp_path / "zero.png", zero)
+    manifest_path = tmp_path / "manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "path": source_path,
+                "baseline": baseline_path,
+                "baseline_mask": target_path,
+                "existing_source_edit_mask": target_path,
+                "regions": [{"region_id": "r"}],
+                "target_instances": [
+                    {"instance_id": "i", "region_id": "r", "priority": "required"}
+                ],
+            }
+        ]
+    }
+    _write_strict_source_manifest(manifest_path, payload)
+    page = payload["pages"][0]  # type: ignore[index]
+    page["baseline"] = baseline_path  # type: ignore[index]
+    page["baseline_mask"] = target_path  # type: ignore[index]
+    page["existing_source_edit_mask"] = target_path  # type: ignore[index]
+    page["protected_structure_mask"] = protected_path  # type: ignore[index]
+    page["ownership_mask"] = full_path  # type: ignore[index]
+    page["claim_seed_mask"] = target_path  # type: ignore[index]
+    page["corner_protect_mask"] = zero_path  # type: ignore[index]
+    page["artifact_sha256"] = manifest_page_artifact_sha256(  # type: ignore[index]
+        manifest_path, page  # type: ignore[arg-type]
+    )
+    payload["page_inventory_sha256"] = source_manifest_page_inventory_sha256(
+        payload["pages"]  # type: ignore[arg-type]
+    )
+    manifest_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    manifest_path.with_suffix(manifest_path.suffix + ".seal.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-manifest-seal-v4",
+                "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                "candidate_generated": False,
+                "candidate_seen": False,
+                "annotation_frozen_before_candidate": True,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    matrix = build_relative_matrix(manifest_path)
+    matrix_path = tmp_path / "matrix.json"
+    matrix_path.write_text(json.dumps(matrix, sort_keys=True), encoding="utf-8")
+    output = tmp_path / "output"
+
+    assert factorized_main(
+        [
+            "--manifest",
+            str(manifest_path),
+            "--matrix",
+            str(matrix_path),
+            "--output-dir",
+            str(output),
+            "--device",
+            "cpu",
+            "--limit",
+            "1",
+        ]
+    ) == 0
+    result = json.loads((output / "factorized-results.json").read_text("utf-8"))
+    run_id = result["runs"][0]["run_id"]
+    statistics = result["pages"][run_id][0]["canonical_statistics"]
+    assert statistics["protected_structure_changed_pixel_count"] == 0
+    assert result["pages"][run_id][0]["changed_pixel_count"] == int(
+        np.count_nonzero(target)
+    )
+
+
+def test_product_eval_manifest_is_a_lossless_source_only_view(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source-manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "required-page",
+                "regions": [{"region_id": "r"}],
+                "target_instances": [
+                    {
+                        "instance_id": "i",
+                        "region_id": "r",
+                        "priority": "required",
+                    }
+                ],
+            },
+            {
+                "page_id": "no-edit-page",
+                "regions": [{"region_id": "r"}],
+                "target_instances": [],
+            },
+        ]
+    }
+    _write_strict_source_manifest(source_manifest, payload)
+    output = tmp_path / "product-eval.json"
+    product, provenance = build_product_eval_manifest(
+        source_manifest_path=source_manifest,
+        output_path=output,
+        source_lock_git_sha="a" * 40,
+    )
+    assert product["manifest_sha256"] == _canonical_manifest_sha256(product)
+    pages = {page["page_id"]: page for page in product["pages"]}
+    source_pages = {page["page_id"]: page for page in payload["pages"]}
+    required = pages["required-page"]
+    assert required["target_text_mask"]["path"] == str(
+        Path(str(source_pages["required-page"]["target_text_mask"])).resolve()
+    )
+    assert required["protected_structure_mask"]["path"] == str(
+        Path(
+            str(source_pages["required-page"]["protected_structure_mask"])
+        ).resolve()
+    )
+    no_edit_target = Path(pages["no-edit-page"]["target_text_mask"]["path"])
+    assert np.count_nonzero(cv2.imread(str(no_edit_target), cv2.IMREAD_GRAYSCALE)) == 0
+    assert provenance["annotation_transform"] == "none"
+    assert provenance["required_page_count"] == 1
+    assert provenance["no_edit_page_count"] == 1
+
+
+def test_product_eval_manifest_rejects_reused_zero_mask_directory(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source-manifest.json"
+    payload: dict[str, object] = {
+        "pages": [
+            {
+                "page_id": "p",
+                "regions": [{"region_id": "r"}],
+                "target_instances": [],
+            }
+        ]
+    }
+    _write_strict_source_manifest(source_manifest, payload)
+    output = tmp_path / "product-eval.json"
+    zero_dir = tmp_path / "product-eval-zero-targets"
+    zero_dir.mkdir()
+    with pytest.raises(FileExistsError, match="zero-mask directory must be fresh"):
+        build_product_eval_manifest(
+            source_manifest_path=source_manifest,
+            output_path=output,
+            source_lock_git_sha="a" * 40,
+        )
+
+
+def test_balanced_preflight_rejects_unavailable_semantic_provider(
+    tmp_path: Path,
+) -> None:
+    manifest_sha = "a" * 64
+    fusion = tmp_path / "fusion.json"
+    fusion.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-detector-fusion-results-v4",
+                "manifest_sha256": manifest_sha,
+                "runs": [
+                    {
+                        "run_id": "best",
+                        "seed_admitted": True,
+                        "metrics": {
+                            "missed_target_instance_count": 6,
+                            "target_instance_seed_recall": 653 / 659,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    semantic = tmp_path / "semantic.json"
+    semantic.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-semantic-policy-results-v4",
+                "manifest_sha256": manifest_sha,
+                "policies": [
+                    {
+                        "policy_id": "ocr_provenance_verifier",
+                        "status": "blocked_asset",
+                        "oracle_only": False,
+                        "metrics": {
+                            "preserve_destructive_count": 0,
+                            "ambiguous_destructive_count": 0,
+                            "no_edit_false_translate_page_count": 0,
+                            "unavailable_instance_count": 809,
+                            "required_translate_recall": 0.0,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = adjudicate_balanced_preflight(
+        fusion_path=fusion,
+        fusion_run_id="best",
+        semantic_path=semantic,
+        semantic_policy_id="ocr_provenance_verifier",
+    )
+    assert result["strict_seed_eligible"] is False
+    assert result["seed_admitted"] is True
+    assert result["balanced_candidate_admitted"] is False
+    assert "semantic_provider_unavailable" in result["gate_failures"]
+    assert (
+        "semantic_gate_nonzero:unavailable_instance_count"
+        in result["gate_failures"]
+    )
+    semantic_payload = json.loads(semantic.read_text(encoding="utf-8"))
+    policy = semantic_payload["policies"][0]
+    policy["status"] = "dominated"
+    policy["metrics"]["unavailable_instance_count"] = 0
+    policy["metrics"]["required_translate_recall"] = 0.99
+    semantic.write_text(json.dumps(semantic_payload), encoding="utf-8")
+    admitted = adjudicate_balanced_preflight(
+        fusion_path=fusion,
+        fusion_run_id="best",
+        semantic_path=semantic,
+        semantic_policy_id="ocr_provenance_verifier",
+    )
+    assert admitted["strict_seed_eligible"] is False
+    assert admitted["balanced_candidate_admitted"] is True
+
+
+def test_balanced_preflight_cli_imports_from_a_direct_script_process() -> None:
+    completed = subprocess.run(
+        [
+            str(ROOT / ".venv-win" / "Scripts" / "python.exe"),
+            "-B",
+            str(ROOT / "scripts" / "adjudicate_inpaint_balanced_preflight_v32.py"),
+            "--help",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Fail closed before spending CUDA" in completed.stdout
+
+
+def test_v32_three_case_sheet_omits_rejected_balanced_column(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "image.png"
+    mask = tmp_path / "mask.png"
+    assert cv2.imwrite(str(image), np.full((20, 30, 3), 180, np.uint8))
+    assert cv2.imwrite(str(mask), np.zeros((20, 30), np.uint8))
+    rows = [
+        {
+            "case_id": case_id,
+            "source": str(image),
+            "control": str(image),
+            "fill_only": str(image),
+            "edit_mask": str(mask),
+            "protect_mask": str(mask),
+            "crop_xyxy": [0, 0, 30, 20],
+        }
+        for case_id in ("japan-i_102", "japan-p_015", "japan-096")
+    ]
+    sheet = build_three_case_sheet(
+        {
+            "schema_version": "inpaint-v32-three-case-contact-sheet-v1",
+            "balanced_available": False,
+            "cell_width": 80,
+            "cell_height": 60,
+            "rows": rows,
+        }
+    )
+    assert sheet.size == (320, 304)
+
+
+def test_v32_three_case_sheet_omits_all_rejected_candidate_columns(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "image.png"
+    mask = tmp_path / "mask.png"
+    assert cv2.imwrite(str(image), np.full((20, 30, 3), 180, np.uint8))
+    assert cv2.imwrite(str(mask), np.zeros((20, 30), np.uint8))
+    sheet = build_three_case_sheet(
+        {
+            "schema_version": "inpaint-v32-three-case-contact-sheet-v1",
+            "fill_only_available": False,
+            "balanced_available": False,
+            "cell_width": 80,
+            "cell_height": 60,
+            "rows": [
+                {
+                    "case_id": case_id,
+                    "source": str(image),
+                    "control": str(image),
+                    "edit_mask": str(mask),
+                    "protect_mask": str(mask),
+                    "crop_xyxy": [0, 0, 30, 20],
+                }
+                for case_id in ("japan-i_102", "japan-p_015", "japan-096")
+            ],
+        }
+    )
+    assert sheet.size == (240, 304)
+
+
+def test_fill_preflight_rejects_unsafe_pr6_mask_before_cuda(
+    tmp_path: Path,
+) -> None:
+    source_manifest = tmp_path / "source.json"
+    source_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "page_count": 1,
+                "source_annotation_manifest_sha256": "a" * 64,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    metrics = _relative_metrics(coverage=0.9, residue=0.2, mask_sha="b" * 64)
+    metrics.update(
+        {
+            "page_count": 1,
+            "protected_structure_changed": 7,
+            "no_edit_false_edit": 9,
+        }
+    )
+    factorized = tmp_path / "factorized.json"
+    factorized.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-results-v3",
+                "manifest_sha256": hashlib.sha256(
+                    source_manifest.read_bytes()
+                ).hexdigest(),
+                "runs": [{"run_id": "b0", "metrics": metrics}],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "manifest_corpora": {
+                    "e1": {"parent_manifest_sha256": "a" * 64}
+                },
+                "success_count": 1,
+                "failure_count": 0,
+                "cpu_fallback_count": 0,
+                "required_skipped_block_count": 0,
+                "protected_structure_changed_pixel_count_exact": 7,
+                "ambiguous_structure_changed_pixel_count_exact": 0,
+                "changed_outside_final_mask_pixel_count_exact": 0,
+                "unexpected_none_edit_count": 1,
+                "inpainter_runtime": {
+                    "actual_device": "cuda",
+                    "actual_precision": "bf16",
+                    "cpu_fallback_used": False,
+                },
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = adjudicate_fill_preflight(
+        factorized_path=factorized,
+        run_id="b0",
+        source_manifest_path=source_manifest,
+        product_summary_path=summary,
+    )
+
+    assert result["fill_candidate_admitted"] is False
+    assert result["cuda_stage2_authorized"] is False
+    assert "safety_nonzero:protected_structure_changed" in result["gate_failures"]
+    assert "safety_nonzero:no_edit_false_edit" in result["gate_failures"]
+    assert (
+        "product_summary_nonzero:protected_structure_changed_pixel_count_exact"
+        in result["gate_failures"]
+    )
+
+
+def test_v32_final_selection_keeps_pr6_when_both_candidates_fail(
+    tmp_path: Path,
+) -> None:
+    balanced = tmp_path / "balanced.json"
+    balanced.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-balanced-preflight-adjudication-v32",
+                "manifest_sha256": "a" * 64,
+                "balanced_candidate_admitted": False,
+                "gate_failures": ["semantic_provider_unavailable"],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    fill = tmp_path / "fill.json"
+    fill.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-fill-preflight-adjudication-v32",
+                "source_annotation_manifest_sha256": "a" * 64,
+                "fill_candidate_admitted": False,
+                "gate_failures": ["safety_nonzero:protected_structure_changed"],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = adjudicate_final_selection(
+        balanced_preflight_path=balanced,
+        fill_preflight_path=fill,
+    )
+
+    assert result["selected_candidate"] == "current_pr6"
+    assert result["relative_product_pass"] is False
+    assert result["product_pr_rebase_authorized"] is False
+    assert result["a5_authorized"] is False
+    assert result["a5_state"] == "unavailable"
+
+
+def test_minimal_closure_matrix_covers_every_non_oracle_role_variant() -> None:
+    controls = {
+        "detector": "d0",
+        "expansion": "e0",
+        "fill": "mask_only",
+        "ownership": "o0",
+        "router": "r0",
+        "silhouette": "s0",
+    }
+    source = {
+        "schema_version": "inpaint-factorized-matrix-v3",
+        "axes": {
+            "detector": ["d0", "oracle", "d1"],
+            "expansion": ["e0", "e1"],
+            "fill": ["mask_only"],
+            "ownership": ["o0", "o1"],
+            "router": ["r0", "r1"],
+            "silhouette": ["s0", "s1"],
+        },
+        "controls": controls,
+        "oracle_only": ["oracle"],
+        "explicit_combinations": [
+            {
+                "detector": "d1",
+                "expansion": "e1",
+                "fill": "mask_only",
+                "ownership": "o1",
+                "router": "r1",
+                "silhouette": "s1",
+            }
+        ],
+    }
+
+    result = build_minimal_closure_matrix(source)
+
+    assert result["closure_reduction"]["coverage_complete"] is True
+    assert result["closure_reduction"]["selected_combination_count"] == 2
+    rows = result["explicit_combinations"]
+    for role in ("detector", "expansion", "ownership", "router", "silhouette"):
+        expected = set(source["axes"][role]) - {"oracle"}
+        assert {row[role] for row in rows} == expected
+
+
 def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
     tmp_path: Path,
 ) -> None:
@@ -492,6 +1338,7 @@ def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
         "current_default",
         "detector_explicit_role",
         "ocr_semantic_hint",
+        "ocr_provenance_verifier",
         "explicit_role_consensus",
         "human_oracle",
     }
@@ -501,9 +1348,133 @@ def test_semantic_policy_matrix_scores_defaults_and_blocks_missing_evidence(
     assert policies["current_default"]["metrics"]["preserve_destructive_count"] == 1
     assert policies["detector_explicit_role"]["status"] == "blocked_asset"
     assert policies["ocr_semantic_hint"]["status"] == "blocked_asset"
+    assert policies["ocr_provenance_verifier"]["status"] == "blocked_asset"
     assert policies["explicit_role_consensus"]["status"] == "blocked_asset"
     assert policies["human_oracle"]["status"] == "family_complete"
     assert policies["human_oracle"]["oracle_only"] is True
+
+
+def test_ocr_provenance_verifier_requires_provider_evidence_and_abstains_without_text(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "regions": [
+                            {
+                                "region_id": "translate",
+                                "proposal": {
+                                    "text_class": "text_bubble",
+                                    "ocr_evidence_available": True,
+                                    "ocr_text": "example",
+                                    "ocr_script": "Latin",
+                                    "ocr_confidence": 0.75,
+                                },
+                            },
+                            {
+                                "region_id": "preserve",
+                                "proposal": {
+                                    "text_class": "sfx",
+                                    "ocr_evidence_available": True,
+                                },
+                            },
+                            {
+                                "region_id": "abstain",
+                                "proposal": {
+                                    "text_class": "text_free",
+                                    "ocr_evidence_available": True,
+                                    "ocr_text": "",
+                                    "ocr_script": "Latin",
+                                    "ocr_confidence": 0.9,
+                                },
+                            },
+                        ],
+                        "target_instances": [
+                            {
+                                "instance_id": "required",
+                                "region_id": "translate",
+                                "semantic_role": "dialogue_bubble",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                            {
+                                "instance_id": "preserve",
+                                "region_id": "preserve",
+                                "semantic_role": "sfx",
+                                "processing_action": "preserve",
+                                "priority": "optional",
+                            },
+                            {
+                                "instance_id": "abstain",
+                                "region_id": "abstain",
+                                "semantic_role": "dialogue_free",
+                                "processing_action": "translate_inpaint",
+                                "priority": "required",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_strict_source_manifest(
+        manifest, json.loads(manifest.read_text(encoding="utf-8"))
+    )
+
+    result = score_semantic_policies(manifest)
+    rows = result["pages"]["ocr_provenance_verifier"][0]["decisions"]
+    by_id = {row["instance_id"]: row for row in rows}
+    assert by_id["required"]["predicted_action"] == "translate_inpaint"
+    assert by_id["preserve"]["predicted_action"] == "preserve"
+    assert by_id["abstain"]["predicted_action"] == "review"
+    assert by_id["abstain"]["available"] is True
+
+
+def test_semantic_policy_counts_false_translate_actions_on_no_edit_pages(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "inpaint-factorized-source-manifest-v4",
+                "pages": [
+                    {
+                        "page_id": "p",
+                        "expected_edit": "none",
+                        "regions": [
+                            {
+                                "region_id": "false-translate",
+                                "proposal": {"text_class": "text_bubble"},
+                            }
+                        ],
+                        "target_instances": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_strict_source_manifest(
+        manifest, json.loads(manifest.read_text(encoding="utf-8"))
+    )
+
+    policies = {
+        row["policy_id"]: row for row in score_semantic_policies(manifest)["policies"]
+    }
+    assert policies["current_default"]["metrics"][
+        "no_edit_false_translate_page_count"
+    ] == 1
+    assert policies["current_default"]["status"] == "dominated"
+    assert policies["human_oracle"]["metrics"][
+        "no_edit_false_translate_page_count"
+    ] == 0
 
 
 def test_semantic_policy_blocks_partially_missing_provider_evidence(
@@ -734,8 +1705,11 @@ def test_method_family_closure_keeps_partial_family_active(tmp_path: Path) -> No
                         "evaluation_scope": "e1",
                         "closure_state": "invalid_with_reason",
                         "disposition": "dominated",
-                        "reason": "not_supported_by_reference",
+                        "reason": "combination_incompatible",
+                        "artifact_sha256": "e" * 64,
                         "scope_manifest_sha256": "1" * 64,
+                        "invalid_parent_record_id": "dilated-combination",
+                        "invalid_gate_facts_sha256": "f" * 64,
                     },
                     {
                         "family_id": "exact-protection",
@@ -970,7 +1944,7 @@ def test_v4_method_registry_covers_every_role_and_required_variant() -> None:
         "planar_gradient",
         "telea",
         "conditional_hybrid",
-        "skip",
+        "conditional_refill_existing",
     }
 
 
@@ -1897,6 +2871,66 @@ def test_detector_fusion_matrix_covers_singles_pairs_and_roi_triggers() -> None:
     assert "primary__gated_always__roi" in run_ids
     assert "primary__gated_seed_missing__roi" in run_ids
     assert "secondary__gated_union__roi" in run_ids
+
+
+def test_detector_fusion_best_effort_admission_keeps_recall_and_safety_views() -> None:
+    def row(run_id: str, missed: int, coverage: float, false_edit: int) -> dict[str, object]:
+        return {
+            "run_id": run_id,
+            "seed_eligible": missed == 0,
+            "metrics": {
+                "missed_target_instance_count": missed,
+                "aggregate_target_coverage": coverage,
+                "minimum_target_instance_coverage": 0.0,
+                "false_edit_pixel_count": false_edit,
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+            },
+        }
+
+    selected = select_seed_admission_run_ids(
+        [
+            row("coverage", 7, 0.95, 1700),
+            row("safety", 7, 0.91, 1200),
+            row("worse-recall", 8, 0.99, 10),
+        ]
+    )
+
+    assert selected == frozenset({"coverage", "safety"})
+
+
+def test_detector_fusion_strict_seed_candidates_take_precedence() -> None:
+    rows = [
+        {
+            "run_id": "strict",
+            "seed_eligible": True,
+            "metrics": {
+                "missed_target_instance_count": 0,
+                "aggregate_target_coverage": 0.9,
+                "minimum_target_instance_coverage": 0.8,
+                "false_edit_pixel_count": 100,
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+            },
+        },
+        {
+            "run_id": "best-effort",
+            "seed_eligible": False,
+            "metrics": {
+                "missed_target_instance_count": 1,
+                "aggregate_target_coverage": 1.0,
+                "minimum_target_instance_coverage": 0.0,
+                "false_edit_pixel_count": 0,
+                "target_extent_independent": True,
+                "target_inventory_independent": True,
+                "target_review_complete": True,
+            },
+        },
+    ]
+
+    assert select_seed_admission_run_ids(rows) == frozenset({"strict"})
 
 
 def test_detector_fusion_respects_manifest_existing_source_edit(tmp_path: Path) -> None:
@@ -2994,6 +4028,22 @@ def test_mixed_page_scores_broad_edit_only_outside_clean_regions() -> None:
 
     assert broad_route_false_positive_pixels(broad & left, masks) == 0
     assert broad_route_false_positive_pixels(broad, masks) == 256
+    sparse_masks = replace(masks, regions=())
+    assert (
+        broad_route_false_positive_pixels(
+            broad, sparse_masks, clean_region_mask=left
+        )
+        == 256
+    )
+
+
+def test_factorized_runner_uses_canonical_broad_route_scorer() -> None:
+    source = (
+        ROOT / "scripts" / "benchmark_inpaint_factorized_v3.py"
+    ).read_text(encoding="utf-8")
+
+    assert "clean_region_mask=streamed_clean_ownership" in source
+    assert "source_clean[region.bubble_interior > 0]" not in source
 
 
 def test_runner_cache_path_preserves_v4_region_and_preserve_masks(
@@ -3476,6 +4526,22 @@ def test_route_hybrid_uses_lama_only_for_narrow_and_flat_for_broad() -> None:
         _route_fill_backend("conditional_hybrid", "narrow", "clean_flat")
         == "current_lama"
     )
+    assert (
+        _route_fill_backend(
+            "conditional_refill_existing", "narrow", "clean_flat"
+        )
+        == "robust_flat_median"
+    )
+    assert (
+        _route_fill_backend(
+            "conditional_refill_existing", "narrow", "clean_gradient"
+        )
+        == "planar_gradient"
+    )
+    assert (
+        _route_fill_backend("conditional_refill_existing", "narrow", "line_art")
+        == "current_lama"
+    )
 
 
 def test_oracle_background_reconstruction_scores_fill_independently() -> None:
@@ -3792,6 +4858,8 @@ def _complete_hard_gate_metrics(**updates: object) -> dict[str, object]:
         "no_edit_false_edit": 0,
         "required_skip_count": 0,
         "preserve_edit_overlap": 0,
+        "ownership_leak_pixel_count": 0,
+        "corner_edit_overlap_pixel_count": 0,
         "missed_target_instance_count": 0,
         "page_residue_worsened_count": 0,
     }
@@ -4124,7 +5192,22 @@ def test_factorized_runner_executes_declared_control_matrix(tmp_path: Path) -> N
         "schema_version"
     ] == "inpaint-factorized-page-statistics-v1"
     assert len(result["runs"][0]["metrics"]["output_mask_set_sha256"]) == 64
-    assert result["output_artifact_inventory"]["artifact_count"] == 4
+    assert result["output_artifact_inventory"]["artifact_count"] == 5
+    inventory = json.loads(
+        (output / "factorized-output-artifact-inventory.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert inventory["schema_version"] == (
+        "inpaint-factorized-output-artifact-inventory-v2"
+    )
+    assert {record["role"] for record in inventory["records"]} == {
+        "detector_seed_mask",
+        "effective_ownership_mask",
+        "edit_mask",
+        "final_mask",
+        "candidate_image",
+    }
     assert result["output_artifact_inventory"]["complete_run_ids"] == [run_id]
     runtime_binding = result["runtime_evidence_ledger"]
     assert runtime_binding["role"] == "runtime_evidence"
@@ -4648,6 +5731,76 @@ def test_isolated_factorized_results_require_every_executed_closure_row(
     assert len(merged["logical_inventory_sha256"]) == 64
 
 
+def test_isolated_factorized_results_merge_local_closure_runtime_diagnostics(
+    tmp_path: Path,
+) -> None:
+    ledger = [
+        {
+            "logical_id": run_id,
+            "selection": {"detector": run_id},
+            "closure_state": "executed",
+            "reason": "",
+            "content_sha256": run_id,
+            "reused_from": "",
+        }
+        for run_id in ("one", "two")
+    ]
+
+    def write_result(name: str, run_id: str, conflict_count: int) -> Path:
+        local_ledger = [dict(row) for row in ledger]
+        local_ledger[[row["logical_id"] for row in ledger].index(run_id)][
+            "runtime_diagnostics"
+        ] = {"conditional_hybrid_overlap_conflict_pixel_count": conflict_count}
+        path = tmp_path / name / "factorized-results.json"
+        path.parent.mkdir()
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "inpaint-factorized-results-v3",
+                    "manifest_sha256": "manifest",
+                    "matrix_sha256": "matrix",
+                    "logical_combination_count": 2,
+                    "physical_combination_count": 2,
+                    "closure_ledger": local_ledger,
+                    "positive_lama_inference_count": 0,
+                    "runs": [
+                        {
+                            "run_id": run_id,
+                            "detector_id": run_id,
+                            "ownership_id": "o",
+                            "silhouette_id": "s",
+                            "router_id": "r",
+                            "expansion_id": "raw",
+                            "fill_id": "mask_only",
+                            "oracle_only": False,
+                            "status": "active",
+                            "metrics": _complete_hard_gate_metrics(
+                                residue_gate_applicable=False
+                            ),
+                            "closure_reason": "",
+                        }
+                    ],
+                    "pages": {run_id: [{"page_id": "p1"}]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    merged = merge_results(
+        [write_result("one", "one", 3), write_result("two", "two", 5)]
+    )
+
+    diagnostics = {
+        row["logical_id"]: row.get("runtime_diagnostics")
+        for row in merged["closure_ledger"]
+    }
+    assert diagnostics == {
+        "one": {"conditional_hybrid_overlap_conflict_pixel_count": 3},
+        "two": {"conditional_hybrid_overlap_conflict_pixel_count": 5},
+    }
+
+
 def test_silhouette_consensus_builds_union_intersection_and_n_of_four() -> None:
     masks = {name: np.zeros((6, 8), np.uint8) for name in (
         "ballons", "pr2", "ctbd", "manga109"
@@ -4681,6 +5834,9 @@ def test_known_background_synthetic_manifest_covers_all_fill_routes(
 ) -> None:
     manifest = build_synthetic_manifest(tmp_path)
 
+    assert manifest["schema_version"] == "inpaint-factorized-source-manifest-v4"
+    assert manifest["split_role"] == "synthetic_known_ground_truth"
+    assert manifest["candidate_seen"] is False
     assert len(manifest["pages"]) == 10
     assert {page["bubble_route_class"] for page in manifest["pages"]} == {
         "clean_flat",
@@ -4690,6 +5846,8 @@ def test_known_background_synthetic_manifest_covers_all_fill_routes(
         "ambiguous",
     }
     for page in manifest["pages"]:
+        assert page["source_sha256"] == page["artifact_sha256"]["path"]
+        assert len(page["regions"]) == 1
         source = cv2.imread(page["path"], cv2.IMREAD_COLOR)
         truth = cv2.imread(page["known_background"], cv2.IMREAD_COLOR)
         target = cv2.imread(page["target_text_mask"], cv2.IMREAD_GRAYSCALE)
@@ -4709,7 +5867,7 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
     matrix = build_fill_matrix(manifest_path)
 
     assert matrix["oracle_experiment"] is True
-    assert len(matrix["explicit_combinations"]) == 11
+    assert len(matrix["explicit_combinations"]) == 13
     assert {
         row["fill"] for row in matrix["explicit_combinations"]
     } == {
@@ -4718,6 +5876,7 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
         "telea",
         "current_lama",
         "ballons_lama",
+        "conditional_refill_existing",
         "conditional_hybrid",
     }
     pages = matrix["families"]["router"]["clean_route_oracle"]["pages"]
@@ -4731,7 +5890,7 @@ def test_fill_oracle_matrix_keeps_unsafe_routes_narrow(tmp_path: Path) -> None:
         matrix=matrix,
         manifest_sha256="f" * 64,
     )
-    assert len(physical) == 11
+    assert len(physical) == 13
     assert {row.closure_state for row in ledger} == {"executed"}
 
 
@@ -4793,6 +5952,69 @@ def test_conditional_hybrid_uses_authoritative_mixed_region_routes() -> None:
     assert all(row["applied"] is True for row in diagnostics["region_fills"])
     assert np.array_equal(candidate[edit == 0], source[edit == 0])
     assert np.max(np.abs(candidate[edit > 0].astype(int) - truth[edit > 0])) <= 1
+
+    refill, refill_diagnostics = _fill_conditional_hybrid_regions(
+        source,
+        edit,
+        masks,
+        route_decision="narrow",
+        background_exclude_mask=zero,
+        lama_fill=unexpected_lama,
+        fill_policy="conditional_refill_existing",
+    )
+    assert refill_diagnostics["backend"] == "conditional_refill_existing"
+    assert refill_diagnostics["positive_lama_inference_count"] == 0
+    assert [row["backend"] for row in refill_diagnostics["region_fills"]] == [
+        "robust_flat_median",
+        "planar_gradient",
+    ]
+    assert np.array_equal(refill[edit == 0], source[edit == 0])
+    assert np.max(np.abs(refill[edit > 0].astype(int) - truth[edit > 0])) <= 1
+
+
+def test_conditional_hybrid_broad_region_samples_exclude_only_narrow_seed() -> None:
+    shape = (48, 64)
+    source = np.full((*shape, 3), 230, np.uint8)
+    interior = np.zeros(shape, np.uint8)
+    interior[8:40, 10:54] = 255
+    seed = np.zeros(shape, np.uint8)
+    seed[20:28, 28:36] = 255
+    source[seed > 0] = 20
+    zero = np.zeros(shape, np.uint8)
+    masks = PageMasks(
+        target=seed,
+        protected=zero,
+        ambiguous=zero,
+        ownership=seed,
+        claim_seed=seed,
+        existing_edit=zero,
+        bubble_interior=interior,
+        corner=zero,
+        broad_ownership=interior,
+        preserve=zero,
+        regions=(
+            RegionMasks("flat", "clean_flat", interior, seed, zero, zero, zero),
+        ),
+    )
+
+    candidate, diagnostics = _fill_conditional_hybrid_regions(
+        source,
+        interior,
+        masks,
+        route_decision="broad",
+        background_exclude_mask=zero,
+        lama_fill=lambda _image, _mask: (_ for _ in ()).throw(
+            AssertionError("clean broad region must not use LaMa")
+        ),
+        narrow_claim=seed,
+    )
+
+    detail = diagnostics["region_fills"][0]
+    assert detail["applied"] is True
+    assert diagnostics["positive_lama_inference_count"] == 0
+    assert detail["edit_pixel_count"] == int(np.count_nonzero(interior))
+    assert detail["sample_exclusion_pixel_count"] == int(np.count_nonzero(seed))
+    assert np.all(candidate[interior > 0] == 230)
 
 
 def test_conditional_hybrid_routes_authoritative_overlap_to_one_narrow_lama_call() -> None:

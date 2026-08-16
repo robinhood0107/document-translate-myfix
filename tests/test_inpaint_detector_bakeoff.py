@@ -37,6 +37,11 @@ from benchmarking.inpaint_detector_bakeoff.contracts import (
     Stage1Page,
     assert_disjoint_masks,
 )
+from benchmarking.inpaint_detector_bakeoff.tiled_detector import (
+    TiledCandidateReference,
+    TiledInferenceSettings,
+    tile_origins,
+)
 from benchmarking.inpaint_detector_bakeoff.stage1 import (
     PageMasks,
     positive_edit_from_claim,
@@ -231,6 +236,46 @@ def test_ctd_ownership_roi_recovers_small_claim_without_bbox_fill() -> None:
     assert np.count_nonzero(result.raw_mask[ownership == 0]) == 0
     assert np.count_nonzero(result.dilated_mask[ownership == 0]) == 0
     assert np.count_nonzero(result.raw_mask) < np.count_nonzero(ownership)
+
+
+def test_tiled_detector_recovers_crop_only_claim_and_maps_boxes() -> None:
+    calls: list[tuple[int, int]] = []
+
+    def infer(image: np.ndarray) -> CandidateMaskResult:
+        calls.append(image.shape[:2])
+        mask = np.zeros(image.shape[:2], np.uint8)
+        boxes: tuple[DetectorBox, ...] = ()
+        if image.shape[:2] == (64, 64):
+            mask[20:24, 28:34] = 255
+            boxes = (DetectorBox((28, 20, 34, 24), "text", 0.9, "test"),)
+        return CandidateMaskResult(
+            "fake",
+            mask,
+            mask,
+            mask,
+            boxes=boxes,
+            runtime={"seconds": 0.01, "device": "cuda"},
+        )
+
+    adapter = TiledCandidateReference(
+        infer,
+        TiledInferenceSettings(tile_sizes=(64,), overlap=0.25),
+    )
+    result = adapter.infer(np.full((96, 128, 3), 180, np.uint8))
+
+    assert calls[0] == (96, 128)
+    assert calls.count((64, 64)) == 6
+    assert result.runtime["inference_call_count"] == 7
+    assert np.count_nonzero(result.raw_mask) > 0
+    assert any(box.xyxy[0] >= 48 for box in result.boxes)
+    assert result.runtime["device"] == "cuda"
+
+
+def test_tile_origins_cover_edges_without_duplicates() -> None:
+    assert tile_origins(128, 64, 0.25) == (0, 48, 64)
+    assert tile_origins(60, 64, 0.25) == (0,)
+    with pytest.raises(ValueError, match="overlap"):
+        TiledInferenceSettings(tile_sizes=(64,), overlap=0.5)
 
 
 def test_ctd_ownership_roi_skips_inference_without_authoritative_ownership() -> None:

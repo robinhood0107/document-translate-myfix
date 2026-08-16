@@ -1231,15 +1231,20 @@ def clean_route_region_mask(masks: PageMasks) -> np.ndarray:
 def broad_route_false_positive_pixels(
     broad_edit: np.ndarray,
     masks: PageMasks,
+    *,
+    clean_region_mask: np.ndarray | None = None,
 ) -> int:
     """Score broad pixels outside clean source-only regions on mixed pages."""
 
     normalized = binary_mask(broad_edit, masks.target.shape)
     if not np.any(normalized):
         return 0
-    if not masks.regions:
+    if clean_region_mask is not None:
+        clean = binary_mask(clean_region_mask, masks.target.shape)
+    elif masks.regions:
+        clean = clean_route_region_mask(masks)
+    else:
         return 0
-    clean = clean_route_region_mask(masks)
     return int(np.count_nonzero((normalized > 0) & (clean == 0)))
 
 

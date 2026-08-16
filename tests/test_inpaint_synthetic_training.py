@@ -25,10 +25,14 @@ from benchmarking.inpaint_detector_bakeoff.stage1 import (
     validate_source_only_manifest_v4,
 )
 from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (
+    ARCHITECTURE_HEAD_ONLY,
+    ARCHITECTURE_LAST_BACKBONE_STAGE,
     CHECKPOINT_SELECTION_CONTRACT,
     CHECKPOINT_SCHEMA,
+    LAST_BACKBONE_STAGE_INDICES,
     TRAINING_CONTRACT,
     _sha256,
+    apply_synthetic_checkpoint_weights,
     cuda_peak_memory_provenance,
     evaluation_runtime_provenance,
     source_dependency_provenance,
@@ -44,6 +48,8 @@ from scripts.build_inpaint_generalization_synthetic_v4 import (
 from scripts.reseal_inpaint_source_manifest_v4 import reseal_manifest
 from scripts.train_inpaint_synthetic_detector_v4 import (
     CTD_RAW_PROBABILITY_THRESHOLD,
+    _configure_trainable_parameters,
+    _set_evaluation_state,
     _pareto_epochs,
     _runtime_versions,
     _selection_key,
@@ -234,6 +240,137 @@ def test_synthetic_detector_checkpoint_provenance_matches_runtime(tmp_path) -> N
     )
 
 
+def test_staged_unfreeze_checkpoint_requires_exact_backbone_modules(
+    tmp_path: Path,
+) -> None:
+    import torch
+
+    base_model = tmp_path / "base.pt"
+    base_model.write_bytes(b"base-model")
+    checkpoint = tmp_path / "checkpoint.pt"
+    payload = _checkpoint_payload(base_model, checkpoint)
+    payload["training_hyperparameters"][
+        "architecture_mode"
+    ] = ARCHITECTURE_LAST_BACKBONE_STAGE
+    payload["architecture_mode"] = ARCHITECTURE_LAST_BACKBONE_STAGE
+    payload["backbone_stage_indices"] = list(LAST_BACKBONE_STAGE_INDICES)
+    payload["backbone_stage_state_dict"] = {
+        str(index): {"weight": torch.zeros(1)}
+        for index in LAST_BACKBONE_STAGE_INDICES
+    }
+
+    validate_checkpoint_provenance(
+        payload,
+        checkpoint_path=checkpoint,
+        base_model_path=base_model,
+    )
+
+    payload["backbone_stage_indices"] = [9]
+    with pytest.raises(ValueError, match="stage indices"):
+        validate_checkpoint_provenance(
+            payload,
+            checkpoint_path=checkpoint,
+            base_model_path=base_model,
+        )
+
+
+def test_head_only_checkpoint_rejects_backbone_indices(tmp_path: Path) -> None:
+    base_model = tmp_path / "base.pt"
+    base_model.write_bytes(b"base-model")
+    checkpoint = tmp_path / "checkpoint.pt"
+    payload = _checkpoint_payload(base_model, checkpoint)
+    payload["backbone_stage_indices"] = list(LAST_BACKBONE_STAGE_INDICES)
+
+    with pytest.raises(ValueError, match="must not declare backbone indices"):
+        validate_checkpoint_provenance(
+            payload,
+            checkpoint_path=checkpoint,
+            base_model_path=base_model,
+        )
+
+
+def test_staged_unfreeze_loads_only_declared_backbone_stage() -> None:
+    import torch
+
+    model = SimpleNamespace(
+        text_seg=torch.nn.Linear(2, 2),
+        blk_det=SimpleNamespace(
+            model=torch.nn.ModuleList(torch.nn.Linear(2, 2) for _ in range(10))
+        ),
+        text_det=torch.nn.Linear(2, 2),
+    )
+    expected_head = torch.nn.Linear(2, 2)
+    expected_stages = {
+        str(index): torch.nn.Linear(2, 2).state_dict()
+        for index in LAST_BACKBONE_STAGE_INDICES
+    }
+    checkpoint = {
+        "text_seg_state_dict": expected_head.state_dict(),
+        "architecture_mode": ARCHITECTURE_LAST_BACKBONE_STAGE,
+        "backbone_stage_indices": list(LAST_BACKBONE_STAGE_INDICES),
+        "backbone_stage_state_dict": expected_stages,
+    }
+
+    apply_synthetic_checkpoint_weights(model, checkpoint)
+
+    assert all(
+        torch.equal(model.text_seg.state_dict()[name], value)
+        for name, value in expected_head.state_dict().items()
+    )
+    for index in LAST_BACKBONE_STAGE_INDICES:
+        assert all(
+            torch.equal(model.blk_det.model[index].state_dict()[name], value)
+            for name, value in expected_stages[str(index)].items()
+        )
+
+
+def test_staged_unfreeze_marks_only_last_backbone_stage_trainable() -> None:
+    import torch
+
+    model = SimpleNamespace(
+        text_seg=torch.nn.Linear(2, 2),
+        blk_det=SimpleNamespace(
+            model=torch.nn.ModuleList(torch.nn.Linear(2, 2) for _ in range(10)),
+            parameters=lambda: (),
+        ),
+        text_det=torch.nn.Linear(2, 2),
+    )
+    model.blk_det.parameters = lambda: (
+        parameter
+        for module in model.blk_det.model
+        for parameter in module.parameters()
+    )
+
+    head, backbone = _configure_trainable_parameters(
+        model, ARCHITECTURE_LAST_BACKBONE_STAGE
+    )
+
+    assert head == list(model.text_seg.parameters())
+    assert backbone
+    for index, module in enumerate(model.blk_det.model):
+        expected = index in LAST_BACKBONE_STAGE_INDICES
+        assert all(parameter.requires_grad is expected for parameter in module.parameters())
+
+
+def test_staged_unfreeze_evaluation_disables_backbone_batch_updates() -> None:
+    import torch
+
+    model = SimpleNamespace(
+        text_seg=torch.nn.Sequential(torch.nn.BatchNorm1d(2)),
+        blk_det=torch.nn.Sequential(torch.nn.BatchNorm1d(2)),
+        text_det=torch.nn.Sequential(torch.nn.BatchNorm1d(2)),
+    )
+    model.text_seg.train()
+    model.blk_det.train()
+    model.text_det.train()
+
+    _set_evaluation_state(model)
+
+    assert model.text_seg.training is False
+    assert model.blk_det.training is False
+    assert model.text_det.training is False
+
+
 def test_synthetic_detector_checkpoint_rejects_stale_runtime_sha(tmp_path) -> None:
     base_model = tmp_path / "base.pt"
     base_model.write_bytes(b"base-model")
@@ -268,6 +405,8 @@ def _valid_training_hyperparameters() -> dict[str, object]:
         "adam_amsgrad": False,
         "raw_probability_threshold": 1.0 / 255.0,
         "evaluation_batch_size": 8,
+        "architecture_mode": ARCHITECTURE_HEAD_ONLY,
+        "backbone_learning_rate_scale": 0.1,
     }
 
 
@@ -291,6 +430,8 @@ def _valid_training_hyperparameters() -> dict[str, object]:
         ("adam_epsilon", 0.0, "positive"),
         ("raw_probability_threshold", 1.1, "must not exceed"),
         ("evaluation_batch_size", 0, "at least"),
+        ("architecture_mode", "everything", "architecture_mode"),
+        ("backbone_learning_rate_scale", 0.0, "positive"),
     ),
 )
 def test_training_hyperparameters_reject_unsafe_numeric_values(

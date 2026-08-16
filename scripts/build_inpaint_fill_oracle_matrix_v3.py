@@ -71,6 +71,7 @@ def build_fill_matrix(manifest_path: Path) -> dict[str, Any]:
         "telea",
         "current_lama",
         "ballons_lama",
+        "conditional_refill_existing",
         "conditional_hybrid",
     )
     explicit: list[dict[str, str]] = []
