@@ -30,7 +30,6 @@ from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.inpaint_cleanup import (
     apply_duplicate_bubble_inner_fill,
-    refine_bubble_residue_inpaint,
 )
 from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
@@ -513,14 +512,10 @@ def _process_image(
             stage_timings["inpaint_seconds"] = perf_counter() - inpaint_started
             mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
             cleanup_started = perf_counter()
-            cleaned, final_mask, cleanup_stats = refine_bubble_residue_inpaint(
-                cleaned,
-                mask,
-                blocks,
-                inpainter,
-                config,
-                protected_corner_mask=mask_details.get("protected_corner_mask"),
-            )
+            final_mask = mask
+            cleanup_stats = {
+                "autonomous_residue_cleanup": "disabled"
+            }
             cleaned, final_mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
                 cleaned,
                 final_mask,
