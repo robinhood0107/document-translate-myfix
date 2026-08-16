@@ -42,6 +42,40 @@ def _required_providers(device: str) -> list[str]:
     return ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
 
+def release_ctd_positive_claim_cache() -> dict[str, int | float | bool]:
+    """Drop cached ORT sessions without invalidating concurrent callers."""
+
+    with _SESSION_CACHE_LOCK:
+        cached_sessions = tuple(_SESSION_CACHE.values())
+        _SESSION_CACHE.clear()
+
+    cuda_session_count = 0
+    cpu_session_count = 0
+    unknown_session_count = 0
+    for session in cached_sessions:
+        try:
+            actual_providers = _provider_names(session.get_providers())
+        except Exception:
+            actual_providers = ()
+        primary_provider = actual_providers[0] if actual_providers else ""
+        if primary_provider == "CUDAExecutionProvider":
+            cuda_session_count += 1
+        elif primary_provider == "CPUExecutionProvider":
+            cpu_session_count += 1
+        else:
+            unknown_session_count += 1
+
+    return {
+        "cache_entry_count": len(cached_sessions),
+        "cuda_session_count": cuda_session_count,
+        "cpu_session_count": cpu_session_count,
+        "unknown_session_count": unknown_session_count,
+        "expected_process_reclaim_mb": 0.0,
+        "untracked_gpu_resource_count": cuda_session_count + unknown_session_count,
+        "gpu_release_expected": (cuda_session_count + unknown_session_count) > 0,
+    }
+
+
 def _cached_session(model_path: str, providers: list[str], detect_size: int):
     key = (str(model_path), tuple(providers), int(detect_size))
     with _SESSION_CACHE_LOCK:
