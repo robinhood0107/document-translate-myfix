@@ -40,4 +40,30 @@ cache consumer reading a field owned by another stage.
 **Depends on:** UI drag semantics, merge/split ownership, `text_free` crop policy,
 and checkpoint/cache migration rules
 
+## Detection and OCR coverage
+
+### Connect undetected page text and SFX to the translation pipeline
+
+**What:** Add a page-level recovery path for Japanese text and sound effects
+that never become detected text blocks.
+
+**Why:** Inpaint quality work can remove residue only for blocks that reach the
+mask and translation stages. Undetected text must be measured separately and
+recovered before it can be erased or translated.
+
+**Context:** The private inpaint evaluation contract records
+`undetected_text` review outcomes, but this signal does not fail the P2 mask and
+composite gate. A future implementation should connect page-level detection,
+OCR, block classification, and translation without weakening protected-line or
+outside-mask guarantees.
+
+Completion requires a neutral-ID corpus gate, detected-versus-annotated recall
+metrics, SFX and ordinary-text fixtures, and end-to-end proof that recovered
+blocks are translated and safely inpainted.
+
+**Effort:** XL
+**Priority:** P3
+**Depends on:** stable private target annotations and page-level detection/OCR
+ownership
+
 ## Completed
