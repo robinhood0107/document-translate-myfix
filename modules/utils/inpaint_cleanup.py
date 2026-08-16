@@ -13,6 +13,7 @@ from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     normalize_edit_mask,
 )
+from modules.utils.inpaint_evidence import BlockInpaintEvidence
 from modules.utils.textblock import TextBlock
 
 def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
@@ -153,6 +154,7 @@ def refine_bubble_residue_inpaint(
     page_label: str = "",
     *,
     protected_corner_mask: np.ndarray | None = None,
+    routing_evidence: tuple[BlockInpaintEvidence, ...] = (),
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Compatibility no-op for the retired autonomous residue pass.
 
@@ -161,7 +163,14 @@ def refine_bubble_residue_inpaint(
     stacked-PR migration.
     """
 
-    del blk_list, inpainter, config, page_label, protected_corner_mask
+    del (
+        blk_list,
+        inpainter,
+        config,
+        page_label,
+        protected_corner_mask,
+        routing_evidence,
+    )
     shape = mask.shape if mask is not None else inpainted_image.shape[:2]
     stats = _empty_pass2_stats(shape)
     stats["autonomous_residue_cleanup"] = "disabled"

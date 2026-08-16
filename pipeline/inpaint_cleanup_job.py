@@ -33,6 +33,7 @@ from modules.utils.inpaint_composite import (
     count_changed_outside_edit_mask,
     normalize_edit_mask,
 )
+from modules.utils.inpaint_evidence import BlockInpaintEvidence
 
 
 @dataclass
@@ -48,6 +49,7 @@ class InpaintCleanupInput:
     page_label: str
     # 모델이 실제로 고친 영역. 없으면 마스크를 그대로 쓴다.
     inpaint_edit_mask: np.ndarray | None = None
+    routing_evidence: tuple[BlockInpaintEvidence, ...] = ()
 
 
 @dataclass
@@ -82,7 +84,10 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
             0,
         ).astype(np.uint8)
 
-    cleanup_stats = {"autonomous_residue_cleanup": "disabled"}
+    cleanup_stats = {
+        "autonomous_residue_cleanup": "disabled",
+        "routing_evidence_block_count": len(job.routing_evidence),
+    }
     inpainted, mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
         inpainted,
         mask,
@@ -105,7 +110,7 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
     inpainted = composite_with_edit_mask(job.image, inpainted, mask)
     outside_after = count_changed_outside_edit_mask(job.image, inpainted, mask)
 
-    return InpaintCleanupResult(
+    result = InpaintCleanupResult(
         inpaint_input_img=np.ascontiguousarray(inpainted, dtype=np.uint8),
         mask=np.ascontiguousarray(mask, dtype=np.uint8),
         cleanup_stats=cleanup_stats,
@@ -113,3 +118,8 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
         outside_after_restore=int(outside_after),
         worker_seconds=max(0.0, time.monotonic() - started),
     )
+    # Sparse routing evidence is page-scoped.  Release the caller-owned
+    # reference once cleanup/composite has consumed it so masks do not remain
+    # resident across the next page.
+    job.routing_evidence = ()
+    return result
