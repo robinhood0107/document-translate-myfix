@@ -44,6 +44,18 @@
       "variants": ["raw", "refined", "native3"]
     },
     {
+      "family_id": "easyocr-craft",
+      "role": "seed",
+      "evaluation_scopes": ["synthetic", "e1"],
+      "variants": ["raw", "refined", "native3"]
+    },
+    {
+      "family_id": "easyocr-dbnet18",
+      "role": "seed",
+      "evaluation_scopes": ["synthetic", "e1"],
+      "variants": ["raw", "refined", "native3"]
+    },
+    {
       "family_id": "detector-fusion",
       "role": "seed",
       "evaluation_scopes": ["synthetic", "e1"],
@@ -85,6 +97,7 @@
         "current_default",
         "detector_explicit_role",
         "ocr_semantic_hint",
+        "ocr_provenance_verifier",
         "explicit_role_consensus",
         "human_oracle"
       ]
@@ -156,7 +169,7 @@
     {
       "family_id": "fill-backend",
       "role": "fill",
-      "evaluation_scopes": ["synthetic", "e1-oracle"],
+      "evaluation_scopes": ["synthetic-fill", "e1-oracle"],
       "variants": [
         "current_lama",
         "ballons_lama",
@@ -164,7 +177,7 @@
         "planar_gradient",
         "telea",
         "conditional_hybrid",
-        "skip"
+        "conditional_refill_existing"
       ]
     },
     {

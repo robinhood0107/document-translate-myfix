@@ -249,7 +249,11 @@ def main(argv: list[str] | None = None) -> int:
         source_cache_root.mkdir(parents=True, exist_ok=True)
 
         for page in pages:
-            image = cv2.imread(page.source_image, cv2.IMREAD_COLOR)
+            # OpenCV's Windows filename loader cannot reliably open non-ASCII
+            # source paths.  imkit decodes the bytes after a Unicode-safe file
+            # read, which is the same path contract used by the product
+            # exporter.
+            image = imk.read_image(page.source_image)
             if image is None or image.size == 0:
                 raise FileNotFoundError(page.source_image)
             shape = image.shape[:2]

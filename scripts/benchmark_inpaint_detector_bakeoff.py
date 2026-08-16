@@ -30,6 +30,12 @@ from benchmarking.inpaint_detector_bakeoff.contracts import (  # noqa: E402
     binary_mask,
     mask_sha256,
 )
+from benchmarking.inpaint_detector_bakeoff.easyocr_reference import (  # noqa: E402
+    CRAFTSettings,
+    DBNetSettings,
+    EasyOCRCRAFTReference,
+    EasyOCRDBNetReference,
+)
 from benchmarking.inpaint_detector_bakeoff.stage1 import (  # noqa: E402
     load_stage1_manifest,
     run_stage1,
@@ -40,6 +46,10 @@ from benchmarking.inpaint_detector_bakeoff.synthetic_detector import (  # noqa: 
     CTDSyntheticFineTuneReference,
     cuda_peak_memory_provenance,
     evaluation_runtime_provenance,
+)
+from benchmarking.inpaint_detector_bakeoff.tiled_detector import (  # noqa: E402
+    TiledCandidateReference,
+    TiledInferenceSettings,
 )
 from modules.masking.ctd_refiner import CTDRefinerSettings  # noqa: E402
 from modules.utils.download import ModelDownloader, ModelID  # noqa: E402
@@ -54,6 +64,12 @@ EVALUATOR_PATH = Path(__file__).resolve()
 STAGE1_PATH = ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "stage1.py"
 SYNTHETIC_DETECTOR_PATH = (
     ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "synthetic_detector.py"
+)
+TILED_DETECTOR_PATH = (
+    ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "tiled_detector.py"
+)
+EASYOCR_REFERENCE_PATH = (
+    ROOT / "benchmarking" / "inpaint_detector_bakeoff" / "easyocr_reference.py"
 )
 
 
@@ -123,7 +139,44 @@ def _ownership_path(args: argparse.Namespace, page) -> Path:
 
 
 def _candidate(args: argparse.Namespace):
-    if args.candidate == "ctd-synthetic-finetune":
+    if args.candidate in {"easyocr-craft", "easyocr-dbnet18"}:
+        if not args.reference_root:
+            raise ValueError("--reference-root is required for EasyOCR references")
+        if not args.model:
+            raise ValueError("--model is required for EasyOCR references")
+        model_path = Path(args.model)
+        if args.candidate == "easyocr-craft":
+            adapter = EasyOCRCRAFTReference(
+                Path(args.reference_root),
+                model_path,
+                device=args.device,
+                settings=CRAFTSettings(
+                    canvas_size=int(args.detect_size),
+                    text_threshold=float(args.text_threshold),
+                    link_threshold=float(args.link_threshold),
+                    low_text=float(args.low_text),
+                    dilate_size=3,
+                ),
+            )
+        else:
+            adapter = EasyOCRDBNetReference(
+                Path(args.reference_root),
+                model_path,
+                device=args.device,
+                settings=DBNetSettings(
+                    detection_size=int(args.detect_size),
+                    text_threshold=float(args.text_threshold),
+                    bbox_min_score=float(args.bbox_min_score),
+                    bbox_min_size=int(args.bbox_min_size),
+                    dilate_size=3,
+                ),
+            )
+        return adapter.infer, model_path, None
+
+    if args.candidate in {
+        "ctd-synthetic-finetune",
+        "ctd-synthetic-finetune-tiled",
+    }:
         if not args.checkpoint:
             raise ValueError("--checkpoint is required for CTD synthetic fine-tune")
         model_path = Path(
@@ -143,7 +196,16 @@ def _candidate(args: argparse.Namespace):
             font_paths=tuple(Path(value) for value in args.font),
             expected_code_commit=_current_commit(),
         )
-        return adapter.infer, model_path, None
+        infer = adapter.infer
+        if args.candidate.endswith("-tiled"):
+            infer = TiledCandidateReference(
+                infer,
+                TiledInferenceSettings(
+                    tile_sizes=tuple(args.tile_size),
+                    overlap=float(args.tile_overlap),
+                ),
+            ).infer
+        return infer, model_path, None
 
     if args.candidate == "ballons-ctbd":
         model_path = Path(args.model or ModelDownloader.get_file_path(
@@ -201,6 +263,15 @@ def _candidate(args: argparse.Namespace):
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         return adapter.infer(image_rgb)
 
+    if args.candidate == "ballons-ctd-tiled":
+        infer = TiledCandidateReference(
+            infer,
+            TiledInferenceSettings(
+                tile_sizes=tuple(args.tile_size),
+                overlap=float(args.tile_overlap),
+            ),
+        ).infer
+
     def infer_ownership_roi(page, image_bgr):
         ownership_path = _ownership_path(args, page)
         ownership = cv2.imdecode(
@@ -242,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
             "ballons-ctd-original",
             "ballons-ctbd",
             "ctd-synthetic-finetune",
+            "ctd-synthetic-finetune-tiled",
+            "ballons-ctd-tiled",
+            "easyocr-craft",
+            "easyocr-dbnet18",
         ),
         required=True,
     )
@@ -262,6 +337,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--ballons-root", default="")
+    parser.add_argument(
+        "--reference-root",
+        default="",
+        help="Pinned upstream Python reference root for lab-only candidates.",
+    )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument(
         "--cache-dir",
@@ -274,7 +354,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confidence", type=float, default=0.3)
     parser.add_argument("--ctbd-dilate", type=int, default=4)
     parser.add_argument("--detect-size", type=int, default=1280)
+    parser.add_argument("--text-threshold", type=float, default=0.7)
+    parser.add_argument("--link-threshold", type=float, default=0.4)
+    parser.add_argument("--low-text", type=float, default=0.4)
+    parser.add_argument("--bbox-min-score", type=float, default=0.2)
+    parser.add_argument("--bbox-min-size", type=int, default=3)
     parser.add_argument("--max-batches", type=int, default=4)
+    parser.add_argument(
+        "--tile-size",
+        action="append",
+        type=int,
+        default=None,
+        help="Source-space square tile size; repeat for multiscale tiling.",
+    )
+    parser.add_argument("--tile-overlap", type=float, default=0.2)
     parser.add_argument(
         "--ownership-root",
         type=Path,
@@ -288,6 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    args.tile_size = list(args.tile_size or [768])
     manifest_path = args.manifest.resolve()
     manifest_binding = validate_source_only_manifest_v4(manifest_path)
     current_commit = _current_commit()
@@ -353,6 +447,28 @@ def main(argv: list[str] | None = None) -> int:
             "ctbd_dilate": int(args.ctbd_dilate),
             "device": args.device,
             "ownership_roi": args.candidate == "ballons-ctd-text-roi",
+            "tile_sizes": (
+                list(args.tile_size) if args.candidate.endswith("-tiled") else []
+            ),
+            "tile_overlap": (
+                float(args.tile_overlap) if args.candidate.endswith("-tiled") else 0.0
+            ),
+            "reference_root_commit": (
+                subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=Path(args.reference_root).resolve(),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                if args.reference_root
+                else ""
+            ),
+            "text_threshold": float(args.text_threshold),
+            "link_threshold": float(args.link_threshold),
+            "low_text": float(args.low_text),
+            "bbox_min_score": float(args.bbox_min_score),
+            "bbox_min_size": int(args.bbox_min_size),
             "ownership_contract": (
                 "external-page-id-mask"
                 if args.ownership_root
@@ -381,6 +497,11 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "model_sha256": _sha256(model_path),
                 "checkpoint_sha256": preprocessing_contract["checkpoint_sha256"],
+                "reference_adapter_sha256": (
+                    _sha256(EASYOCR_REFERENCE_PATH)
+                    if args.candidate.startswith("easyocr-")
+                    else ""
+                ),
             }
         )
         candidate_spec = RoleCandidateSpec(
@@ -651,7 +772,8 @@ def main(argv: list[str] | None = None) -> int:
                 "code_commit": current_commit,
                 "evaluator_sha256": _sha256(EVALUATOR_PATH),
                 "stage1_sha256": _sha256(STAGE1_PATH),
-                "synthetic_detector_sha256": _sha256(SYNTHETIC_DETECTOR_PATH),
+            "synthetic_detector_sha256": _sha256(SYNTHETIC_DETECTOR_PATH),
+                "tiled_detector_sha256": _sha256(TILED_DETECTOR_PATH),
                 "runtime": evaluation_runtime,
             },
             "summary": summary,

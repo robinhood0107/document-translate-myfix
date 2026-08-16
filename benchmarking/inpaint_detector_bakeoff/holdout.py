@@ -83,16 +83,15 @@ def execution_binding_sha256(binding: Mapping[str, object]) -> str:
 
 def canonical_holdout_lock_path(
     prerequisites_path: Path,
-    holdout_id: object,
+    source_inventory_sha256: object,
 ) -> Path:
-    """Return the repository-canonical lock for a holdout identity."""
+    """Return the repository-canonical lock for one sealed source inventory."""
 
     del prerequisites_path  # Copies and renames must retain the same lock identity.
-    identity = str(holdout_id or "").strip()
-    if not identity:
-        raise ValueError("holdout prerequisites require an id")
-    lock_identity = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    return HOLDOUT_LOCK_ROOT / f"inpaint-holdout-{lock_identity}.execution-lock.json"
+    identity = str(source_inventory_sha256 or "").strip()
+    if not _is_sha256(identity):
+        raise ValueError("holdout source inventory identity must be a SHA-256")
+    return HOLDOUT_LOCK_ROOT / f"inpaint-holdout-{identity}.execution-lock.json"
 
 
 def _sha256_file(path: Path) -> str:
@@ -317,7 +316,10 @@ def canonical_holdout_command(execution: Mapping[str, object]) -> list[str]:
     if provider != "CUDAExecutionProvider":
         raise ValueError("holdout execution requires CUDAExecutionProvider")
     holdout_id = str(execution.get("holdout_id") or "").strip()
-    lock_path = canonical_holdout_lock_path(Path(), holdout_id)
+    lock_path = canonical_holdout_lock_path(
+        Path(),
+        execution.get("source_inventory_sha256"),
+    )
     return [
         sys.executable,
         str(runner_path),
@@ -456,7 +458,7 @@ def claim_holdout_once(
     validate_holdout_prerequisites(prerequisites)
     lock_path = canonical_holdout_lock_path(
         prerequisites_path,
-        prerequisites["holdout_id"],
+        prerequisites["execution_binding"]["source_inventory_sha256"],
     )
     execution = prerequisites["execution_binding"]
     assert isinstance(execution, dict)

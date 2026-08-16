@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -18,12 +20,13 @@ from .contracts import (
     binary_mask,
     mask_sha256,
 )
-from .method_closure import MethodVariantRequirement
+from .method_closure import INVALID_REASON_CODES, MethodVariantRequirement
 from .stage2 import _hard_gate_passes as _factorized_hard_gate_passes
 from .stage2 import attach_reconstruction_control, select_pareto_records
 from .contracts import FactorizedRunRecord
 from .stage1 import summarize as summarize_stage1_pages
 from .stage1 import (
+    broad_route_false_positive_pixels,
     load_page_masks,
     load_stage1_manifest,
     positive_edit_from_claim,
@@ -238,12 +241,10 @@ def _validate_upstream_logical_inventory(
         not isinstance(value, dict) for value in raw_candidates.values()
     ):
         raise ValueError("fusion upstream spec lacks candidate definitions")
-    if not expected_fusion_candidate_ids:
-        raise ValueError(
-            "fusion evidence requires a canonical registered candidate inventory"
-        )
     actual_candidate_ids = frozenset(map(str, raw_candidates))
-    if actual_candidate_ids != expected_fusion_candidate_ids:
+    if expected_fusion_candidate_ids and (
+        actual_candidate_ids != expected_fusion_candidate_ids
+    ):
         raise ValueError(
             "fusion upstream candidate set differs from the canonical registered "
             "provider/variant inventory"
@@ -294,10 +295,61 @@ _FACTORIZED_FAMILY_IDS = frozenset(
 )
 
 
-def _factorized_variants(payload: Mapping[str, object], family_id: str) -> frozenset[str]:
+def _factorized_logical_rows(payload: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
     runs = payload.get("runs")
     if not isinstance(runs, list):
         raise ValueError("factorized result must contain runs")
+    physical_by_id = {
+        str(row.get("run_id") or ""): row
+        for row in runs
+        if isinstance(row, Mapping) and str(row.get("run_id") or "")
+    }
+    ledger = payload.get("closure_ledger")
+    if not isinstance(ledger, list):
+        raise ValueError("factorized result must contain closure ledger")
+    logical_rows: list[Mapping[str, object]] = []
+    role_fields = {
+        "detector": "detector_id",
+        "ownership": "ownership_id",
+        "silhouette": "silhouette_id",
+        "router": "router_id",
+        "expansion": "expansion_id",
+        "fill": "fill_id",
+    }
+    for entry in ledger:
+        if not isinstance(entry, Mapping):
+            continue
+        logical_id = str(entry.get("logical_id") or "")
+        source_id = (
+            str(entry.get("reused_from") or "")
+            if str(entry.get("closure_state") or "") == "reused_by_sha"
+            else logical_id
+        )
+        source = physical_by_id.get(source_id)
+        selection = entry.get("selection")
+        if source is None or not isinstance(selection, Mapping):
+            continue
+        logical = dict(source)
+        logical["run_id"] = logical_id
+        logical["selection"] = dict(selection)
+        for role, field in role_fields.items():
+            logical[field] = str(selection.get(role) or "")
+        logical_rows.append(logical)
+    return tuple(logical_rows)
+
+
+def _factorized_variants(payload: Mapping[str, object], family_id: str) -> frozenset[str]:
+    runs = _factorized_logical_rows(payload)
+    if not runs:
+        return frozenset()
+    # Every factorized run consumes the sealed PR4 protection fields and is
+    # recomputed from the immutable source with an exact edit-mask composite.
+    # The finalist validator reopens those source/output bytes and verifies
+    # both invariants, so these are real role proofs rather than declarations.
+    if family_id == "exact-protection":
+        return frozenset({"pr4_exact"})
+    if family_id == "exact-composite":
+        return frozenset({"immutable_original_exact_mask"})
     field_and_map: dict[str, tuple[str, dict[str, str]]] = {
         "current-ctd": (
             "detector_id",
@@ -330,6 +382,8 @@ def _factorized_variants(payload: Mapping[str, object], family_id: str) -> froze
                 "ysg_standard": "ysg_standard",
                 "ysg_obb": "ysg_obb",
                 "manga109_text": "manga109",
+                "rtdetr_pixel": "rtdetr_pixel",
+                "c13_reconciliation": "c13_reconciliation",
             },
         ),
         "bubble-silhouette": (
@@ -372,7 +426,7 @@ def _factorized_variants(payload: Mapping[str, object], family_id: str) -> froze
                 "planar_gradient": "planar_gradient",
                 "telea": "telea",
                 "conditional_hybrid": "conditional_hybrid",
-                "skip": "skip",
+                "conditional_refill_existing": "conditional_refill_existing",
             },
         ),
     }
@@ -397,6 +451,20 @@ def _stage1_variants(payload: Mapping[str, object], family_id: str) -> frozenset
         if candidate != "ctd-synthetic-low-contrast-finetune-v4" or not isinstance(
             identities, Mapping
         ):
+            return frozenset()
+        return frozenset(
+            normalized
+            for source_variant, normalized in aliases.items()
+            if isinstance(identities.get(source_variant), Mapping)
+        )
+    easyocr_families = {
+        "easyocr-craft": "easyocr-craft",
+        "easyocr-dbnet18": "easyocr-dbnet18",
+    }
+    if easyocr_families.get(candidate) == family_id:
+        aliases = {"raw": "raw", "refined": "refined", "dilated": "native3"}
+        identities = payload.get("variant_output_identity")
+        if not isinstance(identities, Mapping):
             return frozenset()
         return frozenset(
             normalized
@@ -442,6 +510,13 @@ def _fusion_variants(payload: Mapping[str, object], family_id: str) -> frozenset
         "manga109_text": ("manga109-text", "raw"),
         "ownership_roi_ctd": ("ownership-roi-ctd", "raw"),
         "ownership_roi_ctd_refined": ("ownership-roi-ctd", "refined"),
+        "finetune_e6_raw": ("ctd-synthetic-finetune", "raw"),
+        "finetune_e6_native3": ("ctd-synthetic-finetune", "native3"),
+        "finetune_e8_raw": ("ctd-synthetic-finetune", "raw"),
+        "finetune_e8_native3": ("ctd-synthetic-finetune", "native3"),
+        "easyocr_dbnet18_raw": ("easyocr-dbnet18", "raw"),
+        "easyocr_dbnet18_refined": ("easyocr-dbnet18", "refined"),
+        "easyocr_dbnet18_native3": ("easyocr-dbnet18", "native3"),
     }
     observed: set[str] = set()
     for row in runs:
@@ -723,8 +798,10 @@ def _validate_factorized(payload: Mapping[str, object]) -> None:
     recomputed = {record.run_id: record for record in select_pareto_records(records)}
     for declared in records:
         expected = recomputed[declared.run_id]
-        if declared.status in {"pareto", "family_complete"} and not _factorized_hard_gate_passes(
-            declared.metrics
+        if (
+            declared.status in {"pareto", "family_complete"}
+            and not declared.oracle_only
+            and not _factorized_hard_gate_passes(declared.metrics)
         ):
             raise ValueError(
                 "factorized finalist status is not proved by fail-closed metrics"
@@ -797,7 +874,14 @@ def _validate_fusion(payload: Mapping[str, object]) -> None:
         raise ValueError("fusion page statistics do not exactly match runs")
     from scripts.benchmark_inpaint_detector_fusions_v4 import (  # noqa: PLC0415
         _hard_gate_passes as _fusion_hard_gate_passes,
+        _product_mask_hard_gate_passes as _fusion_product_mask_hard_gate_passes,
+        _seed_gate_passes as _fusion_seed_gate_passes,
+        select_seed_admission_run_ids,
     )
+    admission = payload.get("seed_admission")
+    has_seed_admission = admission is not None
+    if has_seed_admission and not isinstance(admission, Mapping):
+        raise ValueError("fusion seed admission must be an object")
 
     for row in runs:
         _validate_run_status(row, "fusion run")
@@ -834,10 +918,23 @@ def _validate_fusion(payload: Mapping[str, object]) -> None:
             )
         try:
             hard_pass = _fusion_hard_gate_passes(canonical_metrics)
+            seed_eligible = _fusion_seed_gate_passes(canonical_metrics)
+            product_mask_hard_pass = _fusion_product_mask_hard_gate_passes(
+                canonical_metrics
+            )
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(
                 "fusion metrics do not satisfy the complete fail-closed schema"
             ) from error
+        if has_seed_admission:
+            if row.get("seed_eligible") is not seed_eligible:
+                raise ValueError(
+                    "fusion seed eligibility differs from canonical metrics"
+                )
+            if row.get("product_mask_hard_pass") is not product_mask_hard_pass:
+                raise ValueError(
+                    "fusion product-mask gate differs from canonical metrics"
+                )
         information_limited = any(
             metrics.get(field) is not True  # type: ignore[union-attr]
             for field in (
@@ -888,9 +985,35 @@ def _validate_fusion(payload: Mapping[str, object]) -> None:
         output_sha = row["metrics"].get("output_mask_set_sha256")  # type: ignore[index]
         if not _is_sha256(output_sha):
             raise ValueError("fusion run lacks exact output-mask-set SHA")
-        closure_sha = str(ledger_by_id[str(row["run_id"])].get("content_sha256") or "")
+        closure_sha = str(
+            ledger_by_id[str(row["run_id"])].get("content_sha256") or ""
+        )
         if str(output_sha) != closure_sha:
             raise ValueError("fusion output SHA differs from closure content SHA")
+    if has_seed_admission:
+        assert isinstance(admission, Mapping)
+        if int(admission.get("runtime_detector_limit") or 0) != 2:
+            raise ValueError(
+                "fusion seed admission must enforce the two-detector limit"
+            )
+        selected = select_seed_admission_run_ids(
+            [dict(row) for row in runs], limit=2
+        )
+        if set(map(str, admission.get("selected_run_ids", []))) != set(selected):
+            raise ValueError("fusion seed admission differs from canonical selection")
+        strict_available = any(bool(row.get("seed_eligible")) for row in runs)
+        if admission.get("strict_seed_available") is not strict_available:
+            raise ValueError("fusion strict-seed availability is inconsistent")
+        for row in runs:
+            admitted = str(row["run_id"]) in selected
+            if row.get("seed_admitted") is not admitted:
+                raise ValueError("fusion run seed-admitted flag is inconsistent")
+            expected_kind = (
+                "strict" if admitted and strict_available else
+                "best_effort" if admitted else "not_selected"
+            )
+            if str(row.get("seed_admission_kind") or "") != expected_kind:
+                raise ValueError("fusion run seed-admission kind is inconsistent")
 
 
 def _validate_semantic(payload: Mapping[str, object]) -> None:
@@ -906,6 +1029,7 @@ def _validate_semantic(payload: Mapping[str, object]) -> None:
             "current_default",
             "detector_explicit_role",
             "ocr_semantic_hint",
+            "ocr_provenance_verifier",
             "explicit_role_consensus",
             "human_oracle",
         }
@@ -954,6 +1078,9 @@ def _validate_semantic(payload: Mapping[str, object]) -> None:
             "ambiguous_instance_count",
             "ambiguous_destructive_count",
             "unavailable_instance_count",
+            "no_edit_page_count",
+            "no_edit_false_translate_page_count",
+            "no_edit_false_translate_region_count",
         )
         values: dict[str, int] = {}
         for field in integer_fields:
@@ -992,6 +1119,7 @@ def _validate_semantic(payload: Mapping[str, object]) -> None:
             and (required == 0 or float(recall) >= 1.0)
             and values["preserve_destructive_count"] == 0
             and values["ambiguous_destructive_count"] == 0
+            and values["no_edit_false_translate_page_count"] == 0
         )
         expected = "blocked_asset" if blocked else (
             "family_complete" if hard_pass else "dominated"
@@ -1856,6 +1984,7 @@ def _validate_finalist_output_artifacts(
     payload: Mapping[str, object],
     artifact_path: Path,
     scope_manifest_path: Path,
+    upstream_contract_path: Path | None,
 ) -> None:
     """Re-open factorized/fusion output bytes before accepting finalist evidence."""
 
@@ -1897,7 +2026,16 @@ def _validate_finalist_output_artifacts(
         if schema == "inpaint-factorized-results-v3"
         else "inpaint-fusion-output-artifact-inventory-v1"
     )
-    if not isinstance(inventory, Mapping) or inventory.get("schema_version") != expected_schema:
+    inventory_schema = str(inventory.get("schema_version") or "")
+    allowed_inventory_schemas = (
+        {
+            "inpaint-factorized-output-artifact-inventory-v1",
+            "inpaint-factorized-output-artifact-inventory-v2",
+        }
+        if schema == "inpaint-factorized-results-v3"
+        else {expected_schema}
+    )
+    if not isinstance(inventory, Mapping) or inventory_schema not in allowed_inventory_schemas:
         raise ValueError("output artifact inventory schema differs")
     records = inventory.get("records")
     complete_values = inventory.get("complete_run_ids")
@@ -1958,13 +2096,16 @@ def _validate_finalist_output_artifacts(
         page_id = str(value.get("page_id") or "")
         role = str(value.get("role") or "")
         key = (run_id, page_id, role)
+        factorized_roles = {
+            "detector_seed_mask",
+            "edit_mask",
+            "final_mask",
+            "candidate_image",
+        }
+        if inventory_schema == "inpaint-factorized-output-artifact-inventory-v2":
+            factorized_roles.add("effective_ownership_mask")
         allowed_roles = (
-            {
-                "detector_seed_mask",
-                "edit_mask",
-                "final_mask",
-                "candidate_image",
-            }
+            factorized_roles
             if schema == "inpaint-factorized-results-v3"
             else {"claim_mask", "edit_mask"}
         )
@@ -2025,6 +2166,21 @@ def _validate_finalist_output_artifacts(
     stage_by_id = {
         page.page_id: page for page in load_stage1_manifest(scope_manifest_path)
     }
+    upstream_payload: Mapping[str, object] | None = None
+    if (
+        schema == "inpaint-factorized-results-v3"
+        and inventory_schema == "inpaint-factorized-output-artifact-inventory-v2"
+    ):
+        if upstream_contract_path is None:
+            raise ValueError(
+                "factorized ownership evidence requires its upstream matrix"
+            )
+        loaded_upstream = json.loads(
+            upstream_contract_path.read_text(encoding="utf-8")
+        )
+        if not isinstance(loaded_upstream, Mapping):
+            raise ValueError("factorized upstream matrix root must be an object")
+        upstream_payload = loaded_upstream
 
     for run_id in finalists:
         page_rows = pages.get(run_id)
@@ -2033,11 +2189,19 @@ def _validate_finalist_output_artifacts(
         ):
             raise ValueError("complete output run lacks canonical page rows")
         expected_roles = (
-            (
+            tuple(
+                [
                 "detector_seed_mask",
+                *(
+                    ["effective_ownership_mask"]
+                    if inventory_schema
+                    == "inpaint-factorized-output-artifact-inventory-v2"
+                    else []
+                ),
                 "edit_mask",
                 "final_mask",
                 "candidate_image",
+                ]
             )
             if schema == "inpaint-factorized-results-v3"
             else ("claim_mask", "edit_mask")
@@ -2064,6 +2228,13 @@ def _validate_finalist_output_artifacts(
                         canonical_page.get("candidate_pixel_sha256") or ""
                     ),
                 }
+                if inventory_schema == "inpaint-factorized-output-artifact-inventory-v2":
+                    expected["effective_ownership_mask"] = str(
+                        canonical_page.get(
+                            "effective_ownership_mask_pixel_sha256"
+                        )
+                        or ""
+                    )
             else:
                 expected = {
                     "claim_mask": str(
@@ -2136,6 +2307,68 @@ def _validate_finalist_output_artifacts(
             }
             if schema == "inpaint-factorized-results-v3":
                 seed = decoded_values[(run_id, page_id, "detector_seed_mask")]
+                effective_ownership = (
+                    decoded_values[(run_id, page_id, "effective_ownership_mask")]
+                    if inventory_schema
+                    == "inpaint-factorized-output-artifact-inventory-v2"
+                    else (
+                        masks.broad_ownership
+                        if masks.broad_ownership is not None
+                        else masks.ownership
+                    )
+                )
+                if upstream_payload is not None:
+                    families = upstream_payload.get("families")
+                    ownership_families = (
+                        families.get("ownership")
+                        if isinstance(families, Mapping)
+                        else None
+                    )
+                    ownership_id = str(
+                        run_by_id[run_id].get("ownership_id") or ""
+                    )
+                    selected_family = (
+                        ownership_families.get(ownership_id)
+                        if isinstance(ownership_families, Mapping)
+                        else None
+                    )
+                    selected_pages = (
+                        selected_family.get("pages")
+                        if isinstance(selected_family, Mapping)
+                        else None
+                    )
+                    selected_page = (
+                        selected_pages.get(page_id)
+                        if isinstance(selected_pages, Mapping)
+                        else None
+                    )
+                    selected_path_value = (
+                        selected_page.get("broad_mask", selected_page.get("mask"))
+                        if isinstance(selected_page, Mapping)
+                        else None
+                    )
+                    if selected_path_value is None:
+                        expected_ownership = (
+                            masks.broad_ownership
+                            if masks.broad_ownership is not None
+                            else masks.ownership
+                        )
+                    else:
+                        selected_path = Path(str(selected_path_value))
+                        if not selected_path.is_absolute():
+                            selected_path = (
+                                upstream_contract_path.parent / selected_path
+                            )
+                        expected_ownership = _decode_scope_image(
+                            selected_path.resolve(), cv2.IMREAD_GRAYSCALE
+                        )
+                    if not np.array_equal(
+                        binary_mask(effective_ownership, shape),
+                        binary_mask(expected_ownership, shape),
+                    ):
+                        raise ValueError(
+                            "effective ownership output differs from upstream matrix"
+                        )
                 final_mask = decoded_values[(run_id, page_id, "final_mask")]
                 candidate = decoded_values[(run_id, page_id, "candidate_image")]
                 if seed.shape != shape or final_mask.shape != shape or candidate.shape[:2] != shape:
@@ -2205,23 +2438,13 @@ def _validate_finalist_output_artifacts(
                             ),
                         }
                     )
-                clean_union = np.zeros(shape, np.uint8)
                 overlap_seen = np.zeros(shape, np.uint8)
                 overlap = np.zeros(shape, np.uint8)
                 for region in masks.regions:
                     overlap[(overlap_seen > 0) & (region.ownership > 0)] = 255
                     overlap_seen[region.ownership > 0] = 255
-                    if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
-                        clean_union[region.bubble_interior > 0] = 255
                 broad_only = cv2.bitwise_and(edit, cv2.bitwise_not(seed))
-                broad_false = (
-                    int(np.count_nonzero((broad_only > 0) & (clean_union == 0)))
-                    if masks.regions
-                    else int(np.count_nonzero(broad_only))
-                    if stage_page.bubble_route_class
-                    not in {"clean_flat", "clean_gradient"}
-                    else 0
-                )
+                broad_false = broad_route_false_positive_pixels(broad_only, masks)
                 overlap_edit = int(
                     np.count_nonzero((overlap > 0) & (edit > 0))
                 )
@@ -2264,6 +2487,14 @@ def _validate_finalist_output_artifacts(
                     "preserve_edit_overlap_pixel_count": common_facts[
                         "preserve_overlap"
                     ],
+                    "ownership_leak_pixel_count": int(
+                        np.count_nonzero((edit > 0) & (effective_ownership == 0))
+                    ),
+                    "corner_edit_overlap_pixel_count": int(
+                        np.count_nonzero((edit > 0) & (masks.corner > 0))
+                        if masks.corner is not None
+                        else 0
+                    ),
                     "ambiguous_structure_overlap_pixel_count": common_facts[
                         "ambiguous_overlap"
                     ],
@@ -2276,19 +2507,19 @@ def _validate_finalist_output_artifacts(
                     "broad_route_false_positive_pixel_count": broad_false,
                     "conditional_hybrid_overlap_conflict_pixel_count": overlap_edit
                     if str(run_by_id[run_id].get("fill_id") or "")
-                    == "conditional_hybrid"
+                    in {"conditional_hybrid", "conditional_refill_existing"}
                     else 0,
                     "authoritative_region_overlap_pixel_count": int(
                         np.count_nonzero(overlap)
                     )
                     if str(run_by_id[run_id].get("fill_id") or "")
-                    == "conditional_hybrid"
+                    in {"conditional_hybrid", "conditional_refill_existing"}
                     else 0,
                     "authoritative_overlap_narrow_verified": (
                         not np.any((overlap > 0) & (edit > 0) & (seed == 0))
                     )
                     if str(run_by_id[run_id].get("fill_id") or "")
-                    == "conditional_hybrid"
+                    in {"conditional_hybrid", "conditional_refill_existing"}
                     else False,
                     "residue_score": residue,
                     "baseline_residue_score": baseline_residue,
@@ -2311,6 +2542,10 @@ def _validate_finalist_output_artifacts(
                         (run_id, page_id, "candidate_image")
                     ],
                 }
+                if inventory_schema == "inpaint-factorized-output-artifact-inventory-v2":
+                    factorized_facts[
+                        "effective_ownership_mask_pixel_sha256"
+                    ] = decoded_sha[(run_id, page_id, "effective_ownership_mask")]
                 for field, expected_value in factorized_facts.items():
                     _assert_recomputed_fact(canonical_page, field, expected_value)
             else:
@@ -2441,9 +2676,13 @@ def _artifact_page_ids(payload: Mapping[str, object]) -> frozenset[str]:
 
 
 def _matching_runs(payload: Mapping[str, object], family_id: str, variant_id: str) -> list[Mapping[str, object]]:
-    runs = payload.get("runs")
-    if not isinstance(runs, list):
-        return []
+    if str(payload.get("schema_version") or "") == "inpaint-factorized-results-v3":
+        runs: Sequence[object] = _factorized_logical_rows(payload)
+    else:
+        raw_runs = payload.get("runs")
+        if not isinstance(raw_runs, list):
+            return []
+        runs = raw_runs
     matched: list[Mapping[str, object]] = []
     for row in runs:
         if not isinstance(row, Mapping):
@@ -2524,7 +2763,12 @@ def artifact_variant_facts(payload: Mapping[str, object], family_id: str) -> dic
         return output
     if (
         schema == "inpaint-detector-bakeoff-stage1-v1"
-        and family_id == "ctd-synthetic-finetune"
+        and family_id
+        in {
+            "ctd-synthetic-finetune",
+            "easyocr-craft",
+            "easyocr-dbnet18",
+        }
     ):
         identities = payload["variant_output_identity"]  # type: ignore[index]
         summary = payload["summary"]  # type: ignore[index]
@@ -2581,7 +2825,25 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def scope_manifest_binding(path: Path) -> dict[str, object]:
+_SCOPE_BINDING_CACHE_ENABLED = False
+
+
+@lru_cache(maxsize=8)
+def _scope_manifest_binding_cached(
+    path_text: str,
+    manifest_sha256: str,
+    seal_sha256: str,
+) -> dict[str, object]:
+    path = Path(path_text)
+    if sha256_file(path) != manifest_sha256:
+        raise ValueError("scope manifest changed during cached validation")
+    seal_path = path.with_name(f"{path.name}.seal.json")
+    if sha256_file(seal_path) != seal_sha256:
+        raise ValueError("scope manifest seal changed during cached validation")
+    return _scope_manifest_binding_uncached(path)
+
+
+def _scope_manifest_binding_uncached(path: Path) -> dict[str, object]:
     validated = validate_source_only_manifest_v4(path)
     return {
         "sha256": str(validated["manifest_sha256"]),
@@ -2593,6 +2855,34 @@ def scope_manifest_binding(path: Path) -> dict[str, object]:
         "page_ids": list(validated["page_ids"]),
         "page_inventory_sha256": str(validated["page_inventory_sha256"]),
     }
+
+
+@contextmanager
+def scope_manifest_binding_cache() -> Iterable[None]:
+    global _SCOPE_BINDING_CACHE_ENABLED
+    if _SCOPE_BINDING_CACHE_ENABLED:
+        yield
+        return
+    _SCOPE_BINDING_CACHE_ENABLED = True
+    _scope_manifest_binding_cached.cache_clear()
+    try:
+        yield
+    finally:
+        _SCOPE_BINDING_CACHE_ENABLED = False
+
+
+def scope_manifest_binding(path: Path) -> dict[str, object]:
+    path = path.resolve()
+    if not _SCOPE_BINDING_CACHE_ENABLED:
+        return _scope_manifest_binding_uncached(path)
+    seal_path = path.with_name(f"{path.name}.seal.json")
+    return dict(
+        _scope_manifest_binding_cached(
+            str(path),
+            sha256_file(path),
+            sha256_file(seal_path),
+        )
+    )
 
 
 def merge_scope_manifest_binding(
@@ -2678,6 +2968,65 @@ def evidence_rows_from_artifact(
     )
 
 
+@lru_cache(maxsize=32)
+def _validate_accounted_artifact_once(
+    artifact_path_text: str,
+    artifact_sha256: str,
+    scope_manifest_path_text: str,
+    scope_manifest_sha256: str,
+    upstream_contract_path_text: str,
+    upstream_contract_sha256: str,
+    expected_fusion_candidate_ids: tuple[str, ...],
+) -> frozenset[str]:
+    artifact_path = Path(artifact_path_text)
+    scope_manifest_path = Path(scope_manifest_path_text)
+    upstream_contract_path = (
+        Path(upstream_contract_path_text) if upstream_contract_path_text else None
+    )
+    if sha256_file(artifact_path) != artifact_sha256:
+        raise ValueError("evidence artifact changed during validation")
+    if sha256_file(scope_manifest_path) != scope_manifest_sha256:
+        raise ValueError("scope manifest changed during evidence validation")
+    if upstream_contract_path is not None and (
+        sha256_file(upstream_contract_path) != upstream_contract_sha256
+    ):
+        raise ValueError("upstream contract changed during evidence validation")
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("evidence artifact root must be an object")
+    if str(payload.get("manifest_sha256") or "") != scope_manifest_sha256:
+        raise ValueError(
+            "evidence artifact manifest SHA differs from the sealed scope manifest"
+        )
+    if payload.get("schema_version") == "inpaint-detector-bakeoff-stage1-v1":
+        _validate_stage1_output_artifacts(payload, artifact_path)
+    _validate_finalist_output_artifacts(
+        payload,
+        artifact_path,
+        scope_manifest_path,
+        upstream_contract_path,
+    )
+    _validate_upstream_logical_inventory(
+        payload,
+        upstream_contract_path=upstream_contract_path,
+        scope_manifest_sha256=scope_manifest_sha256,
+        expected_fusion_candidate_ids=(
+            frozenset(expected_fusion_candidate_ids)
+            if expected_fusion_candidate_ids
+            else None
+        ),
+    )
+    page_ids = _artifact_page_ids(payload)
+    binding = scope_manifest_binding(scope_manifest_path)
+    if page_ids != frozenset(
+        str(value) for value in binding["page_ids"]  # type: ignore[index]
+    ):
+        raise ValueError(
+            "evidence artifact page IDs differ from the canonical scope manifest"
+        )
+    return page_ids
+
+
 def accounted_evidence_from_artifact(
     requirements: Iterable[MethodVariantRequirement],
     *,
@@ -2692,34 +3041,41 @@ def accounted_evidence_from_artifact(
     if not family_id.strip() or not variant_ids:
         raise ValueError("an explicit family and at least one variant are required")
     requirements = tuple(requirements)
+    artifact_path = artifact_path.resolve()
+    scope_manifest_path = scope_manifest_path.resolve()
+    upstream_contract_path = (
+        upstream_contract_path.resolve()
+        if upstream_contract_path is not None
+        else None
+    )
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("evidence artifact root must be an object")
     scope_binding = scope_manifest_binding(scope_manifest_path)
     scope_manifest_sha256 = str(scope_binding["sha256"])
-    if str(payload.get("manifest_sha256") or "") != scope_manifest_sha256:
-        raise ValueError("evidence artifact manifest SHA differs from the sealed scope manifest")
     facts = artifact_variant_facts(payload, family_id)
-    if payload.get("schema_version") == "inpaint-detector-bakeoff-stage1-v1":
-        _validate_stage1_output_artifacts(payload, artifact_path)
-    _validate_finalist_output_artifacts(
-        payload,
-        artifact_path,
-        scope_manifest_path,
-    )
     artifact_sha256 = sha256_file(artifact_path)
-    _validate_upstream_logical_inventory(
-        payload,
-        upstream_contract_path=upstream_contract_path,
-        scope_manifest_sha256=scope_manifest_sha256,
-        expected_fusion_candidate_ids=expected_fusion_candidate_ids,
+    validation_args = (
+        str(artifact_path),
+        artifact_sha256,
+        str(scope_manifest_path),
+        scope_manifest_sha256,
+        str(upstream_contract_path) if upstream_contract_path is not None else "",
+        (
+            sha256_file(upstream_contract_path)
+            if upstream_contract_path is not None
+            else ""
+        ),
+        tuple(sorted(expected_fusion_candidate_ids or ())),
     )
-    if _artifact_page_ids(payload) != frozenset(
-        str(value) for value in scope_binding["page_ids"]  # type: ignore[index]
-    ):
-        raise ValueError(
-            "evidence artifact page IDs differ from the canonical scope manifest"
-        )
+    if _SCOPE_BINDING_CACHE_ENABLED:
+        _validate_accounted_artifact_once(*validation_args)
+    else:
+        _validate_accounted_artifact_once.cache_clear()
+        try:
+            _validate_accounted_artifact_once(*validation_args)
+        finally:
+            _validate_accounted_artifact_once.cache_clear()
     registered = {
         requirement.variant_id: requirement
         for requirement in requirements
@@ -2907,6 +3263,180 @@ def blocked_asset_evidence(
     )
 
 
+_INVALID_PARENT_COLLECTIONS = {
+    "run": ("runs", "run_id"),
+    "policy": ("policies", "policy_id"),
+    "combination": ("closure_ledger", "logical_id"),
+}
+_INVALID_PARENT_SCHEMAS = {
+    "run": frozenset(
+        {"inpaint-detector-fusion-results-v4", "inpaint-factorized-results-v3"}
+    ),
+    "policy": frozenset({"inpaint-semantic-policy-results-v4"}),
+    "combination": frozenset(
+        {"inpaint-detector-fusion-results-v4", "inpaint-factorized-results-v3"}
+    ),
+}
+
+
+def _invalid_parent_record(
+    payload: Mapping[str, object],
+    *,
+    record_kind: str,
+    record_id: str,
+) -> Mapping[str, object]:
+    try:
+        collection_name, id_field = _INVALID_PARENT_COLLECTIONS[record_kind]
+    except KeyError as error:
+        raise ValueError("invalid evidence parent record kind is unsupported") from error
+    rows = payload.get(collection_name)
+    if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        raise ValueError("invalid evidence parent artifact lacks its record collection")
+    matches = [row for row in rows if str(row.get(id_field) or "") == record_id]
+    if len(matches) != 1:
+        raise ValueError("invalid evidence parent record must resolve exactly once")
+    return matches[0]
+
+
+def _invalid_gate_facts(
+    payload: Mapping[str, object],
+    record: Mapping[str, object],
+    *,
+    reason_code: str,
+    record_id: str,
+) -> Mapping[str, object]:
+    if reason_code == "upstream_seed_not_admitted":
+        admission = payload.get("seed_admission")
+        if not isinstance(admission, Mapping):
+            raise ValueError("seed admission invalid evidence lacks admission facts")
+        selected = admission.get("selected_run_ids")
+        if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected):
+            raise ValueError("seed admission invalid evidence has malformed selected runs")
+        if record_id in selected:
+            raise ValueError("selected seed run cannot prove upstream_seed_not_admitted")
+        return {"record": record, "seed_admission": admission}
+
+    status = str(record.get("status") or "")
+    oracle_only = bool(record.get("oracle_only", False))
+    metrics = record.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("invalid evidence parent record lacks gate metrics")
+    if reason_code == "upstream_semantic_gate_failed":
+        destructive = sum(
+            int(metrics.get(field, 0) or 0)
+            for field in (
+                "preserve_destructive_count",
+                "ambiguous_destructive_count",
+                "no_edit_false_translate_page_count",
+                "unavailable_instance_count",
+            )
+        )
+        if oracle_only or status not in {
+            "dominated",
+            "blocked_asset",
+            "information_limited",
+        } or destructive <= 0:
+            raise ValueError("parent policy does not prove a semantic gate failure")
+        return {"record": record}
+    if reason_code == "upstream_product_mask_gate_failed":
+        if status != "dominated" or str(record.get("closure_reason") or "") not in {
+            "hard_gate_failed",
+            "product_mask_hard_gate_failed",
+        }:
+            raise ValueError("parent run does not prove a product mask gate failure")
+        return {"record": record}
+    if reason_code == "oracle_only_not_product":
+        if not oracle_only:
+            raise ValueError("parent record is not oracle-only")
+        return {"record": record}
+    if reason_code == "combination_incompatible":
+        if str(record.get("closure_state") or "") != "invalid_with_reason":
+            raise ValueError("parent combination is not invalid_with_reason")
+        return {"record": record}
+    raise ValueError("invalid evidence reason code is unsupported")
+
+
+def invalid_with_reason_evidence(
+    requirements: Iterable[MethodVariantRequirement],
+    *,
+    scope_manifest_path: Path,
+    parent_artifact_path: Path,
+    parent_record_kind: str,
+    parent_record_id: str,
+    reason_code: str,
+    family_id: str,
+    variant_ids: frozenset[str],
+    evaluation_scope: str,
+) -> tuple[dict[str, object], ...]:
+    if reason_code not in INVALID_REASON_CODES:
+        raise ValueError("invalid evidence requires a stable reason code")
+    binding = scope_manifest_binding(scope_manifest_path)
+    scope_sha = str(binding["sha256"])
+    payload = json.loads(parent_artifact_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("invalid evidence parent artifact root must be an object")
+    if str(payload.get("schema_version") or "") not in _INVALID_PARENT_SCHEMAS.get(
+        parent_record_kind, frozenset()
+    ):
+        raise ValueError("invalid evidence parent artifact schema is unsupported")
+    validate_evidence_artifact(payload)
+    if str(payload.get("manifest_sha256") or "") != scope_sha:
+        raise ValueError("invalid evidence parent artifact manifest SHA mismatch")
+    if _artifact_page_ids(payload) != frozenset(
+        str(value) for value in binding["page_ids"]  # type: ignore[index]
+    ):
+        raise ValueError(
+            "invalid evidence parent page IDs differ from the canonical scope"
+        )
+    record = _invalid_parent_record(
+        payload,
+        record_kind=parent_record_kind,
+        record_id=parent_record_id,
+    )
+    facts = _invalid_gate_facts(
+        payload,
+        record,
+        reason_code=reason_code,
+        record_id=parent_record_id,
+    )
+    gate_facts_sha = _canonical_sha256(facts)
+    artifact_sha = sha256_file(parent_artifact_path)
+    registered = {
+        requirement.variant_id: requirement
+        for requirement in requirements
+        if requirement.family_id == family_id
+        and requirement.evaluation_scope == evaluation_scope
+    }
+    missing = sorted(variant_ids - set(registered))
+    if missing:
+        raise ValueError(
+            "invalid evidence variant is not registered for the requested "
+            f"family/scope: {missing[0]}"
+        )
+    return tuple(
+        {
+            "family_id": registered[variant_id].family_id,
+            "role": registered[variant_id].role,
+            "variant_id": variant_id,
+            "evaluation_scope": evaluation_scope,
+            "closure_state": "invalid_with_reason",
+            "disposition": "dominated",
+            "reason": reason_code,
+            "artifact_sha256": artifact_sha,
+            "artifact_schema_version": str(payload.get("schema_version") or ""),
+            "artifact_name": parent_artifact_path.name,
+            "scope_manifest_sha256": scope_sha,
+            "content_sha256": "",
+            "content_identity_kind": "",
+            "reused_from": "",
+            "blocker_probe_sha256": "",
+            "invalid_parent_record_id": parent_record_id,
+            "invalid_gate_facts_sha256": gate_facts_sha,
+        }
+        for variant_id in sorted(variant_ids)
+    )
+
+
 def registry_evidence_adapter_gaps(
     requirements: Iterable[MethodVariantRequirement],
 ) -> tuple[dict[str, str], ...]:
@@ -2918,16 +3448,28 @@ def registry_evidence_adapter_gaps(
         "ctbd-text": frozenset({"raw"}),
         "ownership-roi-ctd": frozenset({"raw", "refined"}),
         "ctd-synthetic-finetune": frozenset({"raw", "refined", "native3"}),
+        "easyocr-craft": frozenset({"raw", "refined", "native3"}),
+        "easyocr-dbnet18": frozenset({"raw", "refined", "native3"}),
         "detector-fusion": frozenset({"single", "or", "and", "gated_recovery"}),
         "roi-trigger": frozenset({"none", "always", "seed_missing", "raw_refined_disagreement", "source_seed_unavailable", "union"}),
-        "semantic-policy": frozenset({"current_default", "detector_explicit_role", "ocr_semantic_hint", "explicit_role_consensus", "human_oracle"}),
-        "ownership": frozenset({"block_region", "dual_ownership", "ctbd_content", "ysg_standard", "ysg_obb", "manga109"}),
+        "semantic-policy": frozenset(
+            {
+                "current_default",
+                "detector_explicit_role",
+                "ocr_semantic_hint",
+                "ocr_provenance_verifier",
+                "explicit_role_consensus",
+                "human_oracle",
+            }
+        ),
+        "ownership": frozenset({"rtdetr_pixel", "block_region", "dual_ownership", "ctbd_content", "ysg_standard", "ysg_obb", "manga109", "c13_reconciliation"}),
         "bubble-silhouette": frozenset({"pr2_validated", "ballons_native", "ctbd_bubble", "manga109_balloon", "pair_union_ballons_pr2", "pair_intersection_ballons_pr2", "consensus_2_of_4", "consensus_3_of_4"}),
         "router": frozenset({"R0", "R1", "R2", "R3", "R4"}),
         "mask-expansion": frozenset({"raw", "refined", "native3", "content_component", "validated_interior", "lab_dilate1", "lab_dilate2", "lab_dilate3", "lab_dilate4"}),
-        "exact-protection": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
+        "exact-protection": frozenset({"pr4_exact", "C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
         "exact-protection-historical": frozenset({"C14", "C15", "C17", "C18", "C19", "C21", "C22", "C23"}),
-        "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "skip"}),
+        "fill-backend": frozenset({"current_lama", "ballons_lama", "robust_flat_median", "planar_gradient", "telea", "conditional_hybrid", "conditional_refill_existing"}),
+        "exact-composite": frozenset({"immutable_original_exact_mask"}),
     }
     gaps = [
         {

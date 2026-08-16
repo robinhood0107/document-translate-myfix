@@ -69,6 +69,12 @@ def _route_fill_backend(
         if bubble_route_class == "clean_gradient":
             return "planar_gradient"
         return "current_lama"
+    if normalized == "conditional_refill_existing":
+        if bubble_route_class == "clean_flat":
+            return "robust_flat_median"
+        if bubble_route_class == "clean_gradient":
+            return "planar_gradient"
+        return "current_lama"
     return normalized
 
 
@@ -94,6 +100,7 @@ def _fill_conditional_hybrid_regions(
     background_exclude_mask: np.ndarray,
     lama_fill,
     narrow_claim: np.ndarray | None = None,
+    fill_policy: str = "conditional_hybrid",
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Fill each authoritative v4 region from one immutable page source."""
 
@@ -104,10 +111,22 @@ def _fill_conditional_hybrid_regions(
     assigned = np.zeros(shape, np.uint8)
     fallback = np.zeros(shape, np.uint8)
     diagnostics: list[dict[str, object]] = []
-    region_edits = [
-        cv2.bitwise_and(edit, binary_mask(region.ownership, shape))
-        for region in masks.regions
-    ]
+    region_edits = []
+    for region in masks.regions:
+        region_domain = binary_mask(region.ownership, shape)
+        if (
+            route_decision == "broad"
+            and region.bubble_route_class in {"clean_flat", "clean_gradient"}
+        ):
+            broad_ownership = (
+                binary_mask(masks.broad_ownership, shape)
+                if masks.broad_ownership is not None
+                else binary_mask(masks.ownership, shape)
+            )
+            region_domain = cv2.bitwise_and(
+                binary_mask(region.bubble_interior, shape), broad_ownership
+            )
+        region_edits.append(cv2.bitwise_and(edit, region_domain))
     authoritative_overlap = _authoritative_region_overlap_mask(
         masks.regions, shape
     )
@@ -157,7 +176,7 @@ def _fill_conditional_hybrid_regions(
             )
         assigned[region_edit > 0] = 255
         backend = _route_fill_backend(
-            "conditional_hybrid",
+            fill_policy,
             route_decision,
             region.bubble_route_class,
         )
@@ -181,6 +200,14 @@ def _fill_conditional_hybrid_regions(
             backend=backend,
             interior_mask=region.bubble_interior,
             background_exclude_mask=background_exclude_mask,
+            background_sample_edit_mask=(
+                cv2.bitwise_and(
+                    region_edit,
+                    binary_mask(narrow_claim, shape),
+                )
+                if route_decision == "broad" and narrow_claim is not None
+                else None
+            ),
         )
         candidate[region_edit > 0] = generated[region_edit > 0]
         diagnostics.append(
@@ -231,7 +258,7 @@ def _fill_conditional_hybrid_regions(
     if np.any(candidate[edit == 0] != original[edit == 0]):
         raise AssertionError("conditional hybrid changed immutable outside pixels")
     return np.ascontiguousarray(candidate), {
-        "backend": "conditional_hybrid",
+        "backend": fill_policy,
         "applied": bool(np.any(edit)),
         "edit_pixel_count": int(np.count_nonzero(edit)),
         "region_fills": diagnostics,
@@ -540,6 +567,14 @@ def aggregate_factorized_page_statistics(
             "protected_structure_changed_pixel_count"
         ),
         "preserve_edit_overlap": sum_pixels("preserve_edit_overlap_pixel_count"),
+        "ownership_leak_pixel_count": sum(
+            optional_nonnegative_integer(fact, "ownership_leak_pixel_count")
+            for fact in facts
+        ),
+        "corner_edit_overlap_pixel_count": sum(
+            optional_nonnegative_integer(fact, "corner_edit_overlap_pixel_count")
+            for fact in facts
+        ),
         "ambiguous_structure_overlap": sum_pixels(
             "ambiguous_structure_overlap_pixel_count"
         ),
@@ -662,6 +697,17 @@ def _seal_factorized_output_inventory(
                     ),
                     (
                         page_id,
+                        "effective_ownership_mask",
+                        run_root / "effective_ownership_masks" / f"{page_id}.png",
+                        str(
+                            canonical.get(
+                                "effective_ownership_mask_pixel_sha256"
+                            )
+                            or ""
+                        ),
+                    ),
+                    (
+                        page_id,
                         "edit_mask",
                         run_root / "edit_masks" / f"{page_id}.png",
                         str(canonical.get("output_edit_mask_pixel_sha256") or ""),
@@ -725,7 +771,7 @@ def _seal_factorized_output_inventory(
         "complete_run_ids": complete_run_ids,
     }
     inventory = {
-        "schema_version": "inpaint-factorized-output-artifact-inventory-v1",
+        "schema_version": "inpaint-factorized-output-artifact-inventory-v2",
         **canonical,
         "inventory_sha256": _canonical_sha256(canonical),
     }
@@ -1473,24 +1519,21 @@ def _run_combination(
         image_cache: dict[str, np.ndarray] = {}
         mask_cache: dict[str, np.ndarray] = {}
         entry = entries[page.page_id]
-        if fill_id == "mask_only":
-            height = int(entry.get("height") or 0)
-            width = int(entry.get("width") or 0)
-            if height <= 0 or width <= 0:
-                source = _read_image(page.source_image, image_cache)
-                shape = source.shape[:2]
-            else:
-                shape = (height, width)
-                source = np.zeros((height, width, 3), np.uint8)
-        else:
-            source = _read_image(page.source_image, image_cache)
-            shape = source.shape[:2]
+        # Mask-only is also the safety preflight for an existing product
+        # candidate.  It must compare that candidate with the real source;
+        # using a dimension-only zero placeholder turns every non-black pixel
+        # into a false structural change.
+        source = _read_image(page.source_image, image_cache)
+        shape = source.shape[:2]
         annotation = _annotation_masks(
             page,
             entry,
             shape,
             mask_cache,
-            sparse_evidence=fill_id != "conditional_hybrid",
+            sparse_evidence=fill_id not in {
+                "conditional_hybrid",
+                "conditional_refill_existing",
+            },
         )
         ownership = _read_mask(
             _page_artifact(ownership_family, page.page_id, "mask"), shape, mask_cache
@@ -1560,7 +1603,7 @@ def _run_combination(
         authoritative_overlap = _authoritative_region_overlap_mask(
             masks.regions, shape
         )
-        if fill_id == "conditional_hybrid" and np.any(authoritative_overlap):
+        if fill_id in {"conditional_hybrid", "conditional_refill_existing"} and np.any(authoritative_overlap):
             existing_unsafe = route_masks.get("unsafe_signal_mask")
             route_masks["unsafe_signal_mask"] = (
                 authoritative_overlap
@@ -1601,25 +1644,23 @@ def _run_combination(
             minimum_background_samples=int(router.get("minimum_background_samples", 32)),
             **route_masks,
         )
-        clean_annotation = page.bubble_route_class in {"clean_flat", "clean_gradient"}
         broad_only = cv2.bitwise_and(
             decision.edit_mask,
             cv2.bitwise_not(detector_seed),
         )
-        if page.regions:
-            source_clean = np.zeros(shape, np.uint8)
-            for region in masks.regions:
-                if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
-                    source_clean[region.bubble_interior > 0] = 255
-            broad_route_false_pixels = int(
-                np.count_nonzero((broad_only > 0) & (source_clean == 0))
-            )
-            broad_route_false = broad_route_false_pixels > 0
-        else:
-            broad_route_false_pixels = int(np.count_nonzero(broad_only)) if (
-                decision.decision == "broad" and not clean_annotation
-            ) else 0
-            broad_route_false = broad_route_false_pixels > 0
+        streamed_clean_ownership = np.zeros(shape, np.uint8)
+        for region in page.regions:
+            if region.bubble_route_class in {"clean_flat", "clean_gradient"}:
+                streamed_clean_ownership = cv2.bitwise_or(
+                    streamed_clean_ownership,
+                    _read_mask(region.ownership_mask, shape, mask_cache),
+                )
+        broad_route_false_pixels = broad_route_false_positive_pixels(
+            broad_only,
+            masks,
+            clean_region_mask=streamed_clean_ownership,
+        )
+        broad_route_false = broad_route_false_pixels > 0
         broad_false += broad_route_false_pixels
         if decision.decision == "skip" and not page.no_edit:
             required_skips += 1
@@ -1671,7 +1712,7 @@ def _run_combination(
             final_mask = cv2.bitwise_or(baseline_mask, decision.edit_mask)
             fill_diagnostics = {"backend": fill_id, "applied": False}
         else:
-            if fill_id == "conditional_hybrid" and masks.regions:
+            if fill_id in {"conditional_hybrid", "conditional_refill_existing"} and masks.regions:
                 generated, fill_diagnostics = _fill_conditional_hybrid_regions(
                     source,
                     decision.edit_mask,
@@ -1680,6 +1721,7 @@ def _run_combination(
                     background_exclude_mask=exclude,
                     lama_fill=lama_pool.fill,
                     narrow_claim=detector_seed,
+                    fill_policy=fill_id,
                 )
             else:
                 selected_fill = _route_fill_backend(
@@ -1699,7 +1741,9 @@ def _run_combination(
                     interior_mask=interior,
                     background_exclude_mask=exclude,
                     background_sample_edit_mask=(
-                        route_seed if decision.decision == "broad" else None
+                        cv2.bitwise_and(route_seed, decision.edit_mask)
+                        if decision.decision == "broad"
+                        else None
                     ),
                     lama_fill=callback,
                 )
@@ -1844,6 +1888,26 @@ def _run_combination(
                 if masks.preserve is not None
                 else 0
             ),
+            "ownership_leak_pixel_count": int(
+                np.count_nonzero(
+                    (decision.edit_mask > 0)
+                    & (
+                        (
+                            masks.broad_ownership
+                            if masks.broad_ownership is not None
+                            else masks.ownership
+                        )
+                        == 0
+                    )
+                )
+            ),
+            "corner_edit_overlap_pixel_count": int(
+                np.count_nonzero(
+                    (decision.edit_mask > 0) & (masks.corner > 0)
+                )
+                if masks.corner is not None
+                else 0
+            ),
             "ambiguous_structure_overlap_pixel_count": int(
                 np.count_nonzero(
                     (decision.edit_mask > 0) & (masks.ambiguous > 0)
@@ -1886,6 +1950,9 @@ def _run_combination(
             "peak_vram_allocated_mib": page_runtime["peak_vram_allocated_mib"],
             "peak_vram_reserved_mib": page_runtime["peak_vram_reserved_mib"],
             "detector_seed_mask_pixel_sha256": _pixel_sha256(detector_seed),
+            "effective_ownership_mask_pixel_sha256": _pixel_sha256(
+                broad_ownership
+            ),
             "output_edit_mask_pixel_sha256": _pixel_sha256(decision.edit_mask),
             "final_mask_pixel_sha256": _pixel_sha256(final_mask),
             "candidate_pixel_sha256": _pixel_sha256(candidate),
@@ -1933,6 +2000,10 @@ def _run_combination(
         )
         if retain_artifacts and (not required_only or not page.no_edit):
             _write_image(run_root / "detector_seed_masks" / f"{page.page_id}.png", detector_seed)
+            _write_image(
+                run_root / "effective_ownership_masks" / f"{page.page_id}.png",
+                broad_ownership,
+            )
             _write_image(run_root / "edit_masks" / f"{page.page_id}.png", decision.edit_mask)
             _write_image(run_root / "final_masks" / f"{page.page_id}.png", final_mask)
             _write_image(run_root / "candidate_images" / f"{page.page_id}.png", candidate)

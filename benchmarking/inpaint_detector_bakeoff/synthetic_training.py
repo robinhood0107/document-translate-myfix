@@ -13,7 +13,15 @@ import cv2
 import numpy as np
 
 
-BACKGROUND_KINDS = ("flat", "gradient", "halftone", "hatching", "paper")
+BACKGROUND_KINDS = (
+    "flat",
+    "gradient",
+    "halftone",
+    "hatching",
+    "paper",
+    "panel_line",
+    "bubble_outline",
+)
 TEXT_STYLES = ("dark", "bright", "outline", "shadow", "embossed")
 FONT_TEXT_PHRASES = ("文字", "テスト", "小", "한글", "효과")
 _FONT_TEXT_CODEPOINTS = frozenset(
@@ -238,6 +246,26 @@ def _background(
     elif kind == "paper":
         noise = rng.normal(0.0, 5.0, size=(height, width, 1)).astype(np.float32)
         image = np.clip(image.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    elif kind == "panel_line":
+        ink = max(0, base - int(rng.integers(90, 176)))
+        thickness = int(rng.integers(2, 7))
+        if bool(rng.integers(0, 2)):
+            position = int(rng.integers(0, max(1, width)))
+            cv2.line(image, (position, 0), (position, height - 1), (ink,) * 3, thickness)
+        else:
+            position = int(rng.integers(0, max(1, height)))
+            cv2.line(image, (0, position), (width - 1, position), (ink,) * 3, thickness)
+    elif kind == "bubble_outline":
+        ink = max(0, base - int(rng.integers(80, 161)))
+        center = (
+            int(rng.integers(width // 3, max(width // 3 + 1, width * 2 // 3))),
+            int(rng.integers(height // 3, max(height // 3 + 1, height * 2 // 3))),
+        )
+        axes = (
+            int(rng.integers(max(8, width // 5), max(9, width // 2))),
+            int(rng.integers(max(8, height // 5), max(9, height // 2))),
+        )
+        cv2.ellipse(image, center, axes, 0.0, 0.0, 360.0, (ink,) * 3, int(rng.integers(1, 4)))
     return image
 
 
@@ -249,7 +277,7 @@ def _text_mask(
     height, width = shape
     mask = np.zeros(shape, np.uint8)
     line_count = int(rng.integers(1, 4))
-    if font_phrase_pairs and rng.random() < 0.65:
+    if font_phrase_pairs and rng.random() < 0.80:
         return _font_text_mask(rng, shape, font_phrase_pairs)
     vertical = bool(rng.integers(0, 2))
     if vertical:
@@ -303,14 +331,22 @@ def _font_text_mask(
     height, width = shape
     pair_index = int(rng.integers(0, len(font_phrase_pairs)))
     font_path, phrase = font_phrase_pairs[pair_index]
-    font_size = int(rng.integers(max(9, min(shape) // 24), max(16, min(shape) // 7)))
+    if rng.random() < 0.55:
+        # Keep genuinely small glyphs small even when the training canvas grows
+        # to 640/960. Scaling every glyph with the canvas recreates the exact
+        # small-text blind spot the multi-scale track is intended to address.
+        font_size = int(rng.integers(7, 21))
+    else:
+        lower = max(10, min(shape) // 32)
+        upper = max(lower + 1, min(shape) // 7)
+        font_size = int(rng.integers(lower, upper))
     font = ImageFont.truetype(str(font_path), font_size, index=0)
     canvas = Image.new("L", (width, height), 0)
     draw = ImageDraw.Draw(canvas)
     vertical = bool(rng.integers(0, 2))
     if vertical:
-        x = int(rng.integers(-font_size // 3, max(1, width - font_size)))
-        y = int(rng.integers(-font_size // 2, max(1, height // 3)))
+        x = int(rng.integers(-font_size // 2, max(1, width - font_size // 2)))
+        y = int(rng.integers(-font_size // 2, max(1, height // 2)))
         for character in phrase:
             draw.text((x, y), character, fill=255, font=font, stroke_width=0)
             y += max(7, int(round(font_size * 0.9)))
@@ -318,10 +354,14 @@ def _font_text_mask(
         bounds = draw.textbbox((0, 0), phrase, font=font, stroke_width=0)
         text_width = max(1, int(bounds[2] - bounds[0]))
         text_height = max(1, int(bounds[3] - bounds[1]))
-        x = int(rng.integers(-max(1, text_width // 4), max(1, width - text_width + 1)))
-        y = int(rng.integers(-max(1, text_height // 4), max(1, height - text_height + 1)))
+        x = int(rng.integers(-max(1, text_width // 2), max(1, width - text_width // 2)))
+        y = int(rng.integers(-max(1, text_height // 2), max(1, height - text_height // 2)))
         draw.text((x, y), phrase, fill=255, font=font, stroke_width=0)
-    return np.where(np.asarray(canvas) > 0, 255, 0).astype(np.uint8, copy=True)
+    rendered = np.asarray(canvas)
+    if not np.any(rendered):
+        draw.text((0, 0), phrase[0], fill=255, font=font, stroke_width=0)
+        rendered = np.asarray(canvas)
+    return np.where(rendered > 0, 255, 0).astype(np.uint8, copy=True)
 
 
 def _paint_text(
@@ -390,7 +430,7 @@ def synthetic_training_sample(
     )
     image = _paint_text(rng, background, target, text_style)
     identity_state = hashlib.sha256()
-    identity_state.update(b"inpaint-synthetic-training-sample-v4\0")
+    identity_state.update(b"inpaint-synthetic-training-sample-v5\0")
     identity_state.update(str((int(shape[0]), int(shape[1]))).encode("ascii"))
     identity_state.update(b"\0")
     identity_state.update(str(int(seed)).encode("ascii"))
@@ -419,7 +459,7 @@ def synthetic_training_digest(
     ordered_seeds = tuple(int(seed) for seed in seeds)
     normalized_fonts = tuple(font_paths)
     state = hashlib.sha256()
-    state.update(b"inpaint-synthetic-training-dataset-v4\0")
+    state.update(b"inpaint-synthetic-training-dataset-v5\0")
     state.update(len(ordered_seeds).to_bytes(8, byteorder="big"))
     for index, seed in enumerate(ordered_seeds):
         sample = synthetic_training_sample(
