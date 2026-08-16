@@ -18,6 +18,10 @@ from modules.utils.inpaint_composite import (  # noqa: E402
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
 )
+from modules.utils.inpaint_evidence import (  # noqa: E402
+    BlockInpaintEvidence,
+    MaskPatch,
+)
 from pipeline.inpaint_cleanup_job import (  # noqa: E402
     InpaintCleanupInput,
     run_inpaint_cleanup,
@@ -133,6 +137,33 @@ class CleanupEquivalenceTests(unittest.TestCase):
 
 
 class CleanupContractTests(unittest.TestCase):
+    def test_sparse_routing_evidence_is_released_after_cleanup(self) -> None:
+        image, inpainted, mask = _scene()
+        job = InpaintCleanupInput(
+            image=image,
+            inpaint_input_img=inpainted,
+            mask=mask,
+            mask_details={},
+            inpaint_blocks=[],
+            config=None,
+            page_label="1/1",
+            routing_evidence=(
+                BlockInpaintEvidence(
+                    block_id="b0",
+                    block_index=0,
+                    source_owned=MaskPatch(
+                        (30, 20, 90, 60),
+                        mask[20:60, 30:90],
+                    ),
+                ),
+            ),
+        )
+
+        result = run_inpaint_cleanup(job)
+
+        self.assertEqual(result.cleanup_stats["routing_evidence_block_count"], 1)
+        self.assertEqual(job.routing_evidence, ())
+
     def test_product_job_never_calls_autonomous_residue_cleanup(self) -> None:
         image, inpainted, mask = _scene()
         with mock.patch(
