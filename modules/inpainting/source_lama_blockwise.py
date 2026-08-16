@@ -23,6 +23,11 @@ from modules.utils.bubble_erase import (
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.gpu_handoff import estimate_torch_cuda_storage_mb
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
+from modules.utils.inpaint_evidence import (
+    BlockInpaintEvidence,
+    SourceLamaBlockwiseResult,
+    mask_patch_from_page_mask,
+)
 from modules.utils.mask_roi import normalize_xyxy, resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
@@ -888,23 +893,60 @@ def _apply_protected_corner_guard(
     return guarded, normalized_edit
 
 
-def source_lama_blockwise_inpaint(
+def _build_owned_block_evidence(
+    blocks: list[TextBlock],
+    raw_source_mask: np.ndarray | None,
+    source_mask: np.ndarray,
+    ownership_mask: np.ndarray,
+    image_shape: tuple[int, ...],
+    original_block_indices: dict[int, int],
+) -> list[BlockInpaintEvidence]:
+    evidence: list[BlockInpaintEvidence] = []
+    for block in blocks:
+        roi = resolve_inpaint_text_xyxy(block, image_shape)
+        if roi is None:
+            roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+        if roi is None:
+            continue
+        evidence.append(
+            BlockInpaintEvidence(
+                block_id=str(getattr(block, "block_id", "") or ""),
+                block_index=original_block_indices.get(id(block)),
+                erase_mode=str(getattr(block, "_erase_mode", "") or ""),
+                skipped_reason=str(
+                    getattr(block, "_erase_skipped_reason", "") or ""
+                ),
+                source_raw_owned=mask_patch_from_page_mask(
+                    raw_source_mask,
+                    roi,
+                    image_shape,
+                ),
+                source_owned=mask_patch_from_page_mask(
+                    source_mask,
+                    roi,
+                    image_shape,
+                ),
+                ownership_protect=mask_patch_from_page_mask(
+                    ownership_mask,
+                    roi,
+                    image_shape,
+                ),
+            )
+        )
+    return evidence
+
+
+def source_lama_blockwise_inpaint_result(
     image: np.ndarray,
     mask: np.ndarray,
     blocks: Iterable[TextBlock],
     inpainter,
     config,
     *,
+    raw_source_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
-    return_edit_mask: bool = False,
-    return_diagnostics: bool = False,
     protected_corner_mask: np.ndarray | None = None,
-) -> (
-    np.ndarray
-    | tuple[np.ndarray, np.ndarray | None]
-    | tuple[np.ndarray, list[dict]]
-    | tuple[np.ndarray, np.ndarray | None, list[dict]]
-):
+) -> SourceLamaBlockwiseResult:
     block_list = list(blocks or [])
     if image is None or mask is None or not np.any(mask) or not block_list:
         result = inpainter(image, mask, config)
@@ -917,15 +959,18 @@ def source_lama_blockwise_inpaint(
             edit_mask,
             protected_corner_mask,
         )
-        return _maybe_return_edit_mask(
-            cleaned,
-            edit_mask,
-            return_edit_mask,
+        return SourceLamaBlockwiseResult(
+            image=cleaned,
+            edit_mask=edit_mask,
             diagnostics=[],
-            return_diagnostics=return_diagnostics,
         )
 
     source_mask = normalize_edit_mask(mask, image.shape)
+    normalized_raw_source = (
+        normalize_edit_mask(raw_source_mask, image.shape)
+        if raw_source_mask is not None
+        else None
+    )
     has_bubble_candidates = any(
         getattr(block, "text_class", "") == "text_bubble"
         for block in block_list
@@ -959,12 +1004,20 @@ def source_lama_blockwise_inpaint(
             source_mask,
             protected_corner_mask,
         )
-        return _maybe_return_edit_mask(
-            cleaned,
-            guarded_mask,
-            return_edit_mask,
+        return SourceLamaBlockwiseResult(
+            image=cleaned,
+            edit_mask=guarded_mask,
             diagnostics=diagnostics,
-            return_diagnostics=return_diagnostics,
+            evidence=tuple(
+                _build_owned_block_evidence(
+                    block_list,
+                    normalized_raw_source,
+                    source_mask,
+                    source_mask,
+                    image.shape,
+                    original_block_indices,
+                )
+            ),
         )
 
     lama_mask = np.where(
@@ -1033,6 +1086,43 @@ def source_lama_blockwise_inpaint(
         config,
         protected_edit_mask=bubble_protected_mask,
     )
+    evidence = _build_owned_block_evidence(
+        lama_blocks,
+        normalized_raw_source,
+        source_mask,
+        bubble_protected_mask,
+        image.shape,
+        original_block_indices,
+    )
+    for item in tuple(getattr(bubble_result, "evidence", ()) or ()):
+        bubble_block = (
+            bubble_blocks[item.block_index]
+            if item.block_index is not None
+            and 0 <= item.block_index < len(bubble_blocks)
+            else None
+        )
+        evidence.append(
+            BlockInpaintEvidence(
+                block_id=item.block_id,
+                block_index=original_block_indices.get(id(bubble_block)),
+                erase_mode=item.erase_mode,
+                skipped_reason=item.skipped_reason,
+                source_raw_owned=mask_patch_from_page_mask(
+                    normalized_raw_source,
+                    item.source_owned.xyxy if item.source_owned else None,
+                    image.shape,
+                ),
+                source_owned=item.source_owned,
+                structure_protect=item.structure_protect,
+                ownership_protect=item.ownership_protect,
+                bubble_interior=item.bubble_interior,
+                positive_claim=item.positive_claim,
+                positive_edit=item.positive_edit,
+                claim_providers=item.claim_providers,
+                route_decision=item.route_decision,
+                route_reasons=item.route_reasons,
+            )
+        )
     for item in list(bubble_result.stats.get("blocks", []) or []):
         try:
             bubble_index = int(item.get("index", -1))
@@ -1090,10 +1180,46 @@ def source_lama_blockwise_inpaint(
         combined_mask,
         protected_corner_mask,
     )
-    return _maybe_return_edit_mask(
-        result,
-        combined_mask,
-        return_edit_mask,
+    return SourceLamaBlockwiseResult(
+        image=result,
+        edit_mask=combined_mask,
         diagnostics=diagnostics,
+        evidence=tuple(evidence),
+    )
+
+
+def source_lama_blockwise_inpaint(
+    image: np.ndarray,
+    mask: np.ndarray,
+    blocks: Iterable[TextBlock],
+    inpainter,
+    config,
+    *,
+    raw_source_mask: np.ndarray | None = None,
+    check_need_inpaint: bool = True,
+    return_edit_mask: bool = False,
+    return_diagnostics: bool = False,
+    protected_corner_mask: np.ndarray | None = None,
+) -> (
+    np.ndarray
+    | tuple[np.ndarray, np.ndarray | None]
+    | tuple[np.ndarray, list[dict]]
+    | tuple[np.ndarray, np.ndarray | None, list[dict]]
+):
+    result = source_lama_blockwise_inpaint_result(
+        image,
+        mask,
+        blocks,
+        inpainter,
+        config,
+        raw_source_mask=raw_source_mask,
+        check_need_inpaint=check_need_inpaint,
+        protected_corner_mask=protected_corner_mask,
+    )
+    return _maybe_return_edit_mask(
+        result.image,
+        result.edit_mask,
+        return_edit_mask,
+        diagnostics=result.diagnostics,
         return_diagnostics=return_diagnostics,
     )

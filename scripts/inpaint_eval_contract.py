@@ -18,7 +18,8 @@ import numpy as np
 from PIL import Image, ImageDraw, PngImagePlugin
 
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
+SUPPORTED_MANIFEST_SCHEMA_VERSIONS = frozenset({1, 2})
 MANIFEST_SEAL_FIELD = "manifest_sha256"
 MANIFEST_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -26,6 +27,11 @@ GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_EDIT_VALUES = frozenset({"required", "none", "optional"})
 FINAL_EXPECTED_EDIT_VALUES = frozenset({"required", "none"})
 EXPECTED_EDIT_DECISION_BASIS = "source-only-review"
+SOURCE_ONLY_EVIDENCE_BASIS = "source-only-inpaint-evidence-v1"
+SOURCE_ONLY_EVIDENCE_BASIS_V2 = "source-only-inpaint-evidence-v2"
+SOURCE_ONLY_ADJUDICATED_EVIDENCE_BASIS_V2 = (
+    "source-only-inpaint-evidence-v2-target-adjudicated"
+)
 SPLIT_ROLE_VALUES = frozenset(
     {
         "tuning",
@@ -60,6 +66,9 @@ MANIFEST_KEYS = frozenset(
         "parent_manifest_sha256",
         "expected_edit_basis",
         "expected_edit_decisions_sha256",
+        "evidence_parent_manifest_sha256",
+        "evidence_basis",
+        "evidence_review_sha256",
     }
 )
 PAGE_KEYS = frozenset(
@@ -74,7 +83,9 @@ PAGE_KEYS = frozenset(
         "baseline",
         "baseline_mask",
         "target_glyph_mask",
+        "target_text_mask",
         "protected_structure_mask",
+        "ambiguous_structure_mask",
     }
 )
 REFERENCE_KEYS = frozenset({"path", "sha256"})
@@ -121,12 +132,20 @@ class EvalPageSpec:
     expected_edit: str
     baseline: EvalImageReference | None = None
     baseline_mask: EvalImageReference | None = None
-    target_glyph_mask: EvalImageReference | None = None
+    target_text_mask: EvalImageReference | None = None
     protected_structure_mask: EvalImageReference | None = None
+    ambiguous_structure_mask: EvalImageReference | None = None
+
+    @property
+    def target_glyph_mask(self) -> EvalImageReference | None:
+        """Compatibility alias for schema-v1 private manifests only."""
+
+        return self.target_text_mask
 
 
 @dataclass(frozen=True)
 class EvalManifest:
+    schema_version: int
     corpus_id: str
     split_role: str
     source_lock_git_sha: str
@@ -136,6 +155,9 @@ class EvalManifest:
     parent_manifest_sha256: str | None = None
     expected_edit_basis: str | None = None
     expected_edit_decisions_sha256: str | None = None
+    evidence_parent_manifest_sha256: str | None = None
+    evidence_basis: str | None = None
+    evidence_review_sha256: str | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -315,7 +337,8 @@ def load_eval_manifest(path: Path) -> EvalManifest:
         raise InpaintEvalManifestError("manifest_root_invalid")
     if set(payload) - MANIFEST_KEYS:
         raise InpaintEvalManifestError("manifest_unknown_key")
-    if payload.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+    schema_version = payload.get("schema_version")
+    if schema_version not in SUPPORTED_MANIFEST_SCHEMA_VERSIONS:
         raise InpaintEvalManifestError("manifest_schema_unsupported")
     corpus_id = _validate_id(payload.get("corpus_id"), code="manifest_corpus_id_invalid")
     split_role = _validate_id(
@@ -339,6 +362,13 @@ def load_eval_manifest(path: Path) -> EvalManifest:
     expected_edit_basis = str(payload.get("expected_edit_basis") or "")
     expected_edit_decisions_sha256 = str(
         payload.get("expected_edit_decisions_sha256") or ""
+    ).lower()
+    evidence_parent_manifest_sha256 = str(
+        payload.get("evidence_parent_manifest_sha256") or ""
+    ).lower()
+    evidence_basis = str(payload.get("evidence_basis") or "")
+    evidence_review_sha256 = str(
+        payload.get("evidence_review_sha256") or ""
     ).lower()
     finalization_fields_present = tuple(
         bool(value)
@@ -367,6 +397,39 @@ def load_eval_manifest(path: Path) -> EvalManifest:
         if not SHA256_RE.fullmatch(expected_edit_decisions_sha256):
             raise InpaintEvalManifestError(
                 "manifest_expected_edit_decisions_seal_invalid",
+                corpus_id=corpus_id,
+            )
+    evidence_fields_present = tuple(
+        bool(value)
+        for value in (
+            evidence_parent_manifest_sha256,
+            evidence_basis,
+            evidence_review_sha256,
+        )
+    )
+    if any(evidence_fields_present) and not all(evidence_fields_present):
+        raise InpaintEvalManifestError(
+            "manifest_evidence_finalization_incomplete",
+            corpus_id=corpus_id,
+        )
+    if all(evidence_fields_present):
+        if not SHA256_RE.fullmatch(evidence_parent_manifest_sha256):
+            raise InpaintEvalManifestError(
+                "manifest_evidence_parent_seal_invalid",
+                corpus_id=corpus_id,
+            )
+        if evidence_basis not in {
+            SOURCE_ONLY_EVIDENCE_BASIS,
+            SOURCE_ONLY_EVIDENCE_BASIS_V2,
+            SOURCE_ONLY_ADJUDICATED_EVIDENCE_BASIS_V2,
+        }:
+            raise InpaintEvalManifestError(
+                "manifest_evidence_basis_invalid",
+                corpus_id=corpus_id,
+            )
+        if not SHA256_RE.fullmatch(evidence_review_sha256):
+            raise InpaintEvalManifestError(
+                "manifest_evidence_review_seal_invalid",
                 corpus_id=corpus_id,
             )
     expected_count = payload.get("expected_count")
@@ -409,6 +472,19 @@ def load_eval_manifest(path: Path) -> EvalManifest:
         if set(raw_page) - PAGE_KEYS:
             raise InpaintEvalManifestError(
                 "manifest_page_unknown_key",
+                corpus_id=corpus_id,
+            )
+        if schema_version == 1 and (
+            "target_text_mask" in raw_page
+            or "ambiguous_structure_mask" in raw_page
+        ):
+            raise InpaintEvalManifestError(
+                "manifest_page_schema_key_invalid",
+                corpus_id=corpus_id,
+            )
+        if schema_version == 2 and "target_glyph_mask" in raw_page:
+            raise InpaintEvalManifestError(
+                "manifest_page_schema_key_invalid",
                 corpus_id=corpus_id,
             )
         try:
@@ -473,6 +549,52 @@ def load_eval_manifest(path: Path) -> EvalManifest:
                 corpus_id=corpus_id,
                 page_id=page_id,
             )
+        target_text_reference = _validate_reference(
+            raw_page.get(
+                "target_text_mask"
+                if schema_version == 2
+                else "target_glyph_mask"
+            ),
+            manifest_path=manifest_path,
+            corpus_id=corpus_id,
+            page_id=page_id,
+            expected_dimensions=dimensions,
+            expected_size_bytes=None,
+            required=schema_version == 2,
+        )
+        protected_structure_reference = _validate_reference(
+            raw_page.get("protected_structure_mask"),
+            manifest_path=manifest_path,
+            corpus_id=corpus_id,
+            page_id=page_id,
+            expected_dimensions=dimensions,
+            expected_size_bytes=None,
+            required=schema_version == 2,
+        )
+        ambiguous_structure_reference = _validate_reference(
+            raw_page.get("ambiguous_structure_mask"),
+            manifest_path=manifest_path,
+            corpus_id=corpus_id,
+            page_id=page_id,
+            expected_dimensions=dimensions,
+            expected_size_bytes=None,
+            required=schema_version == 2,
+        )
+        if schema_version == 2:
+            annotation_masks = (
+                load_binary_mask(target_text_reference, dimensions[::-1]),
+                load_binary_mask(protected_structure_reference, dimensions[::-1]),
+                load_binary_mask(ambiguous_structure_reference, dimensions[::-1]),
+            )
+            if any(
+                np.any((annotation_masks[left] > 0) & (annotation_masks[right] > 0))
+                for left, right in ((0, 1), (0, 2), (1, 2))
+            ):
+                raise InpaintEvalManifestError(
+                    "manifest_annotation_masks_overlap",
+                    corpus_id=corpus_id,
+                    page_id=page_id,
+                )
         pages.append(
             EvalPageSpec(
                 corpus_id=corpus_id,
@@ -500,24 +622,9 @@ def load_eval_manifest(path: Path) -> EvalManifest:
                     expected_size_bytes=None,
                     required=False,
                 ),
-                target_glyph_mask=_validate_reference(
-                    raw_page.get("target_glyph_mask"),
-                    manifest_path=manifest_path,
-                    corpus_id=corpus_id,
-                    page_id=page_id,
-                    expected_dimensions=dimensions,
-                    expected_size_bytes=None,
-                    required=False,
-                ),
-                protected_structure_mask=_validate_reference(
-                    raw_page.get("protected_structure_mask"),
-                    manifest_path=manifest_path,
-                    corpus_id=corpus_id,
-                    page_id=page_id,
-                    expected_dimensions=dimensions,
-                    expected_size_bytes=None,
-                    required=False,
-                ),
+                target_text_mask=target_text_reference,
+                protected_structure_mask=protected_structure_reference,
+                ambiguous_structure_mask=ambiguous_structure_reference,
             )
         )
     if all(finalization_fields_present) and any(
@@ -528,6 +635,7 @@ def load_eval_manifest(path: Path) -> EvalManifest:
             corpus_id=corpus_id,
         )
     return EvalManifest(
+        schema_version=int(schema_version),
         corpus_id=corpus_id,
         split_role=split_role,
         source_lock_git_sha=source_lock_git_sha,
@@ -544,6 +652,15 @@ def load_eval_manifest(path: Path) -> EvalManifest:
             expected_edit_decisions_sha256
             if all(finalization_fields_present)
             else None
+        ),
+        evidence_parent_manifest_sha256=(
+            evidence_parent_manifest_sha256
+            if all(evidence_fields_present)
+            else None
+        ),
+        evidence_basis=evidence_basis if all(evidence_fields_present) else None,
+        evidence_review_sha256=(
+            evidence_review_sha256 if all(evidence_fields_present) else None
         ),
     )
 
@@ -730,6 +847,216 @@ def finalize_optional_eval_manifest(
     return load_eval_manifest(destination)
 
 
+def seal_source_only_evidence_manifest(
+    parent_manifest_path: Path,
+    review_path: Path,
+    output_path: Path,
+) -> EvalManifest:
+    """Seal reviewed baselines and source-only structure masks into a new manifest."""
+    parent_path = Path(parent_manifest_path).expanduser().resolve()
+    review_file = Path(review_path).expanduser().resolve()
+    destination = Path(output_path).expanduser().resolve()
+    if destination == parent_path:
+        raise InpaintEvalManifestError("manifest_evidence_overwrite_parent")
+    if destination.exists():
+        raise InpaintEvalManifestError("manifest_evidence_output_exists")
+    if destination.parent != parent_path.parent:
+        raise InpaintEvalManifestError("manifest_evidence_output_directory_invalid")
+
+    try:
+        parent_bytes = parent_path.read_bytes()
+        parent_payload = json.loads(parent_bytes.decode("utf-8"))
+        review_bytes = review_file.read_bytes()
+        review_payload = json.loads(review_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise InpaintEvalManifestError("manifest_evidence_input_unreadable") from exc
+    parent = load_eval_manifest(parent_path)
+    if (
+        not isinstance(parent_payload, dict)
+        or str(parent_payload.get(MANIFEST_SEAL_FIELD) or "").lower()
+        != parent.manifest_sha256
+        or canonical_manifest_sha256(parent_payload) != parent.manifest_sha256
+    ):
+        raise InpaintEvalManifestError(
+            "manifest_evidence_parent_changed",
+            corpus_id=parent.corpus_id,
+        )
+    if parent.evidence_parent_manifest_sha256 is not None:
+        raise InpaintEvalManifestError(
+            "manifest_evidence_already_finalized",
+            corpus_id=parent.corpus_id,
+        )
+    if not isinstance(review_payload, dict) or set(review_payload) != {
+        "schema_version",
+        "parent_manifest_sha256",
+        "decision_basis",
+        "pages",
+    }:
+        raise InpaintEvalManifestError(
+            "manifest_evidence_review_schema_invalid",
+            corpus_id=parent.corpus_id,
+        )
+    review_schema_version = review_payload.get("schema_version")
+    review_basis = review_payload.get("decision_basis")
+    if (
+        review_schema_version not in SUPPORTED_MANIFEST_SCHEMA_VERSIONS
+        or review_basis
+        != (
+            SOURCE_ONLY_EVIDENCE_BASIS_V2
+            if review_schema_version == 2
+            else SOURCE_ONLY_EVIDENCE_BASIS
+        )
+        or str(review_payload.get("parent_manifest_sha256") or "").lower()
+        != parent.manifest_sha256
+    ):
+        raise InpaintEvalManifestError(
+            "manifest_evidence_review_contract_invalid",
+            corpus_id=parent.corpus_id,
+        )
+    review_rows = review_payload.get("pages")
+    if not isinstance(review_rows, list):
+        raise InpaintEvalManifestError(
+            "manifest_evidence_review_pages_invalid",
+            corpus_id=parent.corpus_id,
+        )
+
+    parent_pages = {page.page_id: page for page in parent.pages}
+    reviewed: dict[str, dict[str, dict[str, str]]] = {}
+    required_row_keys = {
+        "page_id",
+        "baseline",
+        "baseline_mask",
+        "protected_structure_mask",
+    }
+    if review_schema_version == 2:
+        required_row_keys |= {
+            "target_text_mask",
+            "ambiguous_structure_mask",
+        }
+        allowed_row_keys = required_row_keys
+    else:
+        allowed_row_keys = required_row_keys | {"target_glyph_mask"}
+    for row in review_rows:
+        if (
+            not isinstance(row, dict)
+            or not required_row_keys.issubset(row)
+            or set(row) - allowed_row_keys
+        ):
+            raise InpaintEvalManifestError(
+                "manifest_evidence_review_page_invalid",
+                corpus_id=parent.corpus_id,
+            )
+        page_id = _validate_id(
+            row.get("page_id"),
+            code="manifest_evidence_review_page_id_invalid",
+        )
+        if page_id in reviewed or page_id not in parent_pages:
+            raise InpaintEvalManifestError(
+                "manifest_evidence_review_page_set_mismatch",
+                corpus_id=parent.corpus_id,
+                page_id=page_id,
+            )
+        page = parent_pages[page_id]
+        references: dict[str, dict[str, str]] = {}
+        annotation_fields = (
+            (
+                "target_text_mask",
+                "protected_structure_mask",
+                "ambiguous_structure_mask",
+            )
+            if review_schema_version == 2
+            else ("protected_structure_mask", "target_glyph_mask")
+        )
+        for field_name in ("baseline", "baseline_mask", *annotation_fields):
+            if field_name not in row:
+                continue
+            reference = _validate_reference(
+                row.get(field_name),
+                manifest_path=review_file,
+                corpus_id=parent.corpus_id,
+                page_id=page_id,
+                expected_dimensions=(page.width, page.height),
+                expected_size_bytes=None,
+                required=(
+                    review_schema_version == 2
+                    or field_name != "target_glyph_mask"
+                ),
+            )
+            if reference is not None:
+                references[field_name] = {
+                    "path": str(reference.path),
+                    "sha256": reference.sha256,
+                }
+        reviewed[page_id] = references
+    if set(reviewed) != set(parent_pages):
+        raise InpaintEvalManifestError(
+            "manifest_evidence_review_page_set_mismatch",
+            corpus_id=parent.corpus_id,
+        )
+
+    derived_payload = {
+        key: value
+        for key, value in parent_payload.items()
+        if key != MANIFEST_SEAL_FIELD
+    }
+    if review_schema_version == 2:
+        derived_payload["schema_version"] = 2
+    for page_payload in derived_payload["pages"]:
+        page_id = str(page_payload.get("page_id") or "")
+        if review_schema_version == 2:
+            page_payload.pop("target_glyph_mask", None)
+        page_payload.update(reviewed[page_id])
+    derived_payload.update(
+        {
+            "evidence_parent_manifest_sha256": parent.manifest_sha256,
+            "evidence_basis": review_basis,
+            "evidence_review_sha256": hashlib.sha256(review_bytes).hexdigest(),
+        }
+    )
+    sealed_payload = seal_manifest_payload(derived_payload)
+    serialized_payload = (
+        json.dumps(sealed_payload, ensure_ascii=False, indent=2) + "\n"
+    )
+    temporary_path: Path | None = None
+    try:
+        if parent_path.read_bytes() != parent_bytes:
+            raise InpaintEvalManifestError(
+                "manifest_evidence_parent_changed",
+                corpus_id=parent.corpus_id,
+            )
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            text=True,
+        )
+        temporary_path = Path(temporary_name)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(serialized_payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary_path, destination)
+    except InpaintEvalManifestError:
+        raise
+    except FileExistsError as exc:
+        raise InpaintEvalManifestError(
+            "manifest_evidence_output_exists",
+            corpus_id=parent.corpus_id,
+        ) from exc
+    except OSError as exc:
+        raise InpaintEvalManifestError(
+            "manifest_evidence_output_unwritable",
+            corpus_id=parent.corpus_id,
+        ) from exc
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return load_eval_manifest(destination)
+
+
 def load_eval_manifests(paths: Iterable[Path]) -> tuple[EvalManifest, ...]:
     manifests = tuple(load_eval_manifest(path) for path in paths)
     seen_corpora: set[str] = set()
@@ -803,8 +1130,9 @@ def verify_eval_page_spec(page: EvalPageSpec) -> None:
     for reference in (
         page.baseline,
         page.baseline_mask,
-        page.target_glyph_mask,
+        page.target_text_mask,
         page.protected_structure_mask,
+        page.ambiguous_structure_mask,
     ):
         if reference is None:
             continue
@@ -906,7 +1234,7 @@ def build_quality_metrics(
     residue_target_is_annotation: bool = False,
     protected_structure_mask: np.ndarray | None = None,
     pre_composite_candidate_image: np.ndarray | None = None,
-) -> dict[str, float | int | str | bool | None]:
+) -> dict[str, object]:
     source = np.asarray(source_image)
     candidate = np.asarray(candidate_image)
     if source.shape != candidate.shape:
@@ -985,6 +1313,33 @@ def build_quality_metrics(
 
     target_pixel_count = int(np.count_nonzero(target))
     target_covered_count = int(np.count_nonzero((target > 0) & (mask > 0)))
+    target_component_coverages: list[float] = []
+    if target_pixel_count > 0 and residue_target_is_annotation:
+        component_count, component_labels, component_stats, _centroids = (
+            cv2.connectedComponentsWithStats(
+                (target > 0).astype(np.uint8),
+                connectivity=8,
+            )
+        )
+        for component_index in range(1, component_count):
+            component_pixel_count = int(
+                component_stats[component_index, cv2.CC_STAT_AREA]
+            )
+            if component_pixel_count <= 0:
+                continue
+            x = int(component_stats[component_index, cv2.CC_STAT_LEFT])
+            y = int(component_stats[component_index, cv2.CC_STAT_TOP])
+            width = int(component_stats[component_index, cv2.CC_STAT_WIDTH])
+            height = int(component_stats[component_index, cv2.CC_STAT_HEIGHT])
+            component = (
+                component_labels[y : y + height, x : x + width]
+                == component_index
+            )
+            local_mask = mask[y : y + height, x : x + width] > 0
+            target_component_coverages.append(
+                float(np.count_nonzero(component & local_mask))
+                / float(component_pixel_count)
+            )
     protected_pixel_count = int(np.count_nonzero(protected))
     protected_changed_count = int(np.count_nonzero((protected > 0) & changed_exact))
     pre_composite_protected_changed_count = int(
@@ -1025,6 +1380,12 @@ def build_quality_metrics(
             if target_pixel_count > 0 and residue_target_is_annotation
             else None
         ),
+        "residue_target_component_coverages": target_component_coverages,
+        "residue_target_minimum_component_coverage": (
+            min(target_component_coverages)
+            if target_component_coverages
+            else None
+        ),
         "residue_source_contrast_pixel_count": residue_source_count,
         "residue_pixel_count": residue_pixel_count,
         "residue_ratio": (
@@ -1033,6 +1394,11 @@ def build_quality_metrics(
             else None
         ),
         "residue_score": residue_score,
+        "residue_score_sum": (
+            float(residue_score * residue_source_count)
+            if residue_score is not None
+            else None
+        ),
         "protected_structure_pixel_count": protected_pixel_count,
         "protected_structure_changed_pixel_count_exact": protected_changed_count,
         "outline_damage_ratio": (
