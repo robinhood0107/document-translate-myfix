@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 import cv2
 import numpy as np
@@ -626,6 +627,7 @@ def erase_text_bubble_regions(
     fallback_blocks = 0
 
     for index, block in enumerate(list(blocks or [])):
+        block_started = perf_counter()
         if getattr(block, "text_class", "") != "text_bubble":
             if getattr(block, "text_class", "") == "text_free":
                 set_block_erase_metadata(block, BubbleEraseBlockStats(mode=ERASE_MODE_TEXT_FREE_LAMA))
@@ -666,6 +668,7 @@ def erase_text_bubble_regions(
                     skipped_reason="line_art_intrusion",
                 )
                 set_block_erase_metadata(block, block_stats)
+                elapsed_seconds = float(perf_counter() - block_started)
                 block_entries.append(
                     {
                         "index": index,
@@ -673,12 +676,14 @@ def erase_text_bubble_regions(
                         "edit_pixel_count": block_stats.edit_pixel_count,
                         "protect_pixel_count": block_stats.protect_pixel_count,
                         "skipped_reason": block_stats.skipped_reason,
+                        "elapsed_seconds": elapsed_seconds,
                     }
                 )
                 continue
 
         if not np.any(edit_mask):
             set_block_erase_metadata(block, mask_stats)
+            elapsed_seconds = float(perf_counter() - block_started)
             block_entries.append(
                 {
                     "index": index,
@@ -686,6 +691,7 @@ def erase_text_bubble_regions(
                     "edit_pixel_count": 0,
                     "protect_pixel_count": mask_stats.protect_pixel_count,
                     "skipped_reason": mask_stats.skipped_reason,
+                    "elapsed_seconds": elapsed_seconds,
                 }
             )
             continue
@@ -700,6 +706,7 @@ def erase_text_bubble_regions(
             protect_pixel_count=mask_stats.protect_pixel_count,
         )
         set_block_erase_metadata(block, block_stats)
+        elapsed_seconds = float(perf_counter() - block_started)
         block_entries.append(
             {
                 "index": index,
@@ -707,6 +714,7 @@ def erase_text_bubble_regions(
                 "edit_pixel_count": block_stats.edit_pixel_count,
                 "protect_pixel_count": block_stats.protect_pixel_count,
                 "skipped_reason": "",
+                "elapsed_seconds": elapsed_seconds,
             }
         )
 
