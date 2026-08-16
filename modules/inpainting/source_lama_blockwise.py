@@ -17,6 +17,7 @@ from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mas
 from modules.utils.bubble_erase import (
     BubbleEraseBlockStats,
     ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+    ERASE_MODE_TEXT_FREE_LAMA,
     erase_text_bubble_regions,
     set_block_erase_metadata,
 )
@@ -26,8 +27,13 @@ from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_
 from modules.utils.inpaint_evidence import (
     BlockInpaintEvidence,
     SourceLamaBlockwiseResult,
+    combine_evidence_patches,
     mask_patch_from_page_mask,
 )
+from modules.utils.inpaint_positive_evidence import (
+    build_detector_positive_text_evidence,
+)
+from modules.utils.inpainting_runtime import is_lama_family_inpainter
 from modules.utils.mask_roi import normalize_xyxy, resolve_inpaint_text_xyxy
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
@@ -936,6 +942,213 @@ def _build_owned_block_evidence(
     return evidence
 
 
+def _apply_detector_positive_text_evidence(
+    original_image: np.ndarray,
+    current_image: np.ndarray,
+    combined_mask: np.ndarray,
+    blocks: list[TextBlock],
+    evidence: list[BlockInpaintEvidence],
+    diagnostics: list[dict],
+    inpainter,
+    config,
+    positive_claim_raw_mask: np.ndarray | None,
+    protected_corner_mask: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, list[BlockInpaintEvidence]]:
+    positive = build_detector_positive_text_evidence(
+        blocks,
+        positive_claim_raw_mask,
+        evidence,
+        image_shape=original_image.shape,
+        existing_edit_mask=combined_mask,
+        protected_corner_mask=protected_corner_mask,
+        source_image=original_image,
+    )
+    evidence_by_index = {
+        item.block_index: item
+        for item in evidence
+        if item.block_index is not None
+    }
+    positive_backend_supported = is_lama_family_inpainter(
+        getattr(inpainter, "name", "")
+    )
+    for block_index, claim_patch in positive.block_claim_patches.items():
+        block = blocks[block_index]
+        item = evidence_by_index.get(block_index)
+        if item is None:
+            item = BlockInpaintEvidence(
+                block_id=str(
+                    getattr(block, "canonical_block_id", "")
+                    or getattr(block, "block_id", "")
+                    or ""
+                ),
+                block_index=block_index,
+            )
+            evidence.append(item)
+            evidence_by_index[block_index] = item
+        item.positive_claim = claim_patch
+        item.positive_edit = (
+            positive.block_edit_patches.get(block_index)
+            if positive_backend_supported
+            else None
+        )
+        item.claim_providers = positive.block_claim_providers.get(
+            block_index,
+            (),
+        )
+        item.route_decision = positive.block_route_decisions.get(
+            block_index,
+            "narrow",
+        )
+        item.route_reasons = positive.block_route_reasons.get(block_index, ())
+
+    if not np.any(positive.positive_edit):
+        return current_image, combined_mask, evidence
+    if not positive_backend_supported:
+        return current_image, combined_mask, evidence
+
+    exact_background_exclude = np.where(
+        (normalize_edit_mask(combined_mask, original_image.shape) > 0)
+        | (positive.positive_claim > 0)
+        | (
+            combine_evidence_patches(
+                evidence,
+                "structure_protect",
+                original_image.shape,
+            )
+            > 0
+        )
+        | (
+            combine_evidence_patches(
+                evidence,
+                "ownership_protect",
+                original_image.shape,
+            )
+            > 0
+        )
+        | (normalize_edit_mask(protected_corner_mask, original_image.shape) > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    broad_applied = np.zeros(original_image.shape[:2], dtype=np.uint8)
+    for block_index, broad_patch in positive.block_broad_edit_patches.items():
+        item = evidence_by_index.get(block_index)
+        interior_patch = positive.block_bubble_interior_patches.get(block_index)
+        if item is None or interior_patch is None:
+            continue
+        bx1, by1, bx2, by2 = broad_patch.xyxy
+        ix1, iy1, ix2, iy2 = interior_patch.xyxy
+        broad_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+        interior_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+        broad_mask[by1:by2, bx1:bx2] = broad_patch.mask
+        interior_mask[iy1:iy2, ix1:ix2] = interior_patch.mask
+        # Broad edit may cover the whole verified bubble interior.  Sample the
+        # remaining source background by excluding known text/edit evidence
+        # and every exact protection mask, rather than sampling only outside
+        # the broad edit where source-owned glyphs can dominate the median.
+        sample_mask = (interior_mask > 0) & (exact_background_exclude <= 0)
+        samples = np.asarray(original_image)[sample_mask, :3]
+        if samples.shape[0] < 32:
+            item.route_decision = "narrow"
+            item.route_reasons = tuple(
+                dict.fromkeys((*item.route_reasons, "insufficient_roi_background_samples"))
+            )
+            continue
+        fill_color = np.clip(
+            np.rint(np.median(samples.astype(np.float32), axis=0)),
+            0,
+            255,
+        ).astype(np.uint8)
+        generated_broad = np.asarray(original_image).copy()
+        generated_broad[broad_mask > 0, :3] = fill_color
+        current_image = composite_with_edit_mask(
+            current_image,
+            generated_broad,
+            broad_mask,
+        )
+        broad_applied[broad_mask > 0] = 255
+
+    narrow_edit = np.where(
+        (positive.narrow_edit > 0) & (broad_applied <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    positive_diagnostics: list[dict] = []
+    if np.any(narrow_edit):
+        generated, positive_diagnostics = _run_lama_or_fallback(
+            original_image,
+            narrow_edit,
+            [],
+            inpainter,
+            config,
+            check_need_inpaint=False,
+        )
+        current_image = composite_with_edit_mask(
+            current_image,
+            generated,
+            narrow_edit,
+        )
+    positive_indices = sorted(positive.block_edit_patches)
+    for diagnostic in positive_diagnostics:
+        diagnostic["phase"] = "positive_evidence"
+        diagnostic["positive_text_evidence"] = True
+        diagnostic["positive_block_indices"] = positive_indices
+        diagnostic["positive_claim_pixel_count"] = int(
+            np.count_nonzero(positive.positive_claim)
+        )
+        diagnostic["positive_edit_pixel_count"] = int(
+            np.count_nonzero(positive.positive_edit)
+        )
+    diagnostics.extend(positive_diagnostics)
+    if np.any(broad_applied):
+        diagnostics.append(
+            {
+                "phase": "positive_evidence",
+                "is_inference": False,
+                "status": "completed",
+                "backend": "robust_flat_median",
+                "positive_text_evidence": True,
+                "positive_block_indices": sorted(
+                    positive.block_broad_edit_patches
+                ),
+                "positive_claim_pixel_count": int(
+                    np.count_nonzero(positive.positive_claim)
+                ),
+                "positive_edit_pixel_count": int(
+                    np.count_nonzero(broad_applied)
+                ),
+            }
+        )
+    applied_positive = np.where(
+        (narrow_edit > 0) | (broad_applied > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    combined_mask = np.where(
+        (combined_mask > 0) | (applied_positive > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    for block_index, patch in positive.block_edit_patches.items():
+        block = blocks[block_index]
+        mode = (
+            ERASE_MODE_TEXT_FREE_LAMA
+            if str(getattr(block, "text_class", "") or "") == "text_free"
+            else ERASE_MODE_BUBBLE_LAMA_FALLBACK
+        )
+        set_block_erase_metadata(
+            block,
+            BubbleEraseBlockStats(
+                mode=mode,
+                edit_pixel_count=patch.pixel_count,
+                skipped_reason="positive_text_evidence_recovered",
+            ),
+        )
+        item = evidence_by_index[block_index]
+        item.erase_mode = mode
+        item.skipped_reason = "positive_text_evidence_recovered"
+    return current_image, combined_mask, evidence
+
+
 def source_lama_blockwise_inpaint_result(
     image: np.ndarray,
     mask: np.ndarray,
@@ -944,11 +1157,12 @@ def source_lama_blockwise_inpaint_result(
     config,
     *,
     raw_source_mask: np.ndarray | None = None,
+    positive_claim_raw_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
     protected_corner_mask: np.ndarray | None = None,
 ) -> SourceLamaBlockwiseResult:
     block_list = list(blocks or [])
-    if image is None or mask is None or not np.any(mask) or not block_list:
+    if image is None or mask is None or not block_list:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
         cleaned = composite_with_edit_mask(image, converted, mask)
@@ -969,6 +1183,11 @@ def source_lama_blockwise_inpaint_result(
     normalized_raw_source = (
         normalize_edit_mask(raw_source_mask, image.shape)
         if raw_source_mask is not None
+        else None
+    )
+    normalized_positive_claim = (
+        normalize_edit_mask(positive_claim_raw_mask, image.shape)
+        if positive_claim_raw_mask is not None
         else None
     )
     has_bubble_candidates = any(
@@ -998,6 +1217,26 @@ def source_lama_blockwise_inpaint_result(
             check_need_inpaint=check_need_inpaint,
             diagnostic_block_indices=list(range(len(block_list))),
         )
+        evidence = _build_owned_block_evidence(
+            block_list,
+            normalized_raw_source,
+            source_mask,
+            source_mask,
+            image.shape,
+            original_block_indices,
+        )
+        cleaned, source_mask, evidence = _apply_detector_positive_text_evidence(
+            image,
+            cleaned,
+            source_mask,
+            block_list,
+            evidence,
+            diagnostics,
+            inpainter,
+            config,
+            normalized_positive_claim,
+            protected_corner_mask,
+        )
         cleaned, guarded_mask = _apply_protected_corner_guard(
             image,
             cleaned,
@@ -1008,16 +1247,7 @@ def source_lama_blockwise_inpaint_result(
             image=cleaned,
             edit_mask=guarded_mask,
             diagnostics=diagnostics,
-            evidence=tuple(
-                _build_owned_block_evidence(
-                    block_list,
-                    normalized_raw_source,
-                    source_mask,
-                    source_mask,
-                    image.shape,
-                    original_block_indices,
-                )
-            ),
+            evidence=tuple(evidence),
         )
 
     lama_mask = np.where(
@@ -1173,6 +1403,18 @@ def source_lama_blockwise_inpaint_result(
         255,
         0,
     ).astype(np.uint8)
+    result_image, combined_mask, evidence = _apply_detector_positive_text_evidence(
+        image,
+        result_image,
+        combined_mask,
+        block_list,
+        evidence,
+        diagnostics,
+        inpainter,
+        config,
+        normalized_positive_claim,
+        protected_corner_mask,
+    )
     result = composite_with_edit_mask(image, result_image, combined_mask)
     result, combined_mask = _apply_protected_corner_guard(
         image,
@@ -1196,6 +1438,7 @@ def source_lama_blockwise_inpaint(
     config,
     *,
     raw_source_mask: np.ndarray | None = None,
+    positive_claim_raw_mask: np.ndarray | None = None,
     check_need_inpaint: bool = True,
     return_edit_mask: bool = False,
     return_diagnostics: bool = False,
@@ -1213,6 +1456,7 @@ def source_lama_blockwise_inpaint(
         inpainter,
         config,
         raw_source_mask=raw_source_mask,
+        positive_claim_raw_mask=positive_claim_raw_mask,
         check_need_inpaint=check_need_inpaint,
         protected_corner_mask=protected_corner_mask,
     )

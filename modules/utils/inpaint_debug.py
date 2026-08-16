@@ -249,6 +249,20 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "mask_actual_pixel_count": int(
             getattr(block, "mask_actual_pixel_count", 0) or 0
         ),
+        "detector_origin": str(
+            getattr(block, "detector_origin", "") or ""
+        ),
+        "detector_text_bbox": (
+            [
+                int(float(value))
+                for value in getattr(block, "detector_text_bbox", ())[:4]
+            ]
+            if getattr(block, "detector_text_bbox", None) is not None
+            else None
+        ),
+        "detector_provider": str(
+            getattr(block, "detector_provider", "") or ""
+        ),
         "inpaint_bboxes": inpaint_boxes,
         "text_free_erase_envelope_xyxy": (
             [int(v) for v in text_free_envelope]

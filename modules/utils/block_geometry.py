@@ -10,6 +10,7 @@ import numpy as np
 
 BASE_BLOCK_BBOX_FIELDS = (
     "xyxy",
+    "detector_text_bbox",
     "bubble_xyxy",
     "_render_original_xyxy",
     "_render_area_xyxy",
