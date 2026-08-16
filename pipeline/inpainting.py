@@ -46,6 +46,7 @@ from modules.inpainting.source_lama_blockwise import (
     release_source_lama_cache,
     source_lama_blockwise_inpaint_result,
 )
+from modules.masking.ctd_positive_claim import release_ctd_positive_claim_cache
 
 logger = logging.getLogger(__name__)
 
@@ -207,19 +208,26 @@ class InpaintingHandler:
 
         handler_release = self._detach_inpainter_native_resources(cached_inpainter)
         source_release = release_source_lama_cache()
+        positive_claim_release = release_ctd_positive_claim_cache()
         gpu_release_expected = bool(
             handler_release["gpu_release_expected"]
             or source_release["gpu_release_expected"]
+            or positive_claim_release["gpu_release_expected"]
         )
         expected_process_reclaim_mb = float(
             handler_release.get("expected_process_reclaim_mb", 0.0) or 0.0
         ) + float(
             source_release.get("expected_process_reclaim_mb", 0.0) or 0.0
+        ) + float(
+            positive_claim_release.get("expected_process_reclaim_mb", 0.0)
+            or 0.0
         )
         untracked_gpu_resource_count = int(
             handler_release.get("untracked_gpu_resource_count", 0) or 0
         ) + int(
             source_release.get("untracked_gpu_resource_count", 0) or 0
+        ) + int(
+            positive_claim_release.get("untracked_gpu_resource_count", 0) or 0
         )
         del cached_inpainter
 
@@ -240,6 +248,7 @@ class InpaintingHandler:
             "cached_inpainter_key": str(cached_key or ""),
             "handler_release": handler_release,
             "source_lama_release": source_release,
+            "positive_claim_release": positive_claim_release,
             "python_native_cleanup": cleanup,
             "gpu_release_expected": gpu_release_expected,
             "expected_process_reclaim_mb": expected_process_reclaim_mb,

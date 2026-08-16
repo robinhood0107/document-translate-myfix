@@ -23,7 +23,11 @@ from modules.utils.bubble_erase import (
 )
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.gpu_handoff import estimate_torch_cuda_storage_mb
-from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
+from modules.utils.inpaint_composite import (
+    composite_crop_with_edit_mask,
+    composite_with_edit_mask,
+    normalize_edit_mask,
+)
 from modules.utils.inpaint_evidence import (
     BlockInpaintEvidence,
     SourceLamaBlockwiseResult,
@@ -34,7 +38,11 @@ from modules.utils.inpaint_positive_evidence import (
     build_detector_positive_text_evidence,
 )
 from modules.utils.inpainting_runtime import is_lama_family_inpainter
-from modules.utils.mask_roi import normalize_xyxy, resolve_inpaint_text_xyxy
+from modules.utils.mask_roi import (
+    normalize_xyxy,
+    resolve_inpaint_text_xyxy,
+    resolve_source_lama_crop_xyxy,
+)
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
     INPAINT_RETRY_POLICY_VERSION,
@@ -233,11 +241,11 @@ class SourceLaMaLarge:
                         inpaint_cuda_oom_message(),
                         diagnostics=diagnostics,
                     ) from retry_exc
-                result = np.asarray(img).copy()
-                result[y1:y2, x1:x2] = composite_with_edit_mask(
-                    retry_img,
+                result = composite_crop_with_edit_mask(
+                    img,
                     retry_result,
                     retry_mask,
+                    retry_roi.as_list(),
                 )
                 diagnostics["status"] = "completed_after_roi_retry"
             else:
@@ -376,6 +384,7 @@ class SourceLaMaLarge:
             return result_rgb
 
         im_h, im_w = img_rgb.shape[:2]
+        immutable_original = np.copy(img_rgb)
         inpainted = np.copy(img_rgb)
         original_mask = mask.copy()
         work_mask = mask.copy()
@@ -385,11 +394,20 @@ class SourceLaMaLarge:
             else list(diagnostic_block_indices)
         )
         for block_index, blk in enumerate(textblock_list):
-            xyxy = _clip_half_open_bbox(getattr(blk, "xyxy", [0, 0, 0, 0]), im_w, im_h)
+            xyxy = _clip_half_open_bbox(
+                resolve_source_lama_crop_xyxy(blk, img_rgb.shape),
+                im_w,
+                im_h,
+            )
             if xyxy is None:
                 continue
             xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=1.7)
-            image_crop = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
+            image_crop = np.ascontiguousarray(
+                immutable_original[
+                    xyxy_e[1]:xyxy_e[3],
+                    xyxy_e[0]:xyxy_e[2],
+                ]
+            ).copy()
             mask_crop = work_mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
             if image_crop.size == 0 or mask_crop.size == 0:
                 continue
@@ -407,7 +425,7 @@ class SourceLaMaLarge:
                         need_inpaint = False
                         image_crop[np.where(ballon_msk > 0)] = average_bg_color
             if need_inpaint:
-                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(
+                candidate_crop = self.memory_safe_inpaint(
                     image_crop,
                     mask_crop,
                     diagnostic_context={
@@ -425,7 +443,14 @@ class SourceLaMaLarge:
                     },
                 )
             else:
-                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = image_crop
+                candidate_crop = image_crop
+            inpainted = composite_crop_with_edit_mask(
+                inpainted,
+                imk.convert_scale_abs(candidate_crop),
+                mask_crop,
+                xyxy_e,
+                copy_base=False,
+            )
             work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
 
         if original_alpha is not None:
@@ -479,8 +504,11 @@ def get_source_lama_large(device: str = "cuda", precision: str = "bf16", inpaint
     return cached
 
 
-def _adapt_generic_block_to_source_block(block: TextBlock) -> SourceLaMaTextBlock | None:
-    xyxy = getattr(block, "xyxy", None)
+def _adapt_generic_block_to_source_block(
+    block: TextBlock,
+    image_shape: tuple[int, ...],
+) -> SourceLaMaTextBlock | None:
+    xyxy = resolve_source_lama_crop_xyxy(block, image_shape)
     if xyxy is None:
         return None
     source_block = SourceLaMaTextBlock(
@@ -498,6 +526,7 @@ def _adapt_generic_block_to_source_block(block: TextBlock) -> SourceLaMaTextBloc
 
 def _resolve_source_blocks(
     blocks: Iterable[TextBlock],
+    image_shape: tuple[int, ...],
     diagnostic_block_indices: list[int | None] | None = None,
 ) -> tuple[list[SourceLaMaTextBlock], list[int | None]]:
     resolved: list[SourceLaMaTextBlock] = []
@@ -509,7 +538,7 @@ def _resolve_source_blocks(
         else list(diagnostic_block_indices)
     )
     for local_index, block in enumerate(block_list):
-        source_block = _adapt_generic_block_to_source_block(block)
+        source_block = _adapt_generic_block_to_source_block(block, image_shape)
         if source_block is not None:
             resolved.append(source_block)
             resolved_indices.append(
@@ -690,6 +719,7 @@ def _run_lama_or_fallback(
 
     source_blocks, source_block_indices = _resolve_source_blocks(
         blocks,
+        image.shape,
         diagnostic_block_indices,
     )
     if not source_blocks:
@@ -803,11 +833,11 @@ def _run_lama_or_fallback(
                         inpaint_cuda_oom_message(),
                         diagnostics=diagnostics,
                     ) from retry_exc
-                result = np.asarray(image).copy()
-                result[y1:y2, x1:x2] = composite_with_edit_mask(
-                    retry_image,
+                result = composite_crop_with_edit_mask(
+                    image,
                     imk.convert_scale_abs(retry_result),
                     retry_mask,
+                    retry_roi.as_list(),
                 )
                 diagnostics["status"] = "completed_after_roi_retry"
             else:
@@ -1281,7 +1311,7 @@ def source_lama_blockwise_inpaint_result(
     )
     if np.any(lama_unowned_mask):
         unowned_result, unowned_diagnostics = _run_lama_or_fallback(
-            cleaned,
+            image,
             lama_unowned_mask,
             [],
             inpainter,
@@ -1295,8 +1325,8 @@ def source_lama_blockwise_inpaint_result(
         )
         diagnostics.extend(unowned_diagnostics)
     if np.any(missing_bubble_mask):
-        cleaned, missing_diagnostics = _run_lama_or_fallback(
-            cleaned,
+        missing_result, missing_diagnostics = _run_lama_or_fallback(
+            image,
             missing_bubble_mask,
             missing_bubble_blocks,
             inpainter,
@@ -1306,6 +1336,11 @@ def source_lama_blockwise_inpaint_result(
                 original_block_indices.get(id(block))
                 for block in missing_bubble_blocks
             ],
+        )
+        cleaned = composite_with_edit_mask(
+            cleaned,
+            missing_result,
+            missing_bubble_mask,
         )
         diagnostics.extend(missing_diagnostics)
     bubble_result = erase_text_bubble_regions(
@@ -1382,7 +1417,7 @@ def source_lama_blockwise_inpaint_result(
             if getattr(block, "_erase_mode", "") == ERASE_MODE_BUBBLE_LAMA_FALLBACK
         ]
         fallback_result, fallback_diagnostics = _run_lama_or_fallback(
-            result_image,
+            image,
             fallback_mask,
             fallback_blocks,
             inpainter,
