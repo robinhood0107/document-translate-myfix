@@ -51,7 +51,7 @@ from modules.utils.inpaint_debug import (
     export_inpaint_debug_artifacts,
     has_debug_exports,
 )
-from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.export_paths import (
     build_export_timestamp,
@@ -1919,21 +1919,9 @@ class BatchProcessor:
                             255,
                             0,
                         ).astype(np.uint8)
-                    (
-                        inpaint_input_img,
-                        mask,
-                        cleanup_stats,
-                    ) = refine_bubble_residue_inpaint(
-                        inpaint_input_img,
-                        mask,
-                        inpaint_blocks,
-                        self.inpainting.inpainter_cache,
-                        config,
-                        page_label=f"{index + 1}/{total_images}",
-                        protected_corner_mask=mask_details.get(
-                            "protected_corner_mask"
-                        ),
-                    )
+                    cleanup_stats = {
+                        "autonomous_residue_cleanup": "disabled"
+                    }
                     self._report_residue_cleanup(
                         index=index,
                         total=total_images,
