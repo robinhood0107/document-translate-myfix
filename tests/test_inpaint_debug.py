@@ -85,6 +85,9 @@ class InpaintDebugTests(unittest.TestCase):
         module = self._load_export_module()
 
         self.assertTrue(callable(getattr(module, "source_lama_blockwise_inpaint", None)))
+        self.assertTrue(
+            callable(getattr(module, "source_lama_blockwise_inpaint_result", None))
+        )
 
     def test_export_inpaint_debug_defaults_to_original_and_parses_private_inputs(self) -> None:
         module = self._load_export_module()
@@ -359,11 +362,12 @@ class InpaintDebugTests(unittest.TestCase):
                 return_value=details,
             ), mock.patch.object(
                 module,
-                "source_lama_blockwise_inpaint",
-                return_value=(
-                    np.zeros((32, 32, 3), dtype=np.uint8),
-                    mask.copy(),
-                    [diagnostic, erase_diagnostic],
+                "source_lama_blockwise_inpaint_result",
+                return_value=SimpleNamespace(
+                    image=np.zeros((32, 32, 3), dtype=np.uint8),
+                    edit_mask=mask.copy(),
+                    diagnostics=[diagnostic, erase_diagnostic],
+                    evidence=(),
                 ),
             ) as run_lama, mock.patch.object(
                 module,
@@ -427,9 +431,31 @@ class InpaintDebugTests(unittest.TestCase):
                     np.zeros((32, 32, 3), dtype=np.uint8)
                 )
                 prewrite_mask_pixel_sha = module.pixel_sha256(mask)
+                routing_mask_exists = record["routing_structure_mask"].is_file()
+                routing_source_owned_exists = record[
+                    "routing_source_owned_mask"
+                ].is_file()
+                routing_changed_exists = record[
+                    "routing_structure_changed_mask"
+                ].is_file()
+                derived_proxy_exists = record[
+                    "derived_structure_proxy_mask"
+                ].is_file()
+                derived_proxy_changed_exists = record[
+                    "derived_structure_proxy_changed_mask"
+                ].is_file()
+                ambiguous_mask_exists = record[
+                    "ambiguous_structure_mask"
+                ].is_file()
+                ambiguous_changed_exists = record[
+                    "ambiguous_structure_changed_mask"
+                ].is_file()
 
-        self.assertTrue(run_lama.call_args.kwargs["return_diagnostics"])
         self.assertIs(run_lama.call_args.kwargs["check_need_inpaint"], True)
+        np.testing.assert_array_equal(
+            run_lama.call_args.kwargs["raw_source_mask"],
+            details["raw_mask"],
+        )
         duplicate_fill.assert_called_once()
         self.assertEqual(record["hd_strategy"], "Original")
         self.assertEqual(record["refiner_device"], "cuda")
@@ -447,6 +473,16 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertTrue(record["peak_vram_reset_succeeded"])
         self.assertEqual(record["cleaned_pixel_sha256"], saved_cleaned_pixel_sha)
         self.assertEqual(record["final_mask_pixel_sha256"], saved_mask_pixel_sha)
+        self.assertTrue(routing_mask_exists)
+        self.assertTrue(routing_source_owned_exists)
+        self.assertTrue(routing_changed_exists)
+        self.assertTrue(derived_proxy_exists)
+        self.assertTrue(derived_proxy_changed_exists)
+        self.assertTrue(ambiguous_mask_exists)
+        self.assertTrue(ambiguous_changed_exists)
+        self.assertEqual(record["routing_structure_protect_pixel_count"], 0)
+        self.assertEqual(record["routing_source_owned_pixel_count"], 0)
+        self.assertEqual(record["routing_structure_changed_pixel_count_exact"], 0)
         self.assertNotEqual(
             record["cleaned_pixel_sha256"],
             prewrite_cleaned_pixel_sha,
