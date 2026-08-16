@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from collections.abc import Iterable
 from dataclasses import dataclass
+from time import perf_counter
 
 import cv2
 import imkit as imk
@@ -111,8 +113,23 @@ class SourceLaMaLarge:
         self.device = str(device)
         self.precision = resolved_precision
 
-    def memory_safe_inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list=None) -> np.ndarray:
+    def memory_safe_inpaint(
+        self,
+        img: np.ndarray,
+        mask: np.ndarray,
+        textblock_list=None,
+        *,
+        diagnostic_context: dict | None = None,
+    ) -> np.ndarray:
         self.ensure_loaded()
+        context = dict(diagnostic_context or {})
+        block_index = context.get("block_index")
+        try:
+            normalized_block_index = (
+                int(block_index) if block_index is not None else None
+            )
+        except (TypeError, ValueError):
+            normalized_block_index = None
         diagnostics = {
             **inspect_learned_inpainter_runtime(
                 self,
@@ -125,7 +142,39 @@ class SourceLaMaLarge:
             "oom_retry_count": 0,
             "oom_retry_roi": None,
             "status": "running",
+            "phase": str(context.get("phase", "full") or "full"),
+            "block_index": normalized_block_index,
+            "is_inference": True,
         }
+        started = perf_counter()
+
+        def append_diagnostics() -> None:
+            diagnostics["elapsed_seconds"] = float(perf_counter() - started)
+            try:
+                if is_cuda_device(self.device):
+                    if not torch.cuda.is_available():
+                        diagnostics["cuda_memory_diagnostics_unavailable"] = True
+                    else:
+                        device = torch.device(self.device)
+                        diagnostics["cuda_memory_allocated_mb"] = float(
+                            torch.cuda.memory_allocated(device) / (1024 * 1024)
+                        )
+                        diagnostics["cuda_memory_reserved_mb"] = float(
+                            torch.cuda.memory_reserved(device) / (1024 * 1024)
+                        )
+                        diagnostics["page_peak_vram_allocated_mb"] = float(
+                            torch.cuda.max_memory_allocated(device)
+                            / (1024 * 1024)
+                        )
+                        diagnostics["page_peak_vram_reserved_mb"] = float(
+                            torch.cuda.max_memory_reserved(device)
+                            / (1024 * 1024)
+                        )
+                        diagnostics["cuda_memory_diagnostics_available"] = True
+            except Exception:
+                diagnostics["cuda_memory_diagnostics_unavailable"] = True
+            self.run_diagnostics.append(diagnostics)
+
         try:
             result = self._inpaint(img, mask, textblock_list)
         except Exception as exc:
@@ -138,7 +187,7 @@ class SourceLaMaLarge:
                 diagnostics["first_error"] = type(exc).__name__
                 if retry_roi is None:
                     diagnostics["status"] = "failed_no_smaller_roi"
-                    self.run_diagnostics.append(diagnostics)
+                    append_diagnostics()
                     raise InpaintingCudaOOMError(
                         inpaint_cuda_oom_message(),
                         diagnostics=diagnostics,
@@ -159,11 +208,11 @@ class SourceLaMaLarge:
                         diagnostics["retry_error"] = type(
                             retry_exc
                         ).__name__
-                        self.run_diagnostics.append(diagnostics)
+                        append_diagnostics()
                         raise
                     diagnostics["status"] = "failed_after_roi_retry"
                     diagnostics["retry_error"] = type(retry_exc).__name__
-                    self.run_diagnostics.append(diagnostics)
+                    append_diagnostics()
                     raise InpaintingCudaOOMError(
                         inpaint_cuda_oom_message(),
                         diagnostics=diagnostics,
@@ -178,11 +227,11 @@ class SourceLaMaLarge:
             else:
                 diagnostics["status"] = "failed"
                 diagnostics["first_error"] = type(exc).__name__
-                self.run_diagnostics.append(diagnostics)
+                append_diagnostics()
                 raise
         else:
             diagnostics["status"] = "completed"
-        self.run_diagnostics.append(diagnostics)
+        append_diagnostics()
         return result
 
     def inpaint_preprocess(self, img: np.ndarray, mask: np.ndarray):
@@ -269,7 +318,15 @@ class SourceLaMaLarge:
         img_inpainted = img_inpainted * mask_original + img_original * (1 - mask_original)
         return img_inpainted
 
-    def inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list=None, check_need_inpaint: bool = False) -> np.ndarray:
+    def inpaint(
+        self,
+        img: np.ndarray,
+        mask: np.ndarray,
+        textblock_list=None,
+        check_need_inpaint: bool = False,
+        *,
+        diagnostic_block_indices: list[int | None] | None = None,
+    ) -> np.ndarray:
         self.ensure_loaded()
         original_alpha = None
         if len(img.shape) == 3 and img.shape[2] == 4:
@@ -306,7 +363,12 @@ class SourceLaMaLarge:
         inpainted = np.copy(img_rgb)
         original_mask = mask.copy()
         work_mask = mask.copy()
-        for blk in textblock_list:
+        normalized_diagnostic_indices = (
+            None
+            if diagnostic_block_indices is None
+            else list(diagnostic_block_indices)
+        )
+        for block_index, blk in enumerate(textblock_list):
             xyxy = _clip_half_open_bbox(getattr(blk, "xyxy", [0, 0, 0, 0]), im_w, im_h)
             if xyxy is None:
                 continue
@@ -329,7 +391,23 @@ class SourceLaMaLarge:
                         need_inpaint = False
                         image_crop[np.where(ballon_msk > 0)] = average_bg_color
             if need_inpaint:
-                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(image_crop, mask_crop)
+                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(
+                    image_crop,
+                    mask_crop,
+                    diagnostic_context={
+                        "phase": "block",
+                        "block_index": (
+                            block_index
+                            if normalized_diagnostic_indices is None
+                            else (
+                                normalized_diagnostic_indices[block_index]
+                                if block_index
+                                < len(normalized_diagnostic_indices)
+                                else None
+                            )
+                        ),
+                    },
+                )
             else:
                 inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = image_crop
             work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
@@ -402,13 +480,32 @@ def _adapt_generic_block_to_source_block(block: TextBlock) -> SourceLaMaTextBloc
     return source_block
 
 
-def _resolve_source_blocks(blocks: list[TextBlock]) -> list[SourceLaMaTextBlock]:
+def _resolve_source_blocks(
+    blocks: Iterable[TextBlock],
+    diagnostic_block_indices: list[int | None] | None = None,
+) -> tuple[list[SourceLaMaTextBlock], list[int | None]]:
     resolved: list[SourceLaMaTextBlock] = []
-    for block in list(blocks or []):
+    resolved_indices: list[int | None] = []
+    block_list = list(blocks or [])
+    requested_indices = (
+        None
+        if diagnostic_block_indices is None
+        else list(diagnostic_block_indices)
+    )
+    for local_index, block in enumerate(block_list):
         source_block = _adapt_generic_block_to_source_block(block)
         if source_block is not None:
             resolved.append(source_block)
-    return resolved
+            resolved_indices.append(
+                local_index
+                if requested_indices is None
+                else (
+                    requested_indices[local_index]
+                    if local_index < len(requested_indices)
+                    else None
+                )
+            )
+    return resolved, resolved_indices
 
 
 def _split_bubble_source_mask(
@@ -443,11 +540,15 @@ def _run_lama_or_fallback(
     config,
     *,
     check_need_inpaint: bool,
+    diagnostic_block_indices: list[int | None] | None = None,
 ) -> tuple[np.ndarray, list[dict]]:
     if not np.any(mask):
         return np.asarray(image).copy(), []
 
-    source_blocks = _resolve_source_blocks(blocks)
+    source_blocks, source_block_indices = _resolve_source_blocks(
+        blocks,
+        diagnostic_block_indices,
+    )
     if not source_blocks:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
@@ -464,6 +565,7 @@ def _run_lama_or_fallback(
         np.where(mask > 0, 255, 0).astype(np.uint8),
         source_blocks,
         check_need_inpaint=check_need_inpaint,
+        diagnostic_block_indices=source_block_indices,
     )
     converted = imk.convert_scale_abs(result)
     diagnostics = list(
@@ -533,7 +635,7 @@ def _apply_protected_corner_guard(
 def source_lama_blockwise_inpaint(
     image: np.ndarray,
     mask: np.ndarray,
-    blocks: list[TextBlock],
+    blocks: Iterable[TextBlock],
     inpainter,
     config,
     *,
@@ -547,7 +649,8 @@ def source_lama_blockwise_inpaint(
     | tuple[np.ndarray, list[dict]]
     | tuple[np.ndarray, np.ndarray | None, list[dict]]
 ):
-    if image is None or mask is None or not np.any(mask) or not blocks:
+    block_list = list(blocks or [])
+    if image is None or mask is None or not np.any(mask) or not block_list:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
         cleaned = composite_with_edit_mask(image, converted, mask)
@@ -567,15 +670,24 @@ def source_lama_blockwise_inpaint(
         )
 
     source_mask = normalize_edit_mask(mask, image.shape)
-    bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(source_mask, blocks, image.shape)
+    original_block_indices = {
+        id(block): index
+        for index, block in enumerate(block_list)
+    }
+    bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(
+        source_mask,
+        block_list,
+        image.shape,
+    )
     if not bubble_blocks:
         cleaned, diagnostics = _run_lama_or_fallback(
             image,
             source_mask,
-            list(blocks or []),
+            block_list,
             inpainter,
             config,
             check_need_inpaint=check_need_inpaint,
+            diagnostic_block_indices=list(range(len(block_list))),
         )
         cleaned, guarded_mask = _apply_protected_corner_guard(
             image,
@@ -599,8 +711,32 @@ def source_lama_blockwise_inpaint(
         inpainter,
         config,
         check_need_inpaint=check_need_inpaint,
+        diagnostic_block_indices=[
+            original_block_indices.get(id(block))
+            for block in lama_blocks
+        ],
     )
     bubble_result = erase_text_bubble_regions(image, cleaned, bubble_mask, bubble_blocks, config)
+    for item in list(bubble_result.stats.get("blocks", []) or []):
+        try:
+            bubble_index = int(item.get("index", -1))
+        except (TypeError, ValueError):
+            bubble_index = -1
+        bubble_block = (
+            bubble_blocks[bubble_index]
+            if 0 <= bubble_index < len(bubble_blocks)
+            else None
+        )
+        diagnostics.append(
+            {
+                "phase": "bubble_erase",
+                "block_index": original_block_indices.get(id(bubble_block)),
+                "is_inference": False,
+                "status": "completed",
+                "erase_mode": str(item.get("mode", "") or ""),
+                "elapsed_seconds": float(item.get("elapsed_seconds", 0.0) or 0.0),
+            }
+        )
     fallback_mask = normalize_edit_mask(getattr(bubble_result, "fallback_mask", None), image.shape)
     result_image = bubble_result.image
     if np.any(fallback_mask):
@@ -616,6 +752,10 @@ def source_lama_blockwise_inpaint(
             inpainter,
             config,
             check_need_inpaint=False,
+            diagnostic_block_indices=[
+                original_block_indices.get(id(block))
+                for block in fallback_blocks
+            ],
         )
         diagnostics.extend(fallback_diagnostics)
         result_image = composite_with_edit_mask(result_image, fallback_result, fallback_mask)
