@@ -27,7 +27,6 @@ import numpy as np
 
 from modules.utils.inpaint_cleanup import (
     apply_duplicate_bubble_inner_fill,
-    refine_bubble_residue_inpaint,
 )
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
@@ -83,17 +82,7 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
             0,
         ).astype(np.uint8)
 
-    inpainted, mask, cleanup_stats = refine_bubble_residue_inpaint(
-        inpainted,
-        mask,
-        job.inpaint_blocks,
-        # 이 인자는 원 구현에서도 쓰이지 않는다. 계약을 바꾸지 않으려고 자리만
-        # 지킨다.
-        None,
-        job.config,
-        page_label=job.page_label,
-        protected_corner_mask=job.mask_details.get("protected_corner_mask"),
-    )
+    cleanup_stats = {"autonomous_residue_cleanup": "disabled"}
     inpainted, mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
         inpainted,
         mask,
