@@ -56,6 +56,8 @@ class BubbleTextRescueTests(unittest.TestCase):
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0].text_class, "text_bubble")
         self.assertEqual(blocks[0].direction, "vertical")
+        self.assertEqual(blocks[0].detector_origin, "bubble_text_rescue")
+        self.assertIsNone(blocks[0].detector_text_bbox)
         self.assertTrue(np.array_equal(blocks[0].bubble_xyxy, np.asarray([20, 10, 100, 90], dtype=np.int32)))
 
     def test_create_text_blocks_does_not_duplicate_existing_text_box(self) -> None:
@@ -70,6 +72,13 @@ class BubbleTextRescueTests(unittest.TestCase):
 
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0].text_class, "text_bubble")
+        self.assertEqual(blocks[0].detector_origin, "direct_text")
+        self.assertTrue(
+            np.array_equal(
+                blocks[0].detector_text_bbox,
+                np.asarray([48, 24, 74, 78], dtype=np.int32),
+            )
+        )
 
     def test_rescue_ignores_empty_bubble(self) -> None:
         image = np.full((100, 120, 3), 240, dtype=np.uint8)

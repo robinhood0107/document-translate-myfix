@@ -1951,9 +1951,12 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
                     "page_id": "a1-001",
                     "routing_source_raw_owned_pixel_count": 11,
                     "routing_ownership_protect_pixel_count": 12,
+                    "routing_bubble_interior_pixel_count": 15,
                     "routing_positive_claim_pixel_count": 13,
                     "routing_positive_edit_pixel_count": 14,
                     "routing_claim_providers": ["ctd_full_page_raw"],
+                    "routing_route_decision_distribution": {"broad": 1},
+                    "routing_route_reason_distribution": {"clean": 1},
                     "residue_target_component_coverages": [1.0, 0.99],
                     "residue_target_minimum_component_coverage": 0.99,
                     "inpaint_runtime_diagnostics": [
@@ -1970,6 +1973,13 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
                             "status": "completed",
                             "is_inference": True,
                             "mask_pixel_count": 20,
+                        },
+                        {
+                            "phase": "positive_evidence",
+                            "actual_device": "cuda:0",
+                            "status": "completed",
+                            "is_inference": True,
+                            "mask_pixel_count": 14,
                         },
                         {
                             "phase": sensitive_path,
@@ -1990,9 +2000,12 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
 
     assert row["routing_source_raw_owned_pixel_count"] == 11
     assert row["routing_ownership_protect_pixel_count"] == 12
+    assert row["routing_bubble_interior_pixel_count"] == 15
     assert row["routing_positive_claim_pixel_count"] == 13
     assert row["routing_positive_edit_pixel_count"] == 14
     assert row["routing_claim_providers"] == ["ctd_full_page_raw"]
+    assert row["routing_route_decision_distribution"] == {"broad": 1}
+    assert row["routing_route_reason_distribution"] == {"clean": 1}
     assert row["residue_target_component_coverages"] == [1.0, 0.99]
     assert row["residue_target_minimum_component_coverage"] == 0.99
 
@@ -2007,6 +2020,13 @@ def test_page_metrics_projects_runtime_diagnostics_to_safe_fields(
             "is_inference": True,
             "mask_pixel_count": 20,
             "phase": "generic",
+            "status": "completed",
+        },
+        {
+            "actual_device": "cuda:0",
+            "is_inference": True,
+            "mask_pixel_count": 14,
+            "phase": "positive_evidence",
             "status": "completed",
         },
     ]
