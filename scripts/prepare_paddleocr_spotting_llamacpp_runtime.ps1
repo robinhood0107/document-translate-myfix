@@ -1,10 +1,10 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     # Prepare seeds the volume from source files and seals it. Verify is a
     # read-only check. Reseal leaves the volume contents alone, re-runs the real
     # smoke against the current llama.cpp image, and rewrites the ready manifest.
-    # Auto picks Prepare or Reseal from the volume state; the app's self-repair
-    # path uses Auto.
+    # Auto reuses a valid seal immediately, chooses Reseal for stale metadata,
+    # and chooses Prepare when a contracted model is missing.
     [ValidateSet('Prepare', 'Verify', 'Reseal', 'Auto')]
     [string]$Mode = 'Prepare',
 
@@ -34,7 +34,12 @@ param(
 
     [int64]$MinimumFreeBytes = 0,
 
-    [switch]$SkipFreeSpaceCheck
+    [switch]$SkipFreeSpaceCheck,
+
+    # Interpreter used to derive the spotting projector. Empty falls back to the
+    # CUDA 12 environment. setup_full_cuda13.bat only creates .venv-win-cuda13,
+    # so the caller passes its own interpreter instead of assuming .venv-win.
+    [string]$PythonExecutable = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,7 +68,9 @@ $SpottingImageMaxPixels = 1605632
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptRoot
 $DeriveScript = Join-Path $ScriptRoot 'derive_paddleocr_spotting_mmproj.py'
-$PythonExecutable = Join-Path $RepositoryRoot '.venv-win\Scripts\python.exe'
+if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
+    $PythonExecutable = Join-Path $RepositoryRoot '.venv-win\Scripts\python.exe'
+}
 
 $ModelSpecs = @(
     [pscustomobject][ordered]@{
@@ -263,8 +270,32 @@ $ImageId = Get-PinnedImageId
 
 if ($Mode -eq 'Auto') {
     if (Test-VolumeHoldsEveryModel) {
-        Write-Host 'Auto mode: the volume already holds every model; resealing.'
-        $Mode = 'Reseal'
+        try {
+            Assert-VolumeLabels
+            $Manifest = Read-ReadyManifest
+            Assert-ManifestContract -Manifest $Manifest
+            Write-Host (
+                'Auto mode: ready manifest and model sizes match the current image; ' +
+                'reusing the sealed volume without a full hash or GPU smoke.'
+            )
+            [ordered]@{
+                mode = 'Reuse'
+                reused = $true
+                prepared = $true
+                volume_name = $VolumeName
+                image_ref = $ImageRef
+                image_id = $ImageId
+                official_spotting_max_pixels = $SpottingImageMaxPixels
+            } | ConvertTo-Json -Depth 10
+            return
+        }
+        catch {
+            Write-Host (
+                'Auto mode: the sealed volume needs repair; resealing. ' +
+                $_.Exception.Message
+            )
+            $Mode = 'Reseal'
+        }
     }
     else {
         Write-Host 'Auto mode: the volume is missing a model; preparing.'
