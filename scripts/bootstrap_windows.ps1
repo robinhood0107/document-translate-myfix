@@ -24,12 +24,14 @@ $RuntimeConfig = @{
         requirements = 'requirements-cuda12.txt'
         expected_cuda = '12.8'
         llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
+        fallback_llama_image = ''
     }
     cuda13 = [pscustomobject]@{
         venv = '.venv-win-cuda13'
         requirements = 'requirements-cuda13.txt'
         expected_cuda = '13.0'
         llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+        fallback_llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
     }
 }[$Runtime]
 $ManagedRuntimes = @(
@@ -37,6 +39,7 @@ $ManagedRuntimes = @(
     [pscustomobject]@{ label = 'PaddleOCR VL'; script = 'scripts/prepare_paddleocr_llamacpp_runtime.ps1' },
     [pscustomobject]@{ label = 'Gemma IQ4_NL'; script = 'scripts/prepare_gemma_runtime.ps1' }
 )
+$ActiveLlamaImage = [string]$RuntimeConfig.llama_image
 
 $RequiredFiles = @(
     'comic.py', 'controller.py', 'app\version.py', 'requirements-base.txt',
@@ -89,7 +92,10 @@ try {
     Write-Host ''
     Write-Host 'Comic Translate Windows bootstrap' -ForegroundColor Cyan
     Write-BootstrapMessage "Runtime: $Runtime / Python environment: $($RuntimeConfig.venv)"
-    Write-BootstrapMessage "llama.cpp image: $($RuntimeConfig.llama_image)"
+    Write-BootstrapMessage "llama.cpp preferred image: $ActiveLlamaImage"
+    if ($RuntimeConfig.fallback_llama_image) {
+        Write-BootstrapMessage "llama.cpp compatibility fallback: $($RuntimeConfig.fallback_llama_image)"
+    }
     Write-BootstrapMessage 'Automatic local runtimes: HunyuanOCR, PaddleOCR VL, Gemma IQ4_NL (~16.5 GiB source models)'
     if (-not $Doctor) { Write-BootstrapMessage "Log: $LogPath" }
 
@@ -171,11 +177,15 @@ try {
             }
             else { Write-BootstrapMessage 'Pinned packages need repair.' 'WARN' }
         }
-        $Image = [string]$RuntimeConfig.llama_image
-        if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -eq 0) {
-            Write-BootstrapMessage "Docker image is installed: $Image" 'OK'
-        } else {
-            Write-BootstrapMessage "Docker image is not installed yet: $Image" 'WARN'
+        foreach ($Image in @(
+            [string]$RuntimeConfig.llama_image,
+            [string]$RuntimeConfig.fallback_llama_image
+        ) | Where-Object { $_ }) {
+            if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -eq 0) {
+                Write-BootstrapMessage "Docker image is installed: $Image" 'OK'
+            } else {
+                Write-BootstrapMessage "Docker image is not installed yet: $Image" 'WARN'
+            }
         }
         foreach ($Volume in @(
             'comic-translate-hunyuanocr-models-v2',
@@ -192,7 +202,7 @@ try {
         exit 0
     }
 
-    Set-BootstrapRuntimeEnvironment -LlamaImage ([string]$RuntimeConfig.llama_image) -VenvRoot $VenvRoot
+    Set-BootstrapRuntimeEnvironment -LlamaImage $ActiveLlamaImage -VenvRoot $VenvRoot
     $RuntimeVerificationArguments = @(
         '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
         '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
@@ -230,20 +240,49 @@ try {
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed model volume preparation skipped by smoke/test environment.' 'SKIP'
     } else {
-        Stop-BootstrapManagedContainer -Docker $Docker -Name 'hunyuanocr-local-server' -OwnershipLabel 'com.comictranslate.hunyuanocr-model-volume'
-        Stop-BootstrapManagedContainer -Docker $Docker -Name 'paddleocr-llamacpp' -OwnershipLabel 'com.comictranslate.paddleocr-model-volume'
-        Stop-BootstrapManagedContainer -Docker $Docker -Name 'gemma-local-server' -OwnershipLabel 'comic-translate.runtime'
-        foreach ($Managed in $ManagedRuntimes) {
-            $Script = Join-Path $Root ([string]$Managed.script)
-            Write-BootstrapMessage "Preparing $($Managed.label)..."
-            Invoke-BootstrapRetry -Operation "$($Managed.label) preparation" -Attempts 3 -Action {
-                Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments @(
-                    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
-                    '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
-                    '-ImageRef', ([string]$RuntimeConfig.llama_image)
-                ) -WorkingDirectory $Root
+        $ImageCandidates = @($ActiveLlamaImage)
+        if ($RuntimeConfig.fallback_llama_image) {
+            $ImageCandidates += [string]$RuntimeConfig.fallback_llama_image
+        }
+        $Provisioned = $false
+        for ($ImageIndex = 0; $ImageIndex -lt $ImageCandidates.Count; $ImageIndex++) {
+            $CandidateImage = $ImageCandidates[$ImageIndex]
+            $HasFallback = $ImageIndex -lt ($ImageCandidates.Count - 1)
+            try {
+                Set-BootstrapRuntimeEnvironment -LlamaImage $CandidateImage -VenvRoot $VenvRoot
+                Stop-BootstrapManagedContainer -Docker $Docker -Name 'hunyuanocr-local-server' -OwnershipLabel 'com.comictranslate.hunyuanocr-model-volume'
+                Stop-BootstrapManagedContainer -Docker $Docker -Name 'paddleocr-llamacpp' -OwnershipLabel 'com.comictranslate.paddleocr-model-volume'
+                Stop-BootstrapManagedContainer -Docker $Docker -Name 'gemma-local-server' -OwnershipLabel 'comic-translate.runtime'
+                foreach ($Managed in $ManagedRuntimes) {
+                    $Script = Join-Path $Root ([string]$Managed.script)
+                    Write-BootstrapMessage "Preparing $($Managed.label) with $CandidateImage..."
+                    Invoke-BootstrapRetry `
+                        -Operation "$($Managed.label) preparation" `
+                        -Attempts $(if ($HasFallback) { 1 } else { 3 }) `
+                        -Action {
+                            Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments @(
+                                '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
+                                '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
+                                '-ImageRef', $CandidateImage
+                            ) -WorkingDirectory $Root
+                        }
+                    Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
+                }
+                $ActiveLlamaImage = $CandidateImage
+                $Provisioned = $true
+                break
             }
-            Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
+            catch {
+                if (-not $HasFallback) { throw }
+                Write-BootstrapMessage (
+                    "The preferred llama.cpp image failed its real GPU smoke. " +
+                    "Retrying every managed runtime with the compatibility image: " +
+                    $ImageCandidates[$ImageIndex + 1]
+                ) 'WARN'
+            }
+        }
+        if (-not $Provisioned) {
+            throw 'No supported llama.cpp CUDA image completed managed runtime provisioning.'
         }
     }
 
