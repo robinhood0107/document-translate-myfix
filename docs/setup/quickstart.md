@@ -5,7 +5,7 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 ## 1. Prerequisites
 
 - Windows 10/11 x64
-- CPython 3.12 x64, available through `py -3.12` or PATH
+- [Official Python 3.12.10 Windows installer (64-bit)](https://www.python.org/downloads/release/python-31210/)
 - Docker Desktop with its WSL2 backend and GPU support enabled
 - NVIDIA driver and a CUDA-compatible GPU
 - About 6–8 GiB for the selected venv plus the exact size of model files that are still missing
@@ -15,6 +15,8 @@ The pinned `mahotas` dependency currently ships a Windows wheel only for
 CPython 3.12. A machine with only Python 3.13/3.14 is therefore not supported;
 installing 3.12 x64 side by side is sufficient. The launcher prefers
 `py -3.12` and never imports global packages into its venv.
+Keep the `py` launcher enabled in the installer. Adding Python to PATH is
+optional because `py -3.12` is checked first.
 
 ## 2. Clone and launch
 
