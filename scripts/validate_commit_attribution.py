@@ -195,6 +195,16 @@ def commit_errors(commit_sha: str) -> list[str]:
     return errors
 
 
+def commit_is_available(sha: str) -> bool:
+    completed = subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode == 0
+
+
 def commits_in_range(revision_range: str) -> list[str]:
     return [
         line
@@ -231,7 +241,11 @@ def push_commits(
 ) -> list[str]:
     if ZERO_SHA_RE.fullmatch(after_sha):
         return []
-    if ZERO_SHA_RE.fullmatch(before_sha):
+    if ZERO_SHA_RE.fullmatch(before_sha) or not commit_is_available(before_sha):
+        # A force-push leaves the payload's before commit on no ref, so the
+        # workflow checkout never fetches it and the range would fail to
+        # resolve. Fall back to the new-ref walk, which bounds the range by
+        # the other remote refs instead.
         return new_ref_commits(after_sha, branch=branch, remote=remote)
     return commits_in_range(f"{before_sha}..{after_sha}")
 
