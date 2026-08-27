@@ -73,7 +73,7 @@ $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $Lock = $null
 $TranscriptStarted = $false
 $VenvBackup = ''
-$TotalStages = 8
+$TotalStages = 7
 $DeveloperPythonOnly = [bool]$env:COMIC_BOOTSTRAP_ONLY
 $SkipRuntimeSetup = [bool]$env:COMIC_SKIP_STARTUP_MODELS
 $ExistingVenvValid = $false
@@ -225,19 +225,8 @@ try {
         }
     } else { Write-BootstrapMessage 'Application model preparation skipped by smoke/test environment.' 'SKIP' }
 
-    Write-BootstrapStage 6 $TotalStages 'Ensuring the selected llama.cpp CUDA server image'
     $SkipManagedBootstrap = $SkipRuntimeSetup
-    if ($SkipManagedBootstrap) {
-        Write-BootstrapMessage 'Managed llama.cpp image preparation skipped by smoke/test environment.' 'SKIP'
-    } else {
-        if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', ([string]$RuntimeConfig.llama_image))) -ne 0) {
-            Invoke-BootstrapRetry -Operation 'llama.cpp Docker image pull' -Attempts 4 -Action {
-                Invoke-BootstrapCommand -FilePath $Docker -Arguments @('pull', ([string]$RuntimeConfig.llama_image)) -WorkingDirectory $Root
-            }
-        } else { Write-BootstrapMessage 'llama.cpp image already exists locally; pull skipped.' 'SKIP' }
-    }
-
-    Write-BootstrapStage 7 $TotalStages 'Preparing HunyuanOCR, PaddleOCR VL, and Gemma model volumes'
+    Write-BootstrapStage 6 $TotalStages 'Preparing llama.cpp images and managed model volumes'
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed model volume preparation skipped by smoke/test environment.' 'SKIP'
     } else {
@@ -258,7 +247,7 @@ try {
         }
     }
 
-    Write-BootstrapStage 8 $TotalStages 'Launching Comic Translate'
+    Write-BootstrapStage 7 $TotalStages 'Launching Comic Translate'
     Write-BootstrapMessage 'Bootstrap completed. Future launches reuse verified packages, downloads, images, and model volumes.' 'OK'
     Invoke-BootstrapCommand -FilePath $VenvPython -Arguments (@('-B', '-s', (Join-Path $Root 'comic.py')) + @($RemainingArguments)) -WorkingDirectory $Root -Quiet
 }
