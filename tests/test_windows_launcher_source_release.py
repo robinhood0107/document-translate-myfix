@@ -182,6 +182,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             bootstrap,
         )
         self.assertNotIn("$env:COMIC_SMOKE_EXIT_MS", bootstrap)
+        self.assertNotIn("llama.cpp Docker image pull", bootstrap)
 
     def test_bootstrap_configuration_keeps_cuda_variants_separate(self) -> None:
         bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
