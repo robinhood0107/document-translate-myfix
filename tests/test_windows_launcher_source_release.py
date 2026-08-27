@@ -197,7 +197,13 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("llama.cpp:server-cuda'", image_policy)
         self.assertIn("llama.cpp:server-cuda13'", image_policy)
         self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
-        self.assertIn("preferred llama.cpp image failed", bootstrap)
+        self.assertIn("Get-BootstrapDockerImageCudaCompatibility", bootstrap)
+        self.assertIn("Skipping incompatible llama.cpp image", bootstrap)
+        windows_module = (
+            ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Get-NvidiaCudaCompatibilityVersion", windows_module)
+        self.assertIn("NVIDIA_REQUIRE_CUDA", windows_module)
         self.assertLess(
             bootstrap.index("label = 'HunyuanOCR'"),
             bootstrap.index("label = 'PaddleOCR VL'"),
