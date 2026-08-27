@@ -8,8 +8,13 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 - CPython 3.12 x64, available through `py -3.12` or PATH
 - Docker Desktop with its WSL2 backend and GPU support enabled
 - NVIDIA driver and a CUDA-compatible GPU
-- At least 60 GiB free on `C:` for the model cache and Docker volumes
+- About 6–8 GiB for the selected venv plus the exact size of model files that are still missing
 - Git only when using a source checkout
+
+The pinned `mahotas` dependency currently ships a Windows wheel only for
+CPython 3.12. A machine with only Python 3.13/3.14 is therefore not supported;
+installing 3.12 x64 side by side is sufficient. The launcher prefers
+`py -3.12` and never imports global packages into its venv.
 
 ## 2. Clone and launch
 
@@ -38,8 +43,8 @@ The non-interactive first run prepares:
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf` (about 13.58 GiB)
 
-Docker model sources are reused from
-`%LOCALAPPDATA%\ComicTranslate\ModelCache`. Interrupted downloads resume on the
+Docker model sources are reused from `models\managed-runtime-sources` under
+the installation folder. Interrupted downloads resume on the
 next launch. Completion requires exact size/SHA-256 validation and real model
 load smokes. Use `run_comic.bat --doctor` or
 `run_comic_cuda13.bat --doctor` for a read-only report.
@@ -59,6 +64,27 @@ py -3.12 -m venv .venv-win-cuda13
 ```
 
 `requirements.txt` is the default Windows CUDA12 alias. Shared dependencies live in `requirements-base.txt`.
+
+### Installation locations
+
+- CUDA12 venv: `.venv-win` under the installation folder (about 5.9 GB currently)
+- CUDA13 venv: `.venv-win-cuda13` (about 4.3 GB)
+- GGUF source cache: `models\managed-runtime-sources`
+- bootstrap logs/state: `logs\bootstrap` and `.comic-bootstrap`
+- prepared GGUF files: Docker external named volumes
+
+When the repository is on `D:`, its venvs, source cache, logs, and state stay on
+`D:`. Docker named volumes follow Docker Desktop's configured disk-image
+location, which may still be on `C:`. The three default source models total
+about 16.50 GiB and Docker stores a similarly sized prepared copy. Bootstrap
+does not require a fixed 60 GiB; it checks each missing file's exact size plus
+512 MiB immediately before downloading it.
+
+A separate CUDA Toolkit install is not required. PyTorch and ONNX Runtime CUDA
+user-space DLLs live in the selected venv and are preferred by the launcher;
+llama.cpp user-space CUDA libraries live inside the selected Docker image. The
+NVIDIA display driver and Docker Desktop/WSL2 GPU passthrough remain system
+prerequisites and cannot be isolated inside a Python venv.
 
 ## 3. Manual local runtime management
 
@@ -168,7 +194,7 @@ its own. See the Korean guide at
 
 Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and
 its immediate subdirectories first. The launcher instead supplies its shared
-LocalAppData model cache so release folders can reuse the same sources.
+ignored `models\managed-runtime-sources` cache under the installation folder.
 
 HunyuanOCR previously bind-mounted the `testmodel` folder and read generic
 environment names such as `LLAMA_CTX_SIZE`, which it shared with Gemma. It now

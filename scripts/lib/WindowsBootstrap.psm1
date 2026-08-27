@@ -19,27 +19,6 @@ function Write-BootstrapStage {
     Write-Host ("[{0}/{1}] {2}" -f $Index, $Total, $Message) -ForegroundColor Cyan
 }
 
-function Import-WindowsBootstrapConfig {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "Bootstrap configuration is missing: $Path"
-    }
-    $Config = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ([int]$Config.schema_version -ne 1) {
-        throw "Unsupported bootstrap configuration schema: $($Config.schema_version)"
-    }
-    foreach ($Name in @('cuda12', 'cuda13')) {
-        $Entry = $Config.runtimes.$Name
-        if ($null -eq $Entry) { throw "Bootstrap runtime is missing: $Name" }
-        foreach ($Field in @('venv', 'requirements', 'expected_cuda', 'llama_image')) {
-            if ([string]::IsNullOrWhiteSpace([string]$Entry.$Field)) {
-                throw "Bootstrap runtime $Name has no $Field."
-            }
-        }
-    }
-    return $Config
-}
-
 function Invoke-BootstrapRetry {
     param(
         [Parameter(Mandatory = $true)][string]$Operation,
@@ -311,7 +290,7 @@ function Set-BootstrapRuntimeEnvironment {
 }
 
 Export-ModuleMember -Function @(
-    'Write-BootstrapMessage', 'Write-BootstrapStage', 'Import-WindowsBootstrapConfig',
+    'Write-BootstrapMessage', 'Write-BootstrapStage',
     'Invoke-BootstrapRetry', 'Invoke-BootstrapCommand', 'Invoke-BootstrapProbe',
     'Resolve-BootstrapPython312',
     'Enter-BootstrapLock', 'Test-BootstrapWritableDirectory', 'Assert-BootstrapFreeSpace',

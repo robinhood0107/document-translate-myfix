@@ -35,7 +35,7 @@ param(
     [ValidateRange(30, 900)]
     [int]$SmokeTimeoutSec = 420,
 
-    [int64]$MinimumFreeBytes = 32212254720,
+    [int64]$MinimumFreeBytes = 0,
 
     [switch]$SkipFreeSpaceCheck
 )
@@ -434,7 +434,7 @@ Test-ManagedContainerStopped
 # 않으므로 원본 경로도, 복사할 여유 공간도 필요 없다.
 if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
-    if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
+    if ($MinimumFreeBytes -gt 0 -and [int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
             "Insufficient free C: space. required={0:N2} GiB, actual={1:N2} GiB" -f
             ($MinimumFreeBytes / 1GB),
@@ -459,7 +459,8 @@ if (-not $IsReseal) {
             -RequestedPath $Spec.SourcePath `
             -DownloadUrl $Spec.DownloadUrl `
             -DownloadDirectory $DownloadDirectory `
-            -AllowDownload:$AllowDownload
+            -AllowDownload:$AllowDownload `
+            -SkipFreeSpaceCheck:$SkipFreeSpaceCheck
         $PreparedSources += [pscustomobject]@{
             Spec = $Spec
             Path = $Resolved.Path

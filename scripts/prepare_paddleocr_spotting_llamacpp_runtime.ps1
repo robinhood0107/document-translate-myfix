@@ -42,7 +42,7 @@ param(
     [ValidateRange(0, 65536)]
     [int]$MaximumBackgroundGpuMiB = 2048,
 
-    [int64]$MinimumFreeBytes = 5368709120,
+    [int64]$MinimumFreeBytes = 0,
 
     [switch]$SkipFreeSpaceCheck
 )
@@ -564,7 +564,7 @@ Assert-ManagedContainerStopped
 Assert-BackgroundGpuUsage
 # Reseal leaves volume contents alone and copies nothing, so it needs neither a
 # source directory nor room for a copy.
-if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
+if (-not $IsReseal -and -not $SkipFreeSpaceCheck -and $MinimumFreeBytes -gt 0) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
     if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
@@ -611,7 +611,8 @@ try {
                 -RequestedPath $ModelDirectory `
                 -DownloadUrl ([string]$TargetSpec.DownloadUrl) `
                 -DownloadDirectory $DownloadDirectory `
-                -AllowDownload:$AllowDownload).Path
+                -AllowDownload:$AllowDownload `
+                -SkipFreeSpaceCheck:$SkipFreeSpaceCheck).Path
         }
         $TargetHash = (
             Get-FileHash -LiteralPath $TargetSourcePath -Algorithm SHA256
@@ -648,7 +649,8 @@ try {
                 -RequestedPath $ModelDirectory `
                 -DownloadUrl ([string]$ProjectorSpec.SourceDownloadUrl) `
                 -DownloadDirectory $DownloadDirectory `
-                -AllowDownload:$AllowDownload).Path
+                -AllowDownload:$AllowDownload `
+                -SkipFreeSpaceCheck:$SkipFreeSpaceCheck).Path
         }
         $DerivedProjectorPath = Join-Path $TemporaryRoot $ProjectorSpec.Name
         $Derive = Invoke-NativeResult `
