@@ -87,7 +87,7 @@ function Test-ManagedRuntimeModelCandidate {
     return (Get-ManagedRuntimeFileSha256 -Path $Path) -eq $Sha256.ToLowerInvariant()
 }
 
-function Invoke-ManagedRuntimeDownload {
+function Invoke-ManagedRuntimeDownloadAttempt {
     <#
     .SYNOPSIS
     큰 파일을 재개 가능하게 내려받고 크기와 SHA-256 을 검증한다.
@@ -241,6 +241,54 @@ function Invoke-ManagedRuntimeDownload {
     return $Destination
 }
 
+function Invoke-ManagedRuntimeDownload {
+    <#
+    .SYNOPSIS
+    재개 가능한 model download를 제한된 지수 backoff로 다시 시도한다.
+
+    .DESCRIPTION
+    각 attempt는 같은 `.partial` 파일을 사용하므로 이미 받은 byte를 버리지 않는다.
+    인증·권한·파일 없음 오류는 재시도해도 복구되지 않으므로 즉시 올린다.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][int64]$Bytes,
+        [Parameter(Mandatory = $true)][string]$Sha256,
+        [int]$TimeoutMinutes = 240,
+        [ValidateRange(1, 10)][int]$MaximumAttempts = 5
+    )
+
+    for ($Attempt = 1; $Attempt -le $MaximumAttempts; $Attempt++) {
+        try {
+            return Invoke-ManagedRuntimeDownloadAttempt `
+                -Uri $Uri `
+                -Destination $Destination `
+                -Bytes $Bytes `
+                -Sha256 $Sha256 `
+                -TimeoutMinutes $TimeoutMinutes
+        }
+        catch {
+            $Message = [string]$_.Exception.Message
+            if ($Message -match 'HTTP (400|401|403|404|405|410|422)') {
+                throw
+            }
+            if ($Attempt -ge $MaximumAttempts) {
+                throw
+            }
+            $Delay = [int][Math]::Min(30, 2 * [Math]::Pow(2, $Attempt - 1))
+            Write-Warning (
+                "Model download attempt {0}/{1} failed. Resuming in {2}s: {3}" -f
+                $Attempt,
+                $MaximumAttempts,
+                $Delay,
+                $Message
+            )
+            Start-Sleep -Seconds $Delay
+        }
+    }
+}
+
 function Resolve-ManagedRuntimeModelSource {
     <#
     .SYNOPSIS
@@ -270,7 +318,9 @@ function Resolve-ManagedRuntimeModelSource {
         # 내려받은 파일을 둘 위치. 기본값은 저장소의 `testmodel/`.
         [AllowEmptyString()][string]$DownloadDirectory = '',
 
-        [switch]$AllowDownload
+        [switch]$AllowDownload,
+
+        [switch]$SkipFreeSpaceCheck
     )
 
     $Sha256 = $Sha256.ToLowerInvariant()
@@ -391,6 +441,20 @@ function Resolve-ManagedRuntimeModelSource {
     }
 
     $Destination = Join-Path $TargetDirectory $FileName
+    if (-not $SkipFreeSpaceCheck) {
+        $DriveRoot = [System.IO.Path]::GetPathRoot($TargetDirectory)
+        $Drive = [System.IO.DriveInfo]::new($DriveRoot)
+        $RequiredBytes = $Bytes + 536870912L
+        if ($Drive.AvailableFreeSpace -lt $RequiredBytes) {
+            throw (
+                "Not enough free space for {0}: required={1:N2} GiB, available={2:N2} GiB, drive={3}" -f
+                $FileName,
+                ($RequiredBytes / 1GB),
+                ($Drive.AvailableFreeSpace / 1GB),
+                $DriveRoot
+            )
+        }
+    }
     Write-Host (
         "Downloading the registered model source ({0:N2} GiB): {1}" -f
         ($Bytes / 1GB),

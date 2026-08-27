@@ -15,6 +15,12 @@ Do not create a worktree. Work in the checkout, protect `main` and `develop`,
 keep `main`, `develop`, and `benchmarking/lab`, and use only the supported
 Windows environments named in `rules.md` for repository workflows.
 
+The two Windows BAT entrypoints remain dedicated to CUDA12 and CUDA13 while a
+shared PowerShell bootstrap owns their isolated venvs and default local model
+volumes. Treat Python 3.12 x64, WSL2, Docker Desktop, and the NVIDIA driver as
+prerequisites. Keep CI fast and source-contract-only; do not add a clean
+Windows package/model bootstrap job, but enforce release dependency closure.
+
 For Gemma sampler work, judge only the normalized translated sentence. Preserve
 meaning and naturalness; accept meaning-preserving wording or onomatopoeia
 variation; strip known channel/thought framing; and retain envelope shape only
