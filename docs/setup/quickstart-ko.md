@@ -27,7 +27,8 @@ CUDA12 전체 경로(Python cu128 + llama.cpp `server-cuda`):
 run_comic.bat
 ```
 
-CUDA13 전체 경로(Python cu130 + llama.cpp `server-cuda13`):
+CUDA13 Python 경로(cu130, Docker는 `server-cuda13` 우선 후 호환되지 않으면
+`server-cuda` 자동 fallback):
 
 ```bat
 run_comic_cuda13.bat

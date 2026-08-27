@@ -192,6 +192,8 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("venv = '.venv-win-cuda13'", bootstrap)
         self.assertIn("llama.cpp:server-cuda'", bootstrap)
         self.assertIn("llama.cpp:server-cuda13'", bootstrap)
+        self.assertIn("fallback_llama_image", bootstrap)
+        self.assertIn("preferred llama.cpp image failed", bootstrap)
         self.assertLess(
             bootstrap.index("label = 'HunyuanOCR'"),
             bootstrap.index("label = 'PaddleOCR VL'"),
