@@ -29,7 +29,7 @@ manifest는 준비 당시의 llama.cpp image identity를 함께 봉인합니다.
 | `Prepare` | 필요 | 원본을 볼륨에 복사하고, 해시를 검증하고, 실제 GPU 스모크를 통과시킨 뒤 manifest를 씁니다. |
 | `Verify` | 불필요 | 읽기 전용 검사만 합니다. 아무것도 바꾸지 않습니다. |
 | `Reseal` | **불필요** | 볼륨 내용을 그대로 두고, 해시를 다시 검증하고, 현재 image로 스모크를 다시 통과시킨 뒤 manifest만 다시 씁니다. |
-| `Auto` | 상황에 따라 | 볼륨이 이미 계약된 파일을 담고 있으면 `Reseal`, 아니면 `Prepare`를 고릅니다. |
+| `Auto` | 상황에 따라 | 유효한 봉인은 즉시 재사용하고, 봉인이 낡으면 `Reseal`, 모델이 빠졌으면 `Prepare`를 고릅니다. |
 
 image identity drift는 `Reseal`로 복구됩니다. 수십 GB를 다시 복사하거나 다시
 내려받지 않습니다.
