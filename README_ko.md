@@ -134,7 +134,7 @@ PaddleOCR VL Spotting과 MangaLMM은 기본 bootstrap에 포함하지 않으며,
 ### Windows 런타임과 저장소 워크플로
 
 - Windows 실행기와 CUDA13 전용 실행 경로를 추가했습니다.
-- `run_comic.bat`, `run_comic_cuda13.bat` 자체가 로컬 venv/runtime을 자동 bootstrap하도록 바꿨습니다.
+- Windows 진입점을 분리했습니다. `setup*.bat`이 venv와 모델 volume을 준비하고, `run_comic*.bat`은 실행만 합니다.
 - 로컬 Git hook과 CI 검증 체계를 강화했습니다.
 - 브랜치 정책을 정리해 `feature/*`, `fix/*`, `chore/*`, `hotfix/*`, `benchmarking/lab` 체계로 표준화했습니다.
 
@@ -209,25 +209,42 @@ Python installer에서는 `py` launcher를 포함하세요. 시스템 Python은 
 생성에만 사용하고 전역 package는 가져오지 않습니다.
 
 
-CUDA12 전체 런타임(Python cu128 + llama.cpp `server-cuda`):
+설치와 실행은 분리되어 있습니다. 설치는 한 번만 하고, 이후에는 계속 실행만
+하면 됩니다. 실행 런처는 모델 volume을 내려받지 않으므로 수 초 안에 뜹니다.
+
+**1단계 - 최초 1회 준비**(CUDA12는 Python cu128 + llama.cpp `server-cuda`,
+CUDA13은 cu130이며 Docker가 이미지의 CUDA 요구 조건을 먼저 검사한 뒤
+`server-cuda13` 또는 호환 `server-cuda`를 선택):
+
+```bat
+setup.bat
+```
+
+```bat
+setup_cuda13.bat
+```
+
+전용 venv, 앱 필수 모델, 그리고 핵심 런타임 3종(HunyuanOCR, PaddleOCR VL,
+Gemma IQ4_NL)을 준비합니다. MangaLMM과 PaddleOCR VL Spotting까지 미리 받아
+두려면 `setup_full.bat` 또는 `setup_full_cuda13.bat`을 사용하세요. 설치는 질문
+없이 진행되고 중단되어도 이어집니다. 다운로드는 설치 폴더의
+`models/managed-runtime-sources` cache에서 이어받고, 크기와 SHA-256을 통과한
+파일만 Docker volume에 들어갑니다. 다시 실행하면 ready manifest, 현재 image ID,
+모델 크기가 모두 맞을 때 전체 해시와 GPU smoke를 건너뜁니다.
+
+**2단계 - 실행:**
 
 ```bat
 run_comic.bat
 ```
 
-CUDA13 Python 런타임(cu130, Docker는 `server-cuda13` 우선 후 드라이버가
-지원하지 않으면 `server-cuda` 자동 fallback):
-
 ```bat
 run_comic_cuda13.bat
 ```
 
-첫 실행은 질문 없이 전용 venv, 앱 필수 모델, HunyuanOCR, PaddleOCR VL,
-Gemma IQ4_NL을 순서대로 준비합니다. 다운로드는 설치 폴더의
-`models/managed-runtime-sources` cache에서
-이어받고 크기와 SHA-256을 통과한 파일만 Docker volume에 넣습니다. 다음 실행은
-이미 검증된 항목을 건너뜁니다. 설치 상태만 읽기 전용으로 확인하려면
-`run_comic.bat --doctor` 또는 `run_comic_cuda13.bat --doctor`를 실행합니다.
+설치를 건너뛰어도 동작하지만 느립니다. 이 경우 앱이 처음 쓰는 런타임을 GUI
+안에서 진행률 표시 없이 그때그때 준비합니다. 설치 상태만 읽기 전용으로
+확인하려면 `setup.bat --doctor` 또는 `setup_cuda13.bat --doctor`를 실행합니다.
 
 ### 2. 로컬 번역 서버 사용
 

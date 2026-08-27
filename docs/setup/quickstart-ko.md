@@ -17,29 +17,30 @@
 Python installer에서는 `py` launcher를 포함하세요. 시스템 PATH 추가는 선택이며,
 launcher는 `py -3.12`를 우선 탐색합니다.
 
-## 2. 저장소 실행
+## 2. 최초 1회 준비
 
-저장소 루트에서 아래 런처 중 하나를 실행합니다.
+설치와 실행은 진입점이 다릅니다. 오래 걸리는 작업은 전부 설치 쪽에 있고,
+실행 런처는 그 작업을 하지 않습니다.
 
-CUDA12 전체 경로(Python cu128 + llama.cpp `server-cuda`):
+CUDA12 경로(Python cu128 + llama.cpp `server-cuda`):
 
 ```bat
-run_comic.bat
+setup.bat
 ```
 
 CUDA13 Python 경로(cu130, Docker는 `server-cuda13` 우선 후 호환되지 않으면
 `server-cuda` 자동 fallback):
 
 ```bat
-run_comic_cuda13.bat
+setup_cuda13.bat
 ```
 
-두 BAT는 독립된 진입점이지만 같은 PowerShell bootstrap 엔진을 사용합니다.
-시스템 Python은 venv 생성에만 쓰고 전역 package와 Python 환경변수는 무시합니다.
-Docker Desktop이 꺼져 있으면 자동으로 시작하고, 선택한 CUDA 계열의
-llama.cpp server image가 로컬에 없을 때만 가져옵니다.
+두 BAT는 같은 PowerShell bootstrap 엔진을 사용합니다. 시스템 Python은 venv
+생성에만 쓰고 전역 package와 Python 환경변수는 무시합니다. Docker Desktop이
+꺼져 있으면 자동으로 시작하고, 선택한 CUDA 계열의 llama.cpp server image가
+로컬에 없을 때만 가져옵니다.
 
-첫 실행은 질문 없이 아래 항목을 순서대로 준비합니다.
+설치는 질문 없이 아래 항목을 순서대로 준비합니다.
 
 - 선택한 `.venv-win` 또는 `.venv-win-cuda13`과 pinned Python package
 - CTD/LaMa 계열 필수 앱 모델
@@ -47,10 +48,33 @@ llama.cpp server image가 로컬에 없을 때만 가져옵니다.
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf`(약 13.58 GiB)
 
+`setup_full.bat`과 `setup_full_cuda13.bat`은 여기에 MangaLMM과 PaddleOCR VL
+Spotting까지 추가합니다. core 단계는 full 단계의 부분집합이므로
+`setup_full.bat` 뒤에 `setup.bat`을 실행해도 추가로 만든 볼륨이 사라지지 않습니다.
+
 Docker 원본 모델은 설치 폴더의 `models\managed-runtime-sources`에서 재사용하고,
-중단된 다운로드는 다음 BAT 실행에서 이어받습니다. 모든 항목은 크기·SHA-256과
+중단된 다운로드는 다음 실행에서 이어받습니다. 모든 항목은 크기·SHA-256과
 실제 model-load smoke를 통과해야 준비 완료로 인정합니다. 읽기 전용 상태 검사는
-`run_comic.bat --doctor` 또는 `run_comic_cuda13.bat --doctor`를 사용합니다.
+`setup.bat --doctor` 또는 `setup_cuda13.bat --doctor`를 사용합니다.
+
+## 3. 실행
+
+```bat
+run_comic.bat
+```
+
+```bat
+run_comic_cuda13.bat
+```
+
+실행 런처는 venv만 확인하고 앱을 띄우므로, 이미 준비된 상태에서는 수 초 안에
+뜹니다. 이미지를 pull하거나 모델 볼륨을 만들지 않습니다. 준비되지 않은 런타임을
+처음 쓰면 앱이 GUI 안에서 그때 준비합니다. 동작은 하지만 설치를 먼저 돌리는
+편이 훨씬 빠릅니다.
+
+CUDA13 launcher는 컨테이너를 만들기 전에 이미지의 `NVIDIA_REQUIRE_CUDA`와
+드라이버 호환 버전을 비교합니다. 준비 완료 뒤에는 ready manifest, image ID,
+모델 크기가 그대로인 볼륨을 재사용하므로 전체 해시와 GPU smoke를 반복하지 않습니다.
 
 CUDA13 경로는 공식 ONNX Runtime CUDA13 nightly feed를 사용합니다.
 
@@ -89,7 +113,7 @@ llama.cpp의 CUDA 사용자 공간은 선택한 Docker image 안에 있습니다
 구동하는 NVIDIA display driver와 Docker Desktop/WSL2 GPU passthrough는 시스템
 준비물이라 venv 안에 넣을 수 없습니다.
 
-## 3. 로컬 런타임 수동 관리
+## 4. 로컬 런타임 수동 관리
 
 정상적인 첫 실행에서는 아래 준비 명령을 직접 실행할 필요가 없습니다. 전체 hash
 재검증, 별도 volume 또는 선택 runtime을 수동 관리할 때만 사용합니다.
@@ -189,10 +213,10 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 
 ### 준비 볼륨이 갑자기 거부될 때
 
-모든 준비 스크립트는 `-Mode Auto`를 받습니다. 볼륨이 비어 있으면 준비하고,
-이미 계약된 파일을 담고 있으면 다시 봉인합니다. 업스트림이 llama.cpp 태그를
-갱신해 image digest가 움직이면 모델이 멀쩡한데도 manifest만 어긋나는데, 이때
-`Auto`(내부적으로 `Reseal`)가 원본 파일 없이 복구합니다. 앱도 같은 상태를
+모든 준비 스크립트는 `-Mode Auto`를 받습니다. 유효한 봉인은 즉시 재사용하고,
+볼륨이 비어 있으면 준비합니다. 업스트림이 llama.cpp 태그를 갱신해 image digest가
+움직이면 모델이 멀쩡한데도 manifest만 어긋나는데, 이때만 `Auto`가 `Reseal`을
+선택해 원본 파일 없이 복구합니다. 앱도 같은 상태를
 스스로 감지해 한 번 복구합니다. 자세한 내용은
 [관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
 참고하세요.
@@ -206,7 +230,7 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 `HUNYUAN_OCR_LLAMA_*` 전용 이름을 사용하므로, 한쪽을 조정해도 다른 엔진이
 바뀌지 않습니다.
 
-## 4. 권장 앱 설정
+## 5. 권장 앱 설정
 
 - 워크플로 모드: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
@@ -224,7 +248,7 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 - 중국어 -> `HunyuanOCR`
 - 일본어 / 기타 언어 -> `PaddleOCR VL`
 
-## 5. 선택 알림 설정 (ntfy)
+## 6. 선택 알림 설정 (ntfy)
 
 열기:
 
@@ -245,7 +269,7 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 - [ntfy publish docs](https://docs.ntfy.sh/publish/)
 - [ntfy config docs](https://docs.ntfy.sh/config/)
 
-## 6. 현재 제품 코드가 실제로 참고하는 모델/런타임 링크
+## 7. 현재 제품 코드가 실제로 참고하는 모델/런타임 링크
 
 검출 / 마스킹:
 
@@ -270,14 +294,14 @@ OCR:
 - [lama_mpe](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3)
 - [MI-GAN](https://github.com/Sanster/models/releases/tag/migan)
 
-## 7. 같이 보면 좋은 문서
+## 8. 같이 보면 좋은 문서
 
 - [/README.md](/README.md)
 - [/README_ko.md](/README_ko.md)
 - [/docs/gemma/local-server-ko.md](/docs/gemma/local-server-ko.md)
 - [/docs/hunyuan/local-server-ko.md](/docs/hunyuan/local-server-ko.md)
 
-## 8. 공식 Windows 릴리스 패키지
+## 9. 공식 Windows 릴리스 패키지
 
 공식 Windows 릴리스 패키지는 `main`에 포함된 커밋에만 `vX.Y.Z` 태그를 달았을 때 생성됩니다.
 

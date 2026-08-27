@@ -15,10 +15,13 @@ Do not create a worktree. Work in the checkout, protect `main` and `develop`,
 keep `main`, `develop`, and `benchmarking/lab`, and use only the supported
 Windows environments named in `rules.md` for repository workflows.
 
-The two Windows BAT entrypoints remain dedicated to CUDA12 and CUDA13 while a
-shared PowerShell bootstrap owns their isolated venvs and default local model
-volumes. Treat Python 3.12 x64, WSL2, Docker Desktop, and the NVIDIA driver as
-prerequisites. Keep CI fast and source-contract-only; do not add a clean
+Setup and launch are separate Windows entrypoints. `setup*.bat` (core tier)
+and `setup_full*.bat` (adds MangaLMM and PaddleOCR VL Spotting) run the shared
+PowerShell bootstrap, which owns the isolated venvs and managed model volumes
+and never launches the application. `run_comic.bat` and `run_comic_cuda13.bat`
+remain dedicated CUDA12/CUDA13 launch entrypoints and must never pull images,
+create volumes, or invoke a `prepare_*` script. Treat Python 3.12 x64, WSL2,
+Docker Desktop, and the NVIDIA driver as prerequisites. Keep CI fast and source-contract-only; do not add a clean
 Windows package/model bootstrap job, but enforce release dependency closure.
 
 For Gemma sampler work, judge only the normalized translated sentence. Preserve
