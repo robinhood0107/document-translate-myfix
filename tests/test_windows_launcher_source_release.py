@@ -176,6 +176,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("$env:PYTHONHOME = ''", module)
         self.assertIn("$env:PYTHONPATH = ''", module)
         self.assertIn("include-system-site-packages", bootstrap)
+        self.assertIn("Docker model volume is not installed yet", bootstrap)
 
     def test_bootstrap_configuration_keeps_cuda_variants_separate(self) -> None:
         bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(

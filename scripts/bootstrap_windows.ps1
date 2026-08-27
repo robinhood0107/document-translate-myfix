@@ -171,6 +171,23 @@ try {
             }
             else { Write-BootstrapMessage 'Pinned packages need repair.' 'WARN' }
         }
+        $Image = [string]$RuntimeConfig.llama_image
+        if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -eq 0) {
+            Write-BootstrapMessage "Docker image is installed: $Image" 'OK'
+        } else {
+            Write-BootstrapMessage "Docker image is not installed yet: $Image" 'WARN'
+        }
+        foreach ($Volume in @(
+            'comic-translate-hunyuanocr-models-v2',
+            'comic-translate-paddleocr-vl-llamacpp-models-v1',
+            'comic-translate-gemma-models-v2'
+        )) {
+            if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('volume', 'inspect', $Volume)) -eq 0) {
+                Write-BootstrapMessage "Docker model volume is installed: $Volume" 'OK'
+            } else {
+                Write-BootstrapMessage "Docker model volume is not installed yet: $Volume" 'WARN'
+            }
+        }
         Write-BootstrapMessage 'Doctor mode is read-only; no files, packages, images, or volumes were changed.' 'OK'
         exit 0
     }
