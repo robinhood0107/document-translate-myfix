@@ -398,6 +398,12 @@ class PrepareScriptContractTests(unittest.TestCase):
                 )
                 self.assertIn("$IsReseal = $Mode -eq 'Reseal'", script)
                 self.assertIn("if ($Mode -eq 'Auto') {", script)
+                self.assertIn("mode = 'Reuse'", script)
+                self.assertIn("without a full hash or GPU smoke", script)
+                self.assertLess(
+                    script.index("mode = 'Reuse'"),
+                    script.index("$IsReseal = $Mode -eq 'Reseal'"),
+                )
 
     def test_every_prepare_script_normalizes_crlf_for_container_shells(self) -> None:
         # 컨테이너의 /bin/sh 는 dash 다. here-string 의 CR 이 그대로 넘어가면
