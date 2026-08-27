@@ -122,6 +122,9 @@ function Resolve-BootstrapPython312 {
                 bits = [int]$Parts[3]
                 implementation = $Parts[4]
             }
+            # requirements-base.txt pins mahotas==1.4.18, whose newest Windows wheel
+            # is cp312. A 3.13+ interpreter would fall back to a source build, so the
+            # pinned minor is a hard requirement here, not merely a preference.
             if (
                 [int]$Payload.major -eq [int]$PythonContract.major -and
                 [int]$Payload.minor -eq [int]$PythonContract.minor -and
@@ -375,11 +378,14 @@ function Test-BootstrapManagedRuntimeState {
         if (
             [int]$State.schema_version -ne 1 -or
             [string]$State.image_ref -ne $ImageRef -or
-            [string]$State.image_id -ne $ImageId -or
-            @($State.volumes).Count -ne @($ManagedRuntimes).Count
+            [string]$State.image_id -ne $ImageId
         ) {
             return $false
         }
+        # Superset semantics: the seal record may cover more runtimes than this
+        # invocation asks for (setup_full followed by setup). Every requested
+        # runtime must be recorded, but extras are not a mismatch.
+        if (@($State.volumes).Count -lt @($ManagedRuntimes).Count) { return $false }
         foreach ($Managed in $ManagedRuntimes) {
             $Recorded = @($State.volumes | Where-Object {
                 [string]$_.name -eq [string]$Managed.volume
@@ -414,17 +420,49 @@ function Write-BootstrapManagedRuntimeState {
 
     $Directory = Split-Path -Parent $Path
     New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    $Entries = [System.Collections.Generic.List[object]]::new()
+    $Written = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($Managed in $ManagedRuntimes) {
+        [void]$Written.Add([string]$Managed.volume)
+        $Entries.Add([ordered]@{
+            name = [string]$Managed.volume
+            runtime_name = [string]$Managed.runtime_name
+            preparation_version = [int]$Managed.preparation_version
+        })
+    }
+    # A narrower run (setup) must not erase a wider seal (setup_full). Carry over
+    # previously recorded runtimes as long as they were sealed against this exact
+    # image identity; a different image invalidates them and they are dropped.
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        try {
+            $Previous = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            if (
+                [int]$Previous.schema_version -eq 1 -and
+                [string]$Previous.image_ref -eq $ImageRef -and
+                [string]$Previous.image_id -eq $ImageId
+            ) {
+                foreach ($Entry in @($Previous.volumes)) {
+                    $Name = [string]$Entry.name
+                    if ([string]::IsNullOrWhiteSpace($Name)) { continue }
+                    if ($Written.Contains($Name)) { continue }
+                    [void]$Written.Add($Name)
+                    $Entries.Add([ordered]@{
+                        name = $Name
+                        runtime_name = [string]$Entry.runtime_name
+                        preparation_version = [int]$Entry.preparation_version
+                    })
+                }
+            }
+        }
+        catch { }
+    }
     $Payload = [ordered]@{
         schema_version = 1
         image_ref = $ImageRef
         image_id = $ImageId
-        volumes = @($ManagedRuntimes | ForEach-Object {
-            [ordered]@{
-                name = [string]$_.volume
-                runtime_name = [string]$_.runtime_name
-                preparation_version = [int]$_.preparation_version
-            }
-        })
+        volumes = @($Entries)
     }
     $TemporaryPath = "$Path.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
     try {

@@ -17,10 +17,17 @@ source; Codex relies on this `AGENTS.md` entrypoint.
 - Work in this checkout only. Do not create Git worktrees for this repository.
 - Use `.venv-win` and `.venv-win-cuda13` for supported local workflows; do not
   rely on `.venv` as the repository workflow environment.
-- Keep `run_comic.bat` and `run_comic_cuda13.bat` as separate CUDA12/CUDA13
-  entrypoints backed by the shared Windows bootstrap. Python 3.12 x64, WSL2,
-  Docker Desktop, and an NVIDIA driver are prerequisites; the launcher owns
-  venv reconciliation and the default Gemma/HunyuanOCR/PaddleOCR volumes.
+- Keep setup and launch as separate Windows entrypoints. `setup.bat` /
+  `setup_cuda13.bat` provision the core tier (HunyuanOCR, PaddleOCR VL, Gemma)
+  and `setup_full.bat` / `setup_full_cuda13.bat` add MangaLMM and PaddleOCR VL
+  Spotting; all four are backed by the shared Windows PowerShell bootstrap,
+  which owns venv reconciliation and managed model volumes and never launches
+  the application. `run_comic.bat` and `run_comic_cuda13.bat` stay separate
+  CUDA12/CUDA13 launch entrypoints and must never pull images, create volumes,
+  or run a `prepare_*` script; the application self-provisions on demand for
+  anything setup did not seal. Python 3.12 x64 (the pinned `mahotas` wheel has
+  no Windows build above cp312), WSL2, Docker Desktop, and an NVIDIA driver are
+  prerequisites.
 - Windows launcher CI stays source-contract-only and must not perform a fresh
   package/model bootstrap. Release tests must still prove that every imported
   bootstrap module and linked setup document is included in the source ZIP.
