@@ -150,7 +150,12 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 self.assertFalse(any("benchmark_" in name for name in names))
                 self.assertFalse(any(name.lower().endswith(".gguf") for name in names))
 
-    def test_launchers_offer_no_install_release_contract(self) -> None:
+    def test_run_launchers_never_provision_managed_runtimes(self) -> None:
+        """The run path starts the app; it must never seal model volumes.
+
+        Provisioning belongs to setup*.bat. Putting it back on the run path is
+        what made a warm launch take hours, so the boundary is pinned here.
+        """
         expected_runtime = {
             "run_comic.bat": "cuda12",
             "run_comic_cuda13.bat": "cuda13",
@@ -158,18 +163,46 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         for launcher, runtime in expected_runtime.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
             self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
+            self.assertIn(f"requirements-{runtime}.txt", text)
+            self.assertIn("comic.py %*", text)
+            # The verify-only file list legitimately *names* the provisioning
+            # scripts, so assert on invocation, not on mere mention.
+            lowered = text.lower()
+            self.assertNotIn("powershell", lowered)
+            self.assertNotIn("docker ", lowered)
+            self.assertNotIn("-mode auto", lowered)
+
+    def test_setup_launchers_select_runtime_and_tier(self) -> None:
+        expected = {
+            "setup.bat": ("cuda12", False),
+            "setup_cuda13.bat": ("cuda13", False),
+            "setup_full.bat": ("cuda12", True),
+            "setup_full_cuda13.bat": ("cuda13", True),
+        }
+        for launcher, (runtime, full) in expected.items():
+            text = (ROOT / launcher).read_text(encoding="utf-8")
+            self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
             self.assertIn("scripts\\bootstrap_windows.ps1", text)
             self.assertIn(f"-Runtime {runtime}", text)
             self.assertNotIn("pip install", text)
+            if full:
+                self.assertIn("-Full", text)
+            else:
+                self.assertNotIn("-Full", text)
 
+    def test_launchers_offer_no_install_release_contract(self) -> None:
         bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
             encoding="utf-8"
         )
         self.assertIn("prepare_gemma_runtime.ps1", bootstrap)
         self.assertIn("prepare_hunyuanocr_llamacpp_runtime.ps1", bootstrap)
         self.assertIn("prepare_paddleocr_llamacpp_runtime.ps1", bootstrap)
-        self.assertNotIn("prepare_mangalmm_llamacpp_runtime.ps1", bootstrap)
-        self.assertNotIn("prepare_paddleocr_spotting_llamacpp_runtime.ps1", bootstrap)
+        # The full tier owns these two; they stay behind the -Full switch.
+        self.assertIn("prepare_mangalmm_llamacpp_runtime.ps1", bootstrap)
+        self.assertIn("prepare_paddleocr_spotting_llamacpp_runtime.ps1", bootstrap)
+        self.assertIn("tier = 'core'", bootstrap)
+        self.assertIn("tier = 'full'", bootstrap)
+        self.assertIn("$Full -or $_.tier -eq 'core'", bootstrap)
         module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
             encoding="utf-8"
         )
@@ -197,7 +230,13 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("llama.cpp:server-cuda'", image_policy)
         self.assertIn("llama.cpp:server-cuda13'", image_policy)
         self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
-        self.assertIn("preferred llama.cpp image failed", bootstrap)
+        self.assertIn("Get-BootstrapDockerImageCudaCompatibility", bootstrap)
+        self.assertIn("Skipping incompatible llama.cpp image", bootstrap)
+        windows_module = (
+            ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Get-NvidiaCudaCompatibilityVersion", windows_module)
+        self.assertIn("NVIDIA_REQUIRE_CUDA", windows_module)
         self.assertLess(
             bootstrap.index("label = 'HunyuanOCR'"),
             bootstrap.index("label = 'PaddleOCR VL'"),
