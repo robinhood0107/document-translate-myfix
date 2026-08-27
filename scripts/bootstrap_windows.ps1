@@ -54,6 +54,8 @@ $VenvBackup = ''
 $TotalStages = 8
 $DeveloperPythonOnly = [bool]$env:COMIC_BOOTSTRAP_ONLY
 $UiSmokeOnly = [bool]$env:COMIC_SMOKE_EXIT_MS
+$ExistingVenvValid = $false
+$Python = $null
 
 try {
     if (-not $Doctor) {
@@ -70,8 +72,17 @@ try {
     if (-not $Doctor) { Write-BootstrapMessage "Log: $LogPath" }
 
     Write-BootstrapStage 1 $TotalStages 'Checking Python 3.12 x64 and local paths'
-    $Python = Resolve-BootstrapPython312 -PythonContract $Config.python
-    Write-BootstrapMessage "Using Python seed interpreter: $($Python.ResolvedExecutable)" 'OK'
+    if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
+        $ExistingVenvValid = (Invoke-BootstrapProbe -FilePath $VenvPython -Arguments @(
+            '-I', '-c', "import platform,struct,sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) and platform.python_implementation() == 'CPython' and struct.calcsize('P') * 8 == 64 else 1)"
+        )) -eq 0
+    }
+    if ($ExistingVenvValid) {
+        Write-BootstrapMessage 'The existing isolated Python 3.12 environment is reusable; seed interpreter lookup skipped.' 'SKIP'
+    } else {
+        $Python = Resolve-BootstrapPython312 -PythonContract $Config.python
+        Write-BootstrapMessage "Using Python seed interpreter: $($Python.ResolvedExecutable)" 'OK'
+    }
     if (-not $Doctor) {
         Test-BootstrapWritableDirectory -Path $Root
         Test-BootstrapWritableDirectory -Path $BootstrapRoot
@@ -103,13 +114,7 @@ try {
         if (Test-Path -LiteralPath $VenvPython -PathType Leaf) { Write-BootstrapMessage "Environment exists: $VenvRoot" 'OK' }
         else { Write-BootstrapMessage "Environment is not installed yet: $VenvRoot" 'WARN' }
     } else {
-        $VenvValid = $false
-        if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
-            $VenvValid = (Invoke-BootstrapProbe -FilePath $VenvPython -Arguments @(
-                '-I', '-c', "import platform,struct,sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) and platform.python_implementation() == 'CPython' and struct.calcsize('P') * 8 == 64 else 1)"
-            )) -eq 0
-        }
-        if (-not $VenvValid -and (Test-Path -LiteralPath $VenvRoot)) {
+        if (-not $ExistingVenvValid -and (Test-Path -LiteralPath $VenvRoot)) {
             $VenvBackup = "$VenvRoot.bootstrap-backup"
             if (Test-Path -LiteralPath $VenvBackup) {
                 throw "A previous bootstrap backup already exists: $VenvBackup"
@@ -117,7 +122,7 @@ try {
             Write-BootstrapMessage "Quarantining an incompatible or incomplete environment: $VenvRoot" 'WARN'
             Move-Item -LiteralPath $VenvRoot -Destination $VenvBackup
         }
-        if (-not $VenvValid) {
+        if (-not $ExistingVenvValid) {
             Write-BootstrapMessage "Creating virtual environment: $VenvRoot"
             Invoke-BootstrapCommand -FilePath $Python.Executable -Arguments @($Python.Prefix + @('-m', 'venv', $VenvRoot)) -WorkingDirectory $Root
         }
