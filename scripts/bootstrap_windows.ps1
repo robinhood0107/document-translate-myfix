@@ -52,6 +52,8 @@ $Lock = $null
 $TranscriptStarted = $false
 $VenvBackup = ''
 $TotalStages = 8
+$DeveloperPythonOnly = [bool]$env:COMIC_BOOTSTRAP_ONLY
+$UiSmokeOnly = [bool]$env:COMIC_SMOKE_EXIT_MS
 
 try {
     if (-not $Doctor) {
@@ -73,21 +75,28 @@ try {
     if (-not $Doctor) {
         Test-BootstrapWritableDirectory -Path $Root
         Test-BootstrapWritableDirectory -Path $BootstrapRoot
-        Test-BootstrapWritableDirectory -Path $ModelCache
         Assert-BootstrapFreeSpace -Path $Root -MinimumBytes 12884901888 -Label 'Python runtime environment'
-        Assert-BootstrapFreeSpace -Path $ModelCache -MinimumBytes 64424509440 -Label 'Local models and Docker runtime'
+        if (-not $DeveloperPythonOnly -and -not $UiSmokeOnly) {
+            Test-BootstrapWritableDirectory -Path $ModelCache
+            Assert-BootstrapFreeSpace -Path $ModelCache -MinimumBytes 64424509440 -Label 'Local models and Docker runtime'
+        }
     }
 
     Write-BootstrapStage 2 $TotalStages 'Checking WSL, Docker Desktop, Compose, and NVIDIA GPU'
-    $Wsl = Get-Command 'wsl.exe' -ErrorAction SilentlyContinue
-    if ($null -eq $Wsl) { throw 'WSL2 is required but wsl.exe was not found.' }
-    & $Wsl.Source --status *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'WSL2 status check failed. Finish WSL2 setup and reboot Windows.' }
-    $Docker = Get-DockerExecutable
-    Ensure-DockerDesktopReady -Docker $Docker -ReadOnly:$Doctor
-    Assert-DockerCompose -Docker $Docker
-    Assert-NvidiaHost
-    Write-BootstrapMessage 'Docker Desktop, Compose, WSL2, and NVIDIA checks passed.' 'OK'
+    if ($DeveloperPythonOnly -or $UiSmokeOnly) {
+        Write-BootstrapMessage 'External runtime checks skipped by developer bootstrap/smoke mode.' 'SKIP'
+        $Docker = ''
+    } else {
+        $Wsl = Get-Command 'wsl.exe' -ErrorAction SilentlyContinue
+        if ($null -eq $Wsl) { throw 'WSL2 is required but wsl.exe was not found.' }
+        & $Wsl.Source --status *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'WSL2 status check failed. Finish WSL2 setup and reboot Windows.' }
+        $Docker = Get-DockerExecutable
+        Ensure-DockerDesktopReady -Docker $Docker -ReadOnly:$Doctor
+        Assert-DockerCompose -Docker $Docker
+        Assert-NvidiaHost
+        Write-BootstrapMessage 'Docker Desktop, Compose, WSL2, and NVIDIA checks passed.' 'OK'
+    }
 
     Write-BootstrapStage 3 $TotalStages 'Creating or repairing the isolated Python environment'
     if ($Doctor) {
@@ -96,8 +105,9 @@ try {
     } else {
         $VenvValid = $false
         if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
-            & $VenvPython -I -c 'import platform,struct,sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) and platform.python_implementation() == "CPython" and struct.calcsize("P") * 8 == 64 else 1)' *> $null
-            $VenvValid = $LASTEXITCODE -eq 0
+            $VenvValid = (Invoke-BootstrapProbe -FilePath $VenvPython -Arguments @(
+                '-I', '-c', "import platform,struct,sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) and platform.python_implementation() == 'CPython' and struct.calcsize('P') * 8 == 64 else 1)"
+            )) -eq 0
         }
         if (-not $VenvValid -and (Test-Path -LiteralPath $VenvRoot)) {
             $VenvBackup = "$VenvRoot.bootstrap-backup"
@@ -122,8 +132,14 @@ try {
     Write-BootstrapStage 4 $TotalStages 'Verifying and synchronizing pinned Python packages'
     if ($Doctor) {
         if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
-            & $VenvPython -B -s (Join-Path $Root 'scripts\verify_windows_runtime.py') --requirements (Join-Path $Root ([string]$RuntimeConfig.requirements)) --expected-cuda ([string]$RuntimeConfig.expected_cuda)
-            if ($LASTEXITCODE -eq 0) { Write-BootstrapMessage 'Pinned packages are valid.' 'OK' }
+            $DoctorVerify = @(
+                '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
+                '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
+                '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
+            )
+            if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $DoctorVerify) -eq 0) {
+                Write-BootstrapMessage 'Pinned packages are valid.' 'OK'
+            }
             else { Write-BootstrapMessage 'Pinned packages need repair.' 'WARN' }
         }
         Write-BootstrapMessage 'Doctor mode is read-only; no files, packages, images, or volumes were changed.' 'OK'
@@ -131,8 +147,12 @@ try {
     }
 
     Set-BootstrapRuntimeEnvironment -LlamaImage ([string]$RuntimeConfig.llama_image) -VenvRoot $VenvRoot
-    & $VenvPython -B -s (Join-Path $Root 'scripts\verify_windows_runtime.py') --requirements (Join-Path $Root ([string]$RuntimeConfig.requirements)) --expected-cuda ([string]$RuntimeConfig.expected_cuda) *> $null
-    if ($LASTEXITCODE -ne 0) {
+    $RuntimeVerificationArguments = @(
+        '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
+        '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
+        '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
+    )
+    if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments) -ne 0) {
         $PipTools = $Config.pip_tools
         Invoke-BootstrapRetry -Operation 'pip tool installation' -Attempts 4 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--retries', '5', '--timeout', '60', '--upgrade', "pip==$($PipTools.pip)", "wheel==$($PipTools.wheel)", "setuptools==$($PipTools.setuptools)") -WorkingDirectory $Root
@@ -143,7 +163,7 @@ try {
     } else { Write-BootstrapMessage 'Pinned packages already match; installation skipped.' 'SKIP' }
     Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'), '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)), '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)) -WorkingDirectory $Root
     Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', '-c', 'import PySide6, cv2, numpy, onnxruntime, torch; print("[runtime] Core imports passed.")') -WorkingDirectory $Root
+    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', '-c', "import PySide6, cv2, numpy, onnxruntime, torch; print('runtime core imports passed')") -WorkingDirectory $Root
     if ($VenvBackup -and (Test-Path -LiteralPath $VenvBackup)) {
         Remove-Item -LiteralPath $VenvBackup -Recurse -Force
         $VenvBackup = ''
@@ -165,8 +185,7 @@ try {
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed llama.cpp image preparation skipped by smoke/test environment.' 'SKIP'
     } else {
-        & $Docker image inspect ([string]$RuntimeConfig.llama_image) *> $null
-        if ($LASTEXITCODE -ne 0) {
+        if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', ([string]$RuntimeConfig.llama_image))) -ne 0) {
             Invoke-BootstrapRetry -Operation 'llama.cpp Docker image pull' -Attempts 4 -Action {
                 Invoke-BootstrapCommand -FilePath $Docker -Arguments @('pull', ([string]$RuntimeConfig.llama_image)) -WorkingDirectory $Root
             }

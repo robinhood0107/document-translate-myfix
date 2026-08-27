@@ -70,10 +70,26 @@ function Invoke-BootstrapCommand {
         if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
         if (-not $Quiet) { Write-BootstrapMessage ("Running: {0} {1}" -f $FilePath, ($Arguments -join ' ')) }
         & $FilePath @Arguments
-        $Code = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
+        $Code = if ($null -eq $ObservedExitCode) { 0 } else { [int]$ObservedExitCode }
         if ($Code -ne 0) { throw "Command failed with exit code ${Code}: $FilePath" }
     }
     finally { Set-Location $Previous }
+}
+
+function Invoke-BootstrapProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+    $PreviousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $FilePath @Arguments *> $null
+        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
+        return $(if ($null -eq $ObservedExitCode) { 0 } else { [int]$ObservedExitCode })
+    }
+    finally { $ErrorActionPreference = $PreviousPreference }
 }
 
 function Resolve-BootstrapPython312 {
@@ -86,14 +102,47 @@ function Resolve-BootstrapPython312 {
         @{ File = 'python3.exe'; Prefix = @() },
         @{ File = 'python3'; Prefix = @() }
     )
-    $Probe = 'import json,platform,struct,sys,venv; print(json.dumps({"exe":sys.executable,"major":sys.version_info[0],"minor":sys.version_info[1],"bits":struct.calcsize("P")*8,"implementation":platform.python_implementation()}))'
+    $Probe = "import platform,struct,sys,venv; print('|'.join((sys.executable,str(sys.version_info[0]),str(sys.version_info[1]),str(struct.calcsize('P')*8),platform.python_implementation())))"
+    $Failures = [System.Collections.Generic.List[string]]::new()
     foreach ($Candidate in $Candidates) {
         $Command = Get-Command $Candidate.File -ErrorAction SilentlyContinue
         if ($null -eq $Command) { continue }
         try {
-            $Output = & $Command.Source @($Candidate.Prefix) -I -c $Probe 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not $Output) { continue }
-            $Payload = ($Output -join '') | ConvertFrom-Json
+            $PythonArguments = @(
+                @($Candidate.Prefix) |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+            ) + @('-I', '-c', ('"' + $Probe + '"'))
+            $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $StartInfo.FileName = $Command.Source
+            $StartInfo.Arguments = $PythonArguments -join ' '
+            $StartInfo.UseShellExecute = $false
+            $StartInfo.CreateNoWindow = $true
+            $StartInfo.RedirectStandardOutput = $true
+            $StartInfo.RedirectStandardError = $true
+            $Process = [System.Diagnostics.Process]::new()
+            $Process.StartInfo = $StartInfo
+            [void]$Process.Start()
+            $Output = $Process.StandardOutput.ReadToEnd().Trim()
+            $ErrorOutput = $Process.StandardError.ReadToEnd().Trim()
+            $Process.WaitForExit()
+            $ExitCode = $Process.ExitCode
+            $Process.Dispose()
+            if ($ExitCode -ne 0 -or -not $Output) {
+                $Failures.Add("$($Command.Source): probe failed (exit=$ExitCode): $ErrorOutput")
+                continue
+            }
+            $Parts = $Output -split '\|', 5
+            if ($Parts.Count -ne 5) {
+                $Failures.Add("$($Command.Source): unexpected probe output: $Output")
+                continue
+            }
+            $Payload = [pscustomobject]@{
+                exe = $Parts[0]
+                major = [int]$Parts[1]
+                minor = [int]$Parts[2]
+                bits = [int]$Parts[3]
+                implementation = $Parts[4]
+            }
             if (
                 [int]$Payload.major -eq [int]$PythonContract.major -and
                 [int]$Payload.minor -eq [int]$PythonContract.minor -and
@@ -106,10 +155,19 @@ function Resolve-BootstrapPython312 {
                     ResolvedExecutable = [string]$Payload.exe
                 }
             }
+            $Failures.Add(
+                ("{0}: found {1} {2}.{3} ({4}-bit), expected CPython 3.12 x64" -f
+                    $Command.Source,
+                    $Payload.implementation,
+                    $Payload.major,
+                    $Payload.minor,
+                    $Payload.bits)
+            )
         }
-        catch { continue }
+        catch { $Failures.Add("$($Command.Source): $($_.Exception.Message)") }
     }
-    throw 'Python 3.12 x64 (CPython) is required. Install it from python.org and enable the py launcher or PATH entry.'
+    $Detail = if ($Failures.Count -gt 0) { " Candidates: " + ($Failures -join '; ') } else { '' }
+    throw ('Python 3.12 x64 (CPython) is required. Install it from python.org and enable the py launcher or PATH entry.' + $Detail)
 }
 
 function Enter-BootstrapLock {
@@ -154,8 +212,7 @@ function Get-DockerExecutable {
 
 function Test-DockerReady {
     param([Parameter(Mandatory = $true)][string]$Docker)
-    & $Docker info --format '{{.ServerVersion}}' *> $null
-    return $LASTEXITCODE -eq 0
+    return (Invoke-BootstrapProbe -FilePath $Docker -Arguments @('info', '--format', '{{.ServerVersion}}')) -eq 0
 }
 
 function Ensure-DockerDesktopReady {
@@ -184,16 +241,18 @@ function Ensure-DockerDesktopReady {
 
 function Assert-DockerCompose {
     param([Parameter(Mandatory = $true)][string]$Docker)
-    & $Docker compose version *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker Compose v2 is required.' }
+    if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('compose', 'version')) -ne 0) {
+        throw 'Docker Compose v2 is required.'
+    }
 }
 
 function Assert-NvidiaHost {
     $Command = Get-Command 'nvidia-smi.exe' -ErrorAction SilentlyContinue
     if ($null -eq $Command) { $Command = Get-Command 'nvidia-smi' -ErrorAction SilentlyContinue }
     if ($null -eq $Command) { throw 'NVIDIA driver tools were not found (nvidia-smi).' }
-    & $Command.Source -L *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'NVIDIA GPU/driver validation failed (nvidia-smi -L).' }
+    if ((Invoke-BootstrapProbe -FilePath $Command.Source -Arguments @('-L')) -ne 0) {
+        throw 'NVIDIA GPU/driver validation failed (nvidia-smi -L).'
+    }
 }
 
 function Stop-BootstrapManagedContainer {
@@ -202,8 +261,14 @@ function Stop-BootstrapManagedContainer {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$OwnershipLabel
     )
-    $Raw = & $Docker inspect --format '{{json .Config.Labels}}|{{.State.Running}}' $Name 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $Raw) { return }
+    $PreviousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $Raw = & $Docker inspect --format '{{json .Config.Labels}}|{{.State.Running}}' $Name 2>$null
+        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
+    }
+    finally { $ErrorActionPreference = $PreviousPreference }
+    if (($null -ne $ObservedExitCode -and [int]$ObservedExitCode -ne 0) -or -not $Raw) { return }
     $Parts = ($Raw -join '') -split '\|', 2
     if ($Parts.Count -ne 2) { throw "Unable to inspect managed container ownership: $Name" }
     $Labels = $Parts[0] | ConvertFrom-Json
@@ -242,12 +307,13 @@ function Set-BootstrapRuntimeEnvironment {
         (Join-Path $VenvRoot 'Lib\site-packages\nvidia\cuda_nvrtc\bin'),
         (Join-Path $VenvRoot 'Lib\site-packages\nvidia\nvjitlink\bin')
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
-    if ($LibraryPaths.Count -gt 0) { $env:PATH = ((@($LibraryPaths) + @($env:PATH)) -join ';') }
+    if (@($LibraryPaths).Count -gt 0) { $env:PATH = ((@($LibraryPaths) + @($env:PATH)) -join ';') }
 }
 
 Export-ModuleMember -Function @(
     'Write-BootstrapMessage', 'Write-BootstrapStage', 'Import-WindowsBootstrapConfig',
-    'Invoke-BootstrapRetry', 'Invoke-BootstrapCommand', 'Resolve-BootstrapPython312',
+    'Invoke-BootstrapRetry', 'Invoke-BootstrapCommand', 'Invoke-BootstrapProbe',
+    'Resolve-BootstrapPython312',
     'Enter-BootstrapLock', 'Test-BootstrapWritableDirectory', 'Assert-BootstrapFreeSpace',
     'Get-DockerExecutable', 'Test-DockerReady', 'Ensure-DockerDesktopReady',
     'Assert-DockerCompose', 'Assert-NvidiaHost', 'Stop-BootstrapManagedContainer',
