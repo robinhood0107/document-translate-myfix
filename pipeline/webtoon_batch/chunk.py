@@ -11,6 +11,7 @@ from PySide6.QtCore import QCoreApplication
 from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
+from modules.utils.block_geometry import map_block_bbox_fields
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
@@ -245,28 +246,21 @@ class ChunkMixin:
         config = get_config(self.main_page.settings_page)
         mask_blocks: List[TextBlock] = []
         img_h, img_w = image.shape[:2]
+
+        def clamp_bbox(box: list[float]) -> list[int]:
+            return [
+                max(0, min(int(np.floor(box[0])), img_w)),
+                max(0, min(int(np.floor(box[1])), img_h)),
+                max(0, min(int(np.ceil(box[2])), img_w)),
+                max(0, min(int(np.ceil(box[3])), img_h)),
+            ]
+
         for block in blocks:
             mask_block = block.deep_copy()
-            x1, y1, x2, y2 = [float(v) for v in mask_block.xyxy]
-            x1_i = int(np.floor(x1))
-            y1_i = int(np.floor(y1))
-            x2_i = int(np.ceil(x2))
-            y2_i = int(np.ceil(y2))
-            x1_i = max(0, min(x1_i, img_w))
-            y1_i = max(0, min(y1_i, img_h))
-            x2_i = max(0, min(x2_i, img_w))
-            y2_i = max(0, min(y2_i, img_h))
+            map_block_bbox_fields(mask_block, clamp_bbox)
+            x1_i, y1_i, x2_i, y2_i = [int(v) for v in mask_block.xyxy]
             if x2_i <= x1_i or y2_i <= y1_i:
                 continue
-            mask_block.xyxy = [x1_i, y1_i, x2_i, y2_i]
-            if mask_block.bubble_xyxy is not None:
-                bx1, by1, bx2, by2 = [float(v) for v in mask_block.bubble_xyxy]
-                mask_block.bubble_xyxy = [
-                    max(0, min(int(np.floor(bx1)), img_w)),
-                    max(0, min(int(np.floor(by1)), img_h)),
-                    max(0, min(int(np.ceil(bx2)), img_w)),
-                    max(0, min(int(np.ceil(by2)), img_h)),
-                ]
             if not mask_block.text and not mask_block.translation:
                 # Keep inpainting mask generation independent from OCR success.
                 mask_block.text = " "
@@ -286,9 +280,34 @@ class ChunkMixin:
         if mask is None or not np.any(mask):
             return None, None, None, {"applied": False, "component_count": 0, "block_count": 0}, mask_blocks, mask_details
         raw_mask = mask_details["raw_mask"]
-        inpainted = self.inpainting.inpaint_with_blocks(image, mask, mask_blocks, config=config)
+        inpainted = self.inpainting.inpaint_with_blocks(
+            image,
+            mask,
+            mask_blocks,
+            config=config,
+            raw_source_mask=raw_mask,
+            positive_claim_raw_mask=mask_details.get(
+                "positive_claim_raw_mask"
+            ),
+            protected_corner_mask=mask_details.get("protected_corner_mask"),
+        )
         inpainted = imk.convert_scale_abs(inpainted)
-        cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
+        cleanup_stats = {
+            "applied": False,
+            "component_count": 0,
+            "block_count": 0,
+            "routing_evidence_block_count": len(
+                tuple(
+                    getattr(
+                        self.inpainting,
+                        "last_inpaint_evidence",
+                        (),
+                    )
+                    or ()
+                )
+            ),
+        }
+        self.inpainting.last_inpaint_evidence = ()
         self._emit_benchmark_event(
             "inpaint_end",
             image_path=image_path,
@@ -443,11 +462,14 @@ class ChunkMixin:
         localized = []
         for block in blocks:
             local_block = block.deep_copy()
-            local_block.xyxy = self._shift_xyxy(block.xyxy, -float(crop_x1), -float(crop_y1))
-            if local_block.bubble_xyxy is not None:
-                local_block.bubble_xyxy = self._shift_xyxy(
-                    local_block.bubble_xyxy, -float(crop_x1), -float(crop_y1)
-                )
+            map_block_bbox_fields(
+                local_block,
+                lambda box: self._shift_xyxy(
+                    box,
+                    -float(crop_x1),
+                    -float(crop_y1),
+                ),
+            )
             localized.append(local_block)
         return localized
 

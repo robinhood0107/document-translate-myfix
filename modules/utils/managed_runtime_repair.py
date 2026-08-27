@@ -173,6 +173,17 @@ def run_managed_runtime_preparation(
     ]
     if allow_download:
         command.append("-AllowDownload")
+        if "-DownloadDirectory" not in plan.extra_arguments:
+            command.extend(
+                [
+                    "-DownloadDirectory",
+                    str(
+                        plan.prepare_script.parent.parent
+                        / "models"
+                        / "managed-runtime-sources"
+                    ),
+                ]
+            )
 
     if progress is not None:
         progress(

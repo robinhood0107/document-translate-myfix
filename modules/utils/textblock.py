@@ -71,6 +71,9 @@ class TextBlock(object):
                  mask_strategy_reason: str = "",
                  mask_actual_bbox = None,
                  mask_actual_pixel_count: int = 0,
+                 detector_origin: str = "",
+                 detector_text_bbox = None,
+                 detector_provider: str = "",
                  min_font_size: int = 0,
                  max_font_size: int = 0,
                  font_color: tuple = (),
@@ -148,6 +151,9 @@ class TextBlock(object):
         self.mask_actual_pixel_count = int(
             mask_actual_pixel_count or 0
         )
+        self.detector_origin = str(detector_origin or "")
+        self.detector_text_bbox = copy.deepcopy(detector_text_bbox)
+        self.detector_provider = str(detector_provider or "")
 
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size

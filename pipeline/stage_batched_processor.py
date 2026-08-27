@@ -110,8 +110,11 @@ from modules.utils.gpu_handoff import (
     wait_for_global_vram_release,
 )
 from modules.utils.gpu_metrics import query_cuda_handoff_metrics
-from modules.utils.image_utils import generate_mask
-from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.image_utils import (
+    generate_mask,
+    release_protected_mask_for_explicit_additions,
+)
+from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
@@ -3234,6 +3237,7 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.mask_details["raw_mask"]
                 )
                 if brush_strokes:
+                    automatic_mask = np.ascontiguousarray(ctx.mask.copy())
                     merged_mask = (
                         self.inpainting._generate_mask_from_saved_strokes(
                             brush_strokes,
@@ -3247,9 +3251,21 @@ class StageBatchedProcessor(BatchProcessor):
                             dtype=np.uint8,
                         )
                         ctx.mask_details["final_mask"] = ctx.mask
+                        (
+                            ctx.mask_details["protected_corner_mask"],
+                            released_protected_pixels,
+                        ) = release_protected_mask_for_explicit_additions(
+                            ctx.mask_details.get("protected_corner_mask"),
+                            automatic_mask,
+                            ctx.mask,
+                            ctx.image.shape,
+                        )
                         ctx.mask_details[
                             "project_brush_strokes_applied"
                         ] = True
+                        ctx.mask_details[
+                            "protected_corner_brush_override_pixel_count"
+                        ] = int(released_protected_pixels)
 
                 ctx.project_inpaint_checkpoint_status = (
                     "miss" if checkpoint_store is not None else "disabled"
@@ -3337,6 +3353,13 @@ class StageBatchedProcessor(BatchProcessor):
                         ctx.mask,
                         inpaint_blocks,
                         config=config,
+                        raw_source_mask=ctx.raw_mask,
+                        positive_claim_raw_mask=ctx.mask_details.get(
+                            "positive_claim_raw_mask"
+                        ),
+                        protected_corner_mask=ctx.mask_details.get(
+                            "protected_corner_mask"
+                        ),
                     )
                 self._sample_performance_resources("inpainter_forward_end")
                 ctx.inpaint_diagnostics = dict(
@@ -3359,22 +3382,34 @@ class StageBatchedProcessor(BatchProcessor):
                         "mask_pixel_count": int(np.count_nonzero(ctx.mask)),
                     },
                 ):
-                    cleanup = run_inpaint_cleanup(
-                        InpaintCleanupInput(
-                            image=ctx.image,
-                            inpaint_input_img=ctx.inpaint_input_img,
-                            mask=ctx.mask,
-                            mask_details=ctx.mask_details,
-                            inpaint_blocks=inpaint_blocks,
-                            config=config,
-                            page_label=f"{index + 1}/{total_images}",
-                            inpaint_edit_mask=getattr(
-                                self.inpainting,
-                                "last_inpaint_edit_mask",
-                                None,
-                            ),
+                    routing_evidence = tuple(
+                        getattr(
+                            self.inpainting,
+                            "last_inpaint_evidence",
+                            (),
                         )
+                        or ()
                     )
+                    try:
+                        cleanup = run_inpaint_cleanup(
+                            InpaintCleanupInput(
+                                image=ctx.image,
+                                inpaint_input_img=ctx.inpaint_input_img,
+                                mask=ctx.mask,
+                                mask_details=ctx.mask_details,
+                                inpaint_blocks=inpaint_blocks,
+                                config=config,
+                                page_label=f"{index + 1}/{total_images}",
+                                inpaint_edit_mask=getattr(
+                                    self.inpainting,
+                                    "last_inpaint_edit_mask",
+                                    None,
+                                ),
+                                routing_evidence=routing_evidence,
+                            )
+                        )
+                    finally:
+                        self.inpainting.last_inpaint_evidence = ()
                     ctx.inpaint_input_img = cleanup.inpaint_input_img
                     ctx.mask = cleanup.mask
                     ctx.cleanup_stats = cleanup.cleanup_stats
@@ -4908,6 +4943,40 @@ class StageBatchedProcessor(BatchProcessor):
             workflow_mode="stage_batched",
         )
         self._reset_prewarm_lifecycle()
+        pdf_preflight = getattr(
+            self.main_page.file_handler, "preflight_for_processing", None
+        )
+        pdf_count = (
+            pdf_preflight(
+                image_list,
+                should_cancel=lambda: bool(
+                    getattr(self.main_page, "is_current_task_cancelled", lambda: False)()
+                ),
+            )
+            if callable(pdf_preflight)
+            else 0
+        )
+        if pdf_count:
+            logger.info(
+                "Validated %d PDF-backed pages before stage-batched processing.",
+                pdf_count,
+            )
+            warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
+            if warnings:
+                pages = ", ".join(str(item["page_number"]) for item in warnings)
+                sizes = "; ".join(
+                    "{page_number}: {requested_width}×{requested_height} → "
+                    "{applied_width}×{applied_height}".format(**item)
+                    for item in warnings
+                )
+                self.main_page.batch_report_ctrl.register_preflight_warning(
+                    QCoreApplication.translate(
+                        "PdfImport", "PDF import memory limit applied"
+                    ),
+                    QCoreApplication.translate(
+                        "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
+                    ).replace("{pages}", pages).replace("{sizes}", sizes),
+                )
         try:
             with self._measure_performance(
                 stage="pipeline",

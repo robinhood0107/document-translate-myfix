@@ -91,6 +91,9 @@ class DetectionEngine(ABC):
                         TextBlock(
                             text_bbox=txt_box,
                             text_class='text_free',
+                            detector_origin='direct_text',
+                            detector_text_bbox=np.asarray(txt_box, dtype=np.int32),
+                            detector_provider=type(self).__name__,
                             direction=direction,
                             font_color=text_color,
                         )
@@ -107,6 +110,9 @@ class DetectionEngine(ABC):
                                 text_bbox=txt_box,
                                 bubble_bbox=bble_box,
                                 text_class='text_bubble',
+                                detector_origin='direct_text',
+                                detector_text_bbox=np.asarray(txt_box, dtype=np.int32),
+                                detector_provider=type(self).__name__,
                                 direction=direction,
                                 font_color=text_color,
                             )
@@ -121,6 +127,9 @@ class DetectionEngine(ABC):
                                 text_bbox=txt_box,
                                 bubble_bbox=bble_box,
                                 text_class='text_bubble',
+                                detector_origin='direct_text',
+                                detector_text_bbox=np.asarray(txt_box, dtype=np.int32),
+                                detector_provider=type(self).__name__,
                                 direction=direction,
                                 font_color=text_color,
                             )
@@ -134,6 +143,9 @@ class DetectionEngine(ABC):
                         TextBlock(
                             text_bbox=txt_box,
                             text_class='text_free',
+                            detector_origin='direct_text',
+                            detector_text_bbox=np.asarray(txt_box, dtype=np.int32),
+                            detector_provider=type(self).__name__,
                             direction=direction,
                             font_color=text_color,
                         )
@@ -152,6 +164,9 @@ class DetectionEngine(ABC):
                     text_bbox=np.asarray(text_box, dtype=np.int32),
                     bubble_bbox=np.asarray(bubble_box, dtype=np.int32),
                     text_class='text_bubble',
+                    detector_origin='bubble_text_rescue',
+                    detector_text_bbox=None,
+                    detector_provider=type(self).__name__,
                     direction=direction,
                 )
             )

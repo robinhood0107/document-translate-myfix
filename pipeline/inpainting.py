@@ -44,8 +44,9 @@ from modules.utils.inpaint_composite import (
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
 from modules.inpainting.source_lama_blockwise import (
     release_source_lama_cache,
-    source_lama_blockwise_inpaint,
+    source_lama_blockwise_inpaint_result,
 )
+from modules.masking.ctd_positive_claim import release_ctd_positive_claim_cache
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class InpaintingHandler:
         self.cached_inpainter_runtime_signature = None
         self.inpainter_driver_baseline = None
         self.last_inpaint_edit_mask = None
+        self.last_inpaint_evidence = ()
         self.last_inpaint_diagnostics: dict[str, Any] = {}
         self.inpainter_runtime_contract: dict[str, Any] = {}
         self.last_profile_change_release: dict[str, Any] = {}
@@ -206,19 +208,26 @@ class InpaintingHandler:
 
         handler_release = self._detach_inpainter_native_resources(cached_inpainter)
         source_release = release_source_lama_cache()
+        positive_claim_release = release_ctd_positive_claim_cache()
         gpu_release_expected = bool(
             handler_release["gpu_release_expected"]
             or source_release["gpu_release_expected"]
+            or positive_claim_release["gpu_release_expected"]
         )
         expected_process_reclaim_mb = float(
             handler_release.get("expected_process_reclaim_mb", 0.0) or 0.0
         ) + float(
             source_release.get("expected_process_reclaim_mb", 0.0) or 0.0
+        ) + float(
+            positive_claim_release.get("expected_process_reclaim_mb", 0.0)
+            or 0.0
         )
         untracked_gpu_resource_count = int(
             handler_release.get("untracked_gpu_resource_count", 0) or 0
         ) + int(
             source_release.get("untracked_gpu_resource_count", 0) or 0
+        ) + int(
+            positive_claim_release.get("untracked_gpu_resource_count", 0) or 0
         )
         del cached_inpainter
 
@@ -239,6 +248,7 @@ class InpaintingHandler:
             "cached_inpainter_key": str(cached_key or ""),
             "handler_release": handler_release,
             "source_lama_release": source_release,
+            "positive_claim_release": positive_claim_release,
             "python_native_cleanup": cleanup,
             "gpu_release_expected": gpu_release_expected,
             "expected_process_reclaim_mb": expected_process_reclaim_mb,
@@ -269,8 +279,19 @@ class InpaintingHandler:
 
         return inpaint_input_img
 
-    def inpaint_with_blocks(self, image: np.ndarray, mask: np.ndarray, blk_list, config=None):
+    def inpaint_with_blocks(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        blk_list,
+        config=None,
+        *,
+        raw_source_mask: np.ndarray | None = None,
+        positive_claim_raw_mask: np.ndarray | None = None,
+        protected_corner_mask: np.ndarray | None = None,
+    ):
         self.last_inpaint_edit_mask = None
+        self.last_inpaint_evidence = ()
         self.last_inpaint_diagnostics = {}
         if image is None or mask is None:
             return None
@@ -307,18 +328,21 @@ class InpaintingHandler:
             "status": "running",
         }
         try:
-            result, edit_mask, model_diagnostics = (
-                source_lama_blockwise_inpaint(
+            blockwise_result = source_lama_blockwise_inpaint_result(
                     image,
                     mask,
                     blocks,
                     self.inpainter_cache,
                     config,
+                    raw_source_mask=raw_source_mask,
+                    positive_claim_raw_mask=positive_claim_raw_mask,
                     check_need_inpaint=True,
-                    return_edit_mask=True,
-                    return_diagnostics=True,
+                    protected_corner_mask=protected_corner_mask,
                 )
-            )
+            result = blockwise_result.image
+            edit_mask = blockwise_result.edit_mask
+            model_diagnostics = blockwise_result.diagnostics
+            self.last_inpaint_evidence = blockwise_result.evidence
             diagnostics["model_call_diagnostics"] = model_diagnostics
             diagnostics["oom_retry_count"] = sum(
                 int(item.get("oom_retry_count", 0) or 0)

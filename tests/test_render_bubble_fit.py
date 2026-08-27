@@ -28,14 +28,14 @@ from modules.utils.textblock import TextBlock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
-def _block(*, xyxy, text_class="text_bubble", bubble_xyxy=None) -> TextBlock:
+def _block(*, xyxy, text_class="text_bubble", bubble_xyxy=None, source_lang="ko") -> TextBlock:
     return TextBlock(
         text_bbox=np.asarray(xyxy, dtype=np.int32),
         bubble_bbox=np.asarray(bubble_xyxy, dtype=np.int32) if bubble_xyxy is not None else None,
         text_class=text_class,
         text="demo",
         translation="demo",
-        source_lang="ko",
+        source_lang=source_lang,
     )
 
 
@@ -76,6 +76,84 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(second_anchor, first_anchor)
         self.assertEqual(second_source, first_source)
 
+    def test_repeated_japanese_bubble_fit_preserves_minus_five_percent_ui_box(self) -> None:
+        image = np.zeros((240, 400, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[150, 60, 250, 100],
+            bubble_xyxy=[20, 0, 380, 160],
+            source_lang="ja",
+        )
+
+        get_best_render_area([block], image)
+        first_xyxy = list(block.xyxy)
+        first_original = list(block._render_original_xyxy)
+        first_area = list(block._render_area_xyxy)
+        get_best_render_area([block], image)
+
+        self.assertEqual(first_original, [150, 60, 250, 100])
+        self.assertEqual(list(block.xyxy), first_xyxy)
+        self.assertEqual(block._render_original_xyxy, first_original)
+        self.assertEqual(block._render_area_xyxy, first_area)
+
+    def test_existing_minus_five_percent_checkpoint_preserves_original_anchor(self) -> None:
+        image = np.zeros((240, 400, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[59, 17, 340, 142],
+            bubble_xyxy=[20, 0, 380, 160],
+            source_lang="ja",
+        )
+        block._render_original_xyxy = [150, 60, 250, 100]
+        block._render_bubble_xyxy = [20, 0, 380, 160]
+        block._render_area_source = "detected_bubble"
+        block._render_area_xyxy = [52, 14, 347, 145]
+
+        get_best_render_area([block], image)
+
+        self.assertEqual(block._render_original_xyxy, [150, 60, 250, 100])
+        self.assertEqual(block._render_area_xyxy, [52, 14, 347, 145])
+        self.assertEqual(list(block.xyxy), [59, 17, 340, 142])
+
+    def test_manual_bbox_edit_invalidates_stale_render_anchor_on_recompute(self) -> None:
+        image = np.zeros((240, 400, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[150, 60, 250, 100],
+            bubble_xyxy=[20, 0, 380, 160],
+            source_lang="ja",
+        )
+        get_best_render_area([block], image)
+        block.xyxy[:] = [165, 65, 265, 105]
+
+        get_best_render_area([block], image)
+
+        self.assertEqual(block._render_original_xyxy, [165, 65, 265, 105])
+
+    def test_korean_and_chinese_repeated_fit_do_not_apply_japanese_contraction(self) -> None:
+        image = np.zeros((240, 400, 3), dtype=np.uint8)
+        for source_lang in ("ko", "zh"):
+            block = _block(
+                xyxy=[150, 60, 250, 100],
+                bubble_xyxy=[20, 0, 380, 160],
+                source_lang=source_lang,
+            )
+
+            get_best_render_area([block], image)
+            first = (
+                list(block.xyxy),
+                list(block._render_original_xyxy),
+                list(block._render_area_xyxy),
+            )
+            get_best_render_area([block], image)
+
+            self.assertEqual(list(block.xyxy), block._render_area_xyxy)
+            self.assertEqual(
+                (
+                    list(block.xyxy),
+                    list(block._render_original_xyxy),
+                    list(block._render_area_xyxy),
+                ),
+                first,
+            )
+
     def test_render_rect_prefers_detected_bubble_area_after_later_bbox_adjustment(self) -> None:
         block = _block(
             xyxy=[1037, 80, 1557, 308],
@@ -109,6 +187,140 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(free.xyxy.tolist(), [100, 100, 180, 160])
         self.assertEqual(mismatch._render_area_source, "text_bbox")
         self.assertEqual(mismatch.xyxy.tolist(), [400, 400, 450, 450])
+
+    def test_first_free_text_fit_does_not_normalize_or_replace_ui_bbox(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        original = np.asarray([100.25, 100.75, 180.5, 160.125], dtype=np.float64)
+        free = _block(
+            xyxy=original.copy(),
+            text_class="text_free",
+            bubble_xyxy=None,
+            source_lang="ko",
+        )
+        free.xyxy = original.copy()
+
+        get_best_render_area([free], image)
+
+        self.assertIsInstance(free.xyxy, np.ndarray)
+        self.assertEqual(free.xyxy.dtype, np.float64)
+        np.testing.assert_array_equal(free.xyxy, original)
+
+    def test_repeated_korean_free_text_fit_preserves_fractional_ui_box(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        original = np.asarray([100.25, 100.75, 180.5, 160.125], dtype=np.float64)
+        free = _block(
+            xyxy=original.copy(),
+            text_class="text_free",
+            bubble_xyxy=None,
+            source_lang="ko",
+        )
+        free.xyxy = original.copy()
+
+        get_best_render_area([free], image)
+        first_xyxy = free.xyxy.copy()
+        get_best_render_area([free], image)
+
+        np.testing.assert_array_equal(free.xyxy, first_xyxy)
+        self.assertEqual(free.xyxy.dtype, np.float64)
+
+    def test_repeated_japanese_free_text_fit_preserves_fractional_minus_five_box(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        original = np.asarray([100.25, 100.75, 181.5, 161.125], dtype=np.float64)
+        free = _block(
+            xyxy=original.copy(),
+            text_class="text_free",
+            bubble_xyxy=None,
+            source_lang="ja",
+        )
+        free.xyxy = original.copy()
+
+        get_best_render_area([free], image)
+        first_xyxy = free.xyxy.copy()
+        get_best_render_area([free], image)
+
+        np.testing.assert_array_equal(free.xyxy, first_xyxy)
+        np.testing.assert_array_equal(
+            np.asarray(free._render_original_xyxy),
+            original,
+        )
+
+    def test_repeated_japanese_free_text_fit_preserves_first_minus_five_box(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        free = _block(
+            xyxy=[100, 100, 181, 161],
+            text_class="text_free",
+            bubble_xyxy=None,
+            source_lang="ja",
+        )
+
+        get_best_render_area([free], image)
+        first_xyxy = list(free.xyxy)
+        first_original = list(free._render_original_xyxy)
+        get_best_render_area([free], image)
+
+        self.assertEqual(list(free.xyxy), first_xyxy)
+        self.assertEqual(free._render_original_xyxy, first_original)
+        self.assertEqual(first_original, [100, 100, 181, 161])
+
+    def test_repeated_japanese_bubble_without_detected_bubble_is_idempotent(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[100, 100, 181, 161],
+            text_class="text_bubble",
+            bubble_xyxy=None,
+            source_lang="ja",
+        )
+
+        get_best_render_area([block], image)
+        first = (
+            list(block.xyxy),
+            list(block._render_original_xyxy),
+            list(block._render_area_xyxy),
+        )
+        get_best_render_area([block], image)
+
+        self.assertEqual(
+            (
+                list(block.xyxy),
+                list(block._render_original_xyxy),
+                list(block._render_area_xyxy),
+            ),
+            first,
+        )
+
+    def test_tuple_ui_bbox_is_made_mutable_before_japanese_adjustment(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[100, 100, 181, 161],
+            text_class="text_bubble",
+            bubble_xyxy=None,
+            source_lang="ja",
+        )
+        block.xyxy = (100, 100, 181, 161)
+
+        get_best_render_area([block], image)
+        first_xyxy = list(block.xyxy)
+        get_best_render_area([block], image)
+
+        self.assertIsInstance(block.xyxy, list)
+        self.assertEqual(list(block.xyxy), first_xyxy)
+
+    def test_changed_bubble_invalidates_stale_render_anchor_on_recompute(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[120, 120, 180, 165],
+            bubble_xyxy=[80, 80, 340, 260],
+        )
+        get_best_render_area([block], image)
+        stale_original = list(block._render_original_xyxy)
+        current_ui_bbox = list(block.xyxy)
+        block.bubble_xyxy[:] = [60, 60, 360, 280]
+
+        get_best_render_area([block], image)
+
+        self.assertNotEqual(block._render_original_xyxy, stale_original)
+        self.assertEqual(block._render_original_xyxy, current_ui_bbox)
+        self.assertEqual(block._render_bubble_xyxy, [60, 60, 360, 280])
 
     def test_overlapping_detected_bubble_areas_keep_original_bboxes(self) -> None:
         image = np.zeros((500, 500, 3), dtype=np.uint8)

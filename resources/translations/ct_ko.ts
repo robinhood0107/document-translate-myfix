@@ -218,6 +218,46 @@ Choose either a project file or image/document/archive files.</source>
         <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
+        <source>This PDF is password-protected. Password entry is not supported yet.</source>
+        <translation>이 PDF는 비밀번호로 보호되어 있습니다. 아직 비밀번호 입력은 지원하지 않습니다.</translation>
+    </message>
+    <message>
+        <source>The PDF changed after it was imported. Remove it and import it again.</source>
+        <translation>가져온 뒤 PDF가 변경되었습니다. 목록에서 제거한 다음 다시 가져오세요.</translation>
+    </message>
+    <message>
+        <source>The PDF page structure could not be read safely.</source>
+        <translation>PDF 페이지 구조를 안전하게 읽을 수 없습니다.</translation>
+    </message>
+    <message>
+        <source>A PDF page could not be prepared without violating the import quality checks.</source>
+        <translation>가져오기 품질 검사를 유지하면서 PDF 페이지를 준비할 수 없습니다.</translation>
+    </message>
+    <message>
+        <source>There is not enough free disk space to prepare all selected PDF pages.</source>
+        <translation>선택한 PDF 페이지를 모두 준비할 디스크 여유 공간이 부족합니다.</translation>
+    </message>
+    <message>
+        <source>The PDF exceeds the supported import resource limits.</source>
+        <translation>이 PDF는 지원되는 가져오기 자원 한도를 초과합니다.</translation>
+    </message>
+    <message>
+        <source>The PDF could not be imported.</source>
+        <translation>PDF를 가져올 수 없습니다.</translation>
+    </message>
+    <message>
+        <source> Page {page}.</source>
+        <translation> {page}페이지.</translation>
+    </message>
+    <message>
+        <source>PDF page preparation failed before processing started.</source>
+        <translation>처리를 시작하기 전에 PDF 페이지 준비에 실패했습니다.</translation>
+    </message>
+    <message>
+        <source>PDF Import Error</source>
+        <translation>PDF 가져오기 오류</translation>
+    </message>
+    <message>
         <source>자동번역 준비 또는 실행에 실패했습니다.</source>
         <translation>자동번역 준비 또는 실행에 실패했습니다.</translation>
     </message>
@@ -2107,6 +2147,21 @@ detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 na
     <message>
         <source>Translate</source>
         <translation>번역</translation>
+    </message>
+</context>
+<context>
+    <name>PdfImport</name>
+    <message>
+        <source>PDF import limited {count} page(s) to protect memory. Pages: {pages}. Requested/applied sizes: {sizes}.</source>
+        <translation>메모리를 보호하기 위해 PDF {count}개 페이지의 크기를 제한했습니다. 페이지: {pages}. 요청/적용 크기: {sizes}.</translation>
+    </message>
+    <message>
+        <source>PDF import memory limit applied</source>
+        <translation>PDF 가져오기 메모리 한도 적용</translation>
+    </message>
+    <message>
+        <source>Pages: {pages}. Requested/applied sizes: {sizes}.</source>
+        <translation>페이지: {pages}. 요청/적용 크기: {sizes}.</translation>
     </message>
 </context>
 <context>

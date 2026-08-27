@@ -25,6 +25,7 @@ from modules.rendering.render import (
     refit_detected_bubble_text_if_underfilled,
     should_skip_short_render_translation,
 )
+from modules.utils.block_geometry import map_block_bbox_fields
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.debug_artifacts import active_debug_page_directory
 from modules.utils.automatic_output import (
@@ -395,13 +396,15 @@ class RenderMixin:
                 render_block = block.deep_copy()
                 render_block.translation = wrapped_translation
                 render_block._render_html = block._render_html
-                render_block.xyxy = list(render_block.xyxy)
-                render_block.xyxy[1] += page_scene_offset
-                render_block.xyxy[3] += page_scene_offset
-                if render_block.bubble_xyxy is not None:
-                    render_block.bubble_xyxy = list(render_block.bubble_xyxy)
-                    render_block.bubble_xyxy[1] += page_scene_offset
-                    render_block.bubble_xyxy[3] += page_scene_offset
+                map_block_bbox_fields(
+                    render_block,
+                    lambda box: [
+                        box[0],
+                        box[1] + page_scene_offset,
+                        box[2],
+                        box[3] + page_scene_offset,
+                    ],
+                )
                 self.main_page.blk_rendered.emit(
                     wrapped_translation, font_size, render_block, image_path
                 )

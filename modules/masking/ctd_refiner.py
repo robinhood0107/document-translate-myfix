@@ -8,7 +8,12 @@ import numpy as np
 
 from modules.masking.ctd_vendor.ctd import TextDetBase, TextDetBaseDNN
 from modules.utils.download import ModelDownloader, ModelID
-from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_ctd_roi
+from modules.utils.mask_roi import (
+    build_text_prior_mask,
+    normalize_xyxy,
+    resolve_block_ctd_roi,
+    resolve_inpaint_text_xyxy,
+)
 from modules.utils.textblock import TextBlock
 
 
@@ -213,9 +218,10 @@ def _refine_mask(image: np.ndarray, pred_mask: np.ndarray, blocks: list[TextBloc
     mask_refined = np.zeros_like(pred_mask)
     im_h, im_w = image.shape[:2]
     for block in blocks:
-        if getattr(block, "xyxy", None) is None:
+        text_anchor = resolve_inpaint_text_xyxy(block, image.shape)
+        if text_anchor is None:
             continue
-        bx1, by1, bx2, by2 = _enlarge_window(block.xyxy, im_w, im_h)
+        bx1, by1, bx2, by2 = _enlarge_window(text_anchor, im_w, im_h)
         region = np.ascontiguousarray(image[by1:by2, bx1:bx2])
         region_mask = np.ascontiguousarray(pred_mask[by1:by2, bx1:bx2])
         if region.size == 0 or region_mask.size == 0 or not np.any(region_mask):
@@ -497,7 +503,7 @@ def _filter_bubble_dark_glyph_anchor_mask(candidate_mask: np.ndarray, search_mas
 def _block_text_search_mask(block, roi: tuple[int, int, int, int], image_shape) -> np.ndarray:
     x1, y1, x2, y2 = roi
     search = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
-    text_box = normalize_xyxy(getattr(block, 'xyxy', None), image_shape)
+    text_box = resolve_inpaint_text_xyxy(block, image_shape)
     if text_box is None:
         return search
 

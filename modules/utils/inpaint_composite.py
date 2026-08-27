@@ -55,6 +55,44 @@ def composite_with_edit_mask(
     return np.where(mask > 0, edited, original).astype(edited.dtype, copy=False)
 
 
+def composite_crop_with_edit_mask(
+    base_image: np.ndarray,
+    candidate_crop: np.ndarray,
+    edit_mask_crop: np.ndarray,
+    crop_xyxy: tuple[int, int, int, int] | list[int],
+    *,
+    copy_base: bool = True,
+) -> np.ndarray:
+    """Composite one crop through its exact local edit mask.
+
+    The crop rectangle is only an addressing envelope. It never grants edit
+    ownership by itself, so callers cannot accidentally paste a whole LaMa
+    crop over immutable page pixels.
+    """
+
+    base = np.asarray(base_image)
+    candidate = np.asarray(candidate_crop)
+    try:
+        x1, y1, x2, y2 = [int(value) for value in crop_xyxy]
+    except Exception as exc:
+        raise ValueError("crop_xyxy must contain four integer coordinates") from exc
+    if not (0 <= x1 < x2 <= base.shape[1] and 0 <= y1 < y2 <= base.shape[0]):
+        raise ValueError("crop_xyxy must be a non-empty region inside base_image")
+    expected_shape = (y2 - y1, x2 - x1, *base.shape[2:])
+    if candidate.shape != expected_shape:
+        raise ValueError(
+            "candidate_crop shape must exactly match the crop addressing envelope"
+        )
+    local_mask = normalize_edit_mask(edit_mask_crop, candidate.shape)
+    result = base.copy() if copy_base else base
+    result[y1:y2, x1:x2] = composite_with_edit_mask(
+        base[y1:y2, x1:x2],
+        candidate,
+        local_mask,
+    )
+    return result
+
+
 def count_changed_outside_edit_mask(
     original_image: np.ndarray | None,
     edited_image: np.ndarray | None,
