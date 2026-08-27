@@ -4,29 +4,47 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 
 ## 1. Prerequisites
 
-- Windows 10/11
-- Python 3.12 or newer
-- Git
-- Docker Desktop with GPU support enabled
-- NVIDIA driver / CUDA-compatible GPU if you want local Gemma, HunyuanOCR, or PaddleOCR VL acceleration
-- At least 60 GiB free on `C:` for the initial Gemma volume preparation check
+- Windows 10/11 x64
+- CPython 3.12 x64, available through `py -3.12` or PATH
+- Docker Desktop with its WSL2 backend and GPU support enabled
+- NVIDIA driver and a CUDA-compatible GPU
+- At least 60 GiB free on `C:` for the model cache and Docker volumes
+- Git only when using a source checkout
 
 ## 2. Clone and launch
 
-From the repository root, use one of the supported Windows launchers:
+For the CUDA12 path (Python cu128 plus llama.cpp `server-cuda`):
 
 ```bat
 run_comic.bat
 ```
 
-CUDA13 path:
+For the CUDA13 path (Python cu130 plus llama.cpp `server-cuda13`):
 
 ```bat
 run_comic_cuda13.bat
 ```
 
-The launchers bootstrap `.venv-win` or `.venv-win-cuda13` automatically.
-The CUDA13 path uses the official ONNX Runtime CUDA13 nightly feed because CUDA13 GPU wheels are not the default PyPI `onnxruntime-gpu` package yet.
+The BAT files are separate entry points backed by one PowerShell bootstrap.
+System Python is used only to create the selected venv; global packages and
+Python environment variables are ignored. The launcher starts Docker Desktop
+when necessary and pulls the selected llama.cpp image only when it is missing.
+
+The non-interactive first run prepares:
+
+- the selected `.venv-win` or `.venv-win-cuda13` and pinned packages
+- required CTD/LaMa application models
+- HunyuanOCR Q8 model/mmproj
+- PaddleOCR VL 1.6 model/mmproj
+- `gemma-4-26B-IQ4_NL.gguf` (about 13.58 GiB)
+
+Docker model sources are reused from
+`%LOCALAPPDATA%\ComicTranslate\ModelCache`. Interrupted downloads resume on the
+next launch. Completion requires exact size/SHA-256 validation and real model
+load smokes. Use `run_comic.bat --doctor` or
+`run_comic_cuda13.bat --doctor` for a read-only report.
+
+The CUDA13 path uses the official ONNX Runtime CUDA13 nightly feed.
 
 If you prefer to create a venv manually and install everything with one pip command, use one of these runtime-specific requirement files:
 
@@ -42,7 +60,10 @@ py -3.12 -m venv .venv-win-cuda13
 
 `requirements.txt` is the default Windows CUDA12 alias. Shared dependencies live in `requirements-base.txt`.
 
-## 3. Optional local runtimes
+## 3. Manual local runtime management
+
+Normal first runs do not require the commands below. Use them only for explicit
+full hash verification, custom volumes, or optional runtime maintenance.
 
 ### Gemma local translation runtime
 
@@ -51,7 +72,7 @@ py -3.12 -m venv .venv-win-cuda13
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
-Prepare the versioned external model volume once from Windows PowerShell:
+The launcher prepares this exact model automatically. For manual preparation:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -60,26 +81,6 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ```
 
 Then choose `Custom Local Server(Gemma)` in the app. The managed runtime mounts the prepared volume read-only and starts the exact prepared container automatically.
-
-### HunyuanOCR local runtime
-
-- Compose file: `/hunyuanocr_docker_files/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
-- Runtime/model references:
-  - [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
-  - [llama.cpp](https://github.com/ggml-org/llama.cpp)
-
-Required local model files:
-
-- `HunyuanOCR-BF16.gguf`
-- `mmproj-HunyuanOCR-BF16.gguf`
-
-Start it:
-
-```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml pull --policy always
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recreate
-```
 
 ### PaddleOCR VL local runtime
 
@@ -135,7 +136,7 @@ mode, and `1,605,632` projector pixel budget. The crop route keeps its original
 `1,003,520` projector. See
 [/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md).
 
-### HunyuanOCR route
+### HunyuanOCR local runtime
 
 This is the engine the Optimal choice uses for Chinese. Prepare its versioned
 external model volume once, under the same contract as the other managed
@@ -166,7 +167,8 @@ its own. See the Korean guide at
 [docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
 
 Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and
-its immediate subdirectories first.
+its immediate subdirectories first. The launcher instead supplies its shared
+LocalAppData model cache so release folders can reuse the same sources.
 
 HunyuanOCR previously bind-mounted the `testmodel` folder and read generic
 environment names such as `LLAMA_CTX_SIZE`, which it shared with Gemma. It now

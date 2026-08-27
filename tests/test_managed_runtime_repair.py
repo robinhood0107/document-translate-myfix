@@ -378,6 +378,22 @@ class PrepareScriptContractTests(unittest.TestCase):
                 self.assertIn("$NormalizedArguments", script)
                 self.assertIn('-replace "`r`n", "`n"', script)
 
+    def test_every_prepare_script_accepts_both_launcher_cuda_images(self) -> None:
+        for name in PREPARE_SCRIPTS:
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertIn("[string]$ImageRef", script)
+                self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", script)
+                self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", script)
+
+    def test_shared_model_download_retries_without_discarding_partial_data(self) -> None:
+        source = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeModelSource.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function Invoke-ManagedRuntimeDownloadAttempt", source)
+        self.assertIn("[int]$MaximumAttempts = 5", source)
+        self.assertIn("Resuming in", source)
+
     def test_every_contracted_model_has_a_registered_download_source(self) -> None:
         # 원본이 없으면 자가복구가 볼륨을 채울 수 없다. 등록된 출처를 계약으로 고정해
         # 새 모델을 추가할 때 URL 을 빠뜨리지 않게 한다.

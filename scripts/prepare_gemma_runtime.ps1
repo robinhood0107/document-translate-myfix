@@ -20,6 +20,15 @@ param(
 
     [string]$VolumeName = 'comic-translate-gemma-models-v2',
 
+    [ValidateSet(
+        'ghcr.io/ggml-org/llama.cpp:server-cuda',
+        'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    )]
+    [string]$ImageRef = $(
+        if ($env:LLAMA_CPP_IMAGE) { $env:LLAMA_CPP_IMAGE }
+        else { 'ghcr.io/ggml-org/llama.cpp:server-cuda13' }
+    ),
+
     [ValidateRange(1024, 65535)]
     [int]$SmokePort = 18082,
 
@@ -39,7 +48,6 @@ Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Fo
 $PreparationVersion = 2
 $ManifestSchemaVersion = 2
 $ReadyManifestName = '.comic-translate-gemma-ready-v2.json'
-$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
 # CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
 $SupportedImageRefs = @(
     'ghcr.io/ggml-org/llama.cpp:server-cuda13',

@@ -4,31 +4,48 @@
 
 ## 1. 준비물
 
-- Windows 10/11
-- Python 3.12 이상
-- Git
-- GPU 지원이 켜진 Docker Desktop
-- 로컬 Gemma / HunyuanOCR / PaddleOCR VL 가속을 쓰려면 NVIDIA 드라이버와 CUDA 호환 GPU
-- 최초 Gemma volume 준비 검사에 필요한 `C:` 여유 공간 60 GiB 이상
+- Windows 10/11 x64
+- Python 3.12 x64(CPython, `py -3.12` 또는 PATH에서 실행 가능)
+- WSL2 backend와 GPU 지원이 켜진 Docker Desktop
+- NVIDIA 드라이버와 CUDA 호환 GPU
+- 모델 cache와 Docker volume을 위한 `C:` 여유 공간 60 GiB 이상
+- 소스 checkout을 사용할 때만 Git
 
 ## 2. 저장소 실행
 
 저장소 루트에서 아래 런처 중 하나를 실행합니다.
 
-기본 경로:
+CUDA12 전체 경로(Python cu128 + llama.cpp `server-cuda`):
 
 ```bat
 run_comic.bat
 ```
 
-CUDA13 경로:
+CUDA13 전체 경로(Python cu130 + llama.cpp `server-cuda13`):
 
 ```bat
 run_comic_cuda13.bat
 ```
 
-이 런처들은 `.venv-win`, `.venv-win-cuda13` 환경을 자동 bootstrap합니다.
-CUDA13 경로는 공식 ONNX Runtime CUDA13 nightly feed를 사용합니다. CUDA13 GPU wheel은 아직 기본 PyPI `onnxruntime-gpu` 패키지 경로가 아니기 때문입니다.
+두 BAT는 독립된 진입점이지만 같은 PowerShell bootstrap 엔진을 사용합니다.
+시스템 Python은 venv 생성에만 쓰고 전역 package와 Python 환경변수는 무시합니다.
+Docker Desktop이 꺼져 있으면 자동으로 시작하고, 선택한 CUDA 계열의
+llama.cpp server image가 로컬에 없을 때만 가져옵니다.
+
+첫 실행은 질문 없이 아래 항목을 순서대로 준비합니다.
+
+- 선택한 `.venv-win` 또는 `.venv-win-cuda13`과 pinned Python package
+- CTD/LaMa 계열 필수 앱 모델
+- HunyuanOCR Q8 model/mmproj
+- PaddleOCR VL 1.6 model/mmproj
+- `gemma-4-26B-IQ4_NL.gguf`(약 13.58 GiB)
+
+Docker 원본 모델은 `%LOCALAPPDATA%\ComicTranslate\ModelCache`에서 재사용하고,
+중단된 다운로드는 다음 BAT 실행에서 이어받습니다. 모든 항목은 크기·SHA-256과
+실제 model-load smoke를 통과해야 준비 완료로 인정합니다. 읽기 전용 상태 검사는
+`run_comic.bat --doctor` 또는 `run_comic_cuda13.bat --doctor`를 사용합니다.
+
+CUDA13 경로는 공식 ONNX Runtime CUDA13 nightly feed를 사용합니다.
 
 수동으로 venv를 만들고 pip 한 번으로 설치하려면 아래 중 하나를 사용합니다.
 
@@ -44,7 +61,10 @@ py -3.12 -m venv .venv-win-cuda13
 
 `requirements.txt`는 기본 Windows CUDA12 런타임용 별칭이며, 공통 의존성은 `requirements-base.txt`에 모아둡니다.
 
-## 3. 선택 로컬 런타임
+## 3. 로컬 런타임 수동 관리
+
+정상적인 첫 실행에서는 아래 준비 명령을 직접 실행할 필요가 없습니다. 전체 hash
+재검증, 별도 volume 또는 선택 runtime을 수동 관리할 때만 사용합니다.
 
 ### Gemma 로컬 번역 런타임
 
@@ -54,7 +74,7 @@ py -3.12 -m venv .venv-win-cuda13
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
 
-Windows PowerShell에서 버전이 지정된 external model volume을 한 번 준비합니다.
+런처는 이 exact 모델을 자동으로 준비합니다. 수동 준비가 필요하면:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -63,26 +83,6 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ```
 
 앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임이 준비된 volume을 read-only로 마운트하고 정확히 준비된 컨테이너를 자동으로 시작합니다.
-
-### HunyuanOCR 로컬 런타임
-
-- compose 파일: `/hunyuanocr_docker_files/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
-- 참고 링크:
-  - [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
-  - [llama.cpp](https://github.com/ggml-org/llama.cpp)
-
-필수 로컬 모델 파일:
-
-- `HunyuanOCR-BF16.gguf`
-- `mmproj-HunyuanOCR-BF16.gguf`
-
-실행:
-
-```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml pull --policy always
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recreate
-```
 
 ### PaddleOCR VL 로컬 런타임
 
@@ -140,7 +140,7 @@ Spotting 경로는 공식 `Spotting:` prompt, `--special` 좌표 token 모드,
 [/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md)를
 참고하세요.
 
-### HunyuanOCR 경로
+### HunyuanOCR 로컬 런타임
 
 최적값의 중국어 분기가 쓰는 엔진입니다. 다른 관리형 엔진과 같은 규약으로
 versioned external model volume을 한 번 준비합니다. 필요한 파일은
@@ -170,7 +170,8 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 참고하세요.
 
 `-ModelDirectory`를 생략하면 저장소의 gitignore된 `testmodel/`과 그 바로 아래
-하위 폴더를 먼저 찾습니다.
+하위 폴더를 먼저 찾습니다. launcher 경로는 저장소가 아니라 LocalAppData의 공유
+model cache를 명시해 릴리스 폴더가 바뀌어도 재사용합니다.
 
 과거 HunyuanOCR은 `testmodel` 폴더를 bind mount하고 Gemma와 이름이 겹치는
 `LLAMA_CTX_SIZE` 같은 일반 환경변수를 읽었습니다. 이제는 준비된 volume과
