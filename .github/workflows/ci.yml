@@ -78,10 +78,15 @@ jobs:
         run: |
           $env:COMIC_VERIFY_ONLY = "1"
           $env:COMIC_NO_PAUSE = "1"
-          cmd.exe /d /c "call run_comic.bat"
-          if ($LASTEXITCODE -ne 0) { throw "CUDA12 source contract failed." }
-          cmd.exe /d /c "call run_comic_cuda13.bat"
-          if ($LASTEXITCODE -ne 0) { throw "CUDA13 source contract failed." }
+          $launchers = @(
+            "run_comic.bat", "run_comic_cuda13.bat",
+            "setup.bat", "setup_cuda13.bat",
+            "setup_full.bat", "setup_full_cuda13.bat"
+          )
+          foreach ($launcher in $launchers) {
+            cmd.exe /d /c "call .\$launcher"
+            if ($LASTEXITCODE -ne 0) { throw "$launcher source contract failed." }
+          }
 
   validate-pr-flow:
     if: github.event_name == 'pull_request'

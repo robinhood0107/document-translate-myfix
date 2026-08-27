@@ -2,8 +2,8 @@
 param(
     # Prepare 는 원본을 볼륨에 넣고 봉인한다. Verify 는 읽기 전용 검사다.
     # Reseal 은 볼륨 내용을 그대로 두고 현재 llama.cpp image 로 smoke 를 다시
-    # 통과시킨 뒤 ready manifest 만 다시 쓴다. Auto 는 볼륨 상태를 보고 Prepare 와
-    # Reseal 중 맞는 쪽을 고르며, 앱의 자가복구 경로가 쓰는 모드다.
+    # 통과시킨 뒤 ready manifest 만 다시 쓴다. Auto 는 유효한 봉인을 즉시 재사용하고,
+    # 봉인이 낡았으면 Reseal, 모델이 빠졌으면 Prepare 를 고른다.
     [ValidateSet('Prepare', 'Verify', 'Reseal', 'Auto')]
     [string]$Mode = 'Prepare',
 
@@ -131,8 +131,31 @@ $ImageId = Get-PinnedImageId
 
 if ($Mode -eq 'Auto') {
     if (Test-VolumeHoldsEveryModel) {
-        Write-Host 'Auto mode: the volume already holds every model; resealing.'
-        $Mode = 'Reseal'
+        try {
+            Assert-VolumeLabels
+            $Manifest = Read-ReadyManifest
+            Assert-ManifestContract -Manifest $Manifest
+            Write-Host (
+                'Auto mode: ready manifest and model sizes match the current image; ' +
+                'reusing the sealed volume without a full hash or GPU smoke.'
+            )
+            [ordered]@{
+                mode = 'Reuse'
+                reused = $true
+                prepared = $true
+                volume_name = $VolumeName
+                image_ref = $ImageRef
+                image_id = $ImageId
+            } | ConvertTo-Json -Depth 10
+            return
+        }
+        catch {
+            Write-Host (
+                'Auto mode: the sealed volume needs repair; resealing. ' +
+                $_.Exception.Message
+            )
+            $Mode = 'Reseal'
+        }
     }
     else {
         Write-Host 'Auto mode: the volume is missing a model; preparing.'

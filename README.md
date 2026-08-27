@@ -137,7 +137,7 @@ Local product work since the `v2.6.7` base has focused on a few technical areas.
 ### Windows runtime and repo workflow
 
 - added dedicated Windows launchers and a CUDA13 environment path
-- made `run_comic.bat` and `run_comic_cuda13.bat` self-bootstrapping for local venv/runtime setup
+- split the Windows entry points: `setup*.bat` provisions venv and model volumes, `run_comic*.bat` only launches
 - hardened local Git hook setup and CI validation flow
 - cleaned branch policy and standardized on `feature/*`, `fix/*`, `chore/*`, `hotfix/*`, `benchmarking/lab`
 
@@ -212,24 +212,44 @@ Keep the `py` launcher enabled in the Python installer. System Python is used
 only to create the isolated venv; global packages are never imported.
 
 
-CUDA12 runtime end to end (Python cu128 plus llama.cpp `server-cuda`):
+Setup and launch are separate. Run setup once, then launch as often as you
+like; the launcher never downloads model volumes, so it starts in seconds.
+
+**Step 1 - provision once** (CUDA12 uses Python cu128 plus llama.cpp
+`server-cuda`; CUDA13 uses cu130 and inspects each image's CUDA requirement
+before selecting `server-cuda13` or the compatible `server-cuda` fallback):
+
+```bat
+setup.bat
+```
+
+```bat
+setup_cuda13.bat
+```
+
+That prepares the selected venv, required app models, and the three core
+runtimes: HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. To also provision
+MangaLMM and PaddleOCR VL Spotting up front, use `setup_full.bat` or
+`setup_full_cuda13.bat` instead. Setup is non-interactive and resumable:
+downloads resume from `models/managed-runtime-sources` under the installation
+folder, and only size/SHA-verified files enter Docker volumes. Re-running setup
+skips full hashes and GPU smokes when the ready manifest, current image ID, and
+model sizes still match.
+
+**Step 2 - launch:**
 
 ```bat
 run_comic.bat
 ```
 
-CUDA13 Python runtime (cu130; Docker prefers `server-cuda13` and automatically
-falls back to `server-cuda` when the installed driver cannot start it):
-
 ```bat
 run_comic_cuda13.bat
 ```
 
-The first run is non-interactive. It prepares the selected venv, required app
-models, HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. Downloads resume from
-`models/managed-runtime-sources` under the installation folder and only size/SHA-verified files enter Docker
-volumes. Later runs skip verified work. Use `run_comic.bat --doctor` or
-`run_comic_cuda13.bat --doctor` for a read-only status report.
+Skipping setup is supported but slower: the application provisions any missing
+runtime on first use, inside the GUI and without a progress bar. Use
+`setup.bat --doctor` or `setup_cuda13.bat --doctor` for a read-only status
+report.
 
 ### 2. Local translation runtime
 
