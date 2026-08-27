@@ -16,6 +16,7 @@ LAUNCHERS = (
         "label": "cuda12",
         "venv_dir": ".venv-win",
         "bat": "run_comic.bat",
+        "setup_bats": ("setup.bat", "setup_full.bat"),
         "expected_versions": {
             "torch": "2.11.0+cu128",
             "torchvision": "0.26.0+cu128",
@@ -29,6 +30,7 @@ LAUNCHERS = (
         "label": "cuda13",
         "venv_dir": ".venv-win-cuda13",
         "bat": "run_comic_cuda13.bat",
+        "setup_bats": ("setup_cuda13.bat", "setup_full_cuda13.bat"),
         "expected_versions": {
             "torch": "2.11.0+cu130",
             "torchvision": "0.26.0+cu130",
@@ -109,7 +111,7 @@ print(json.dumps(payload, ensure_ascii=False))
 
 
 def verify_bootstrap(cfg: dict) -> None:
-    command = f'set COMIC_BOOTSTRAP_ONLY=1 && call {cfg["bat"]}'
+    command = f'set COMIC_BOOTSTRAP_ONLY=1 && call .\\{cfg["bat"]}'
     env = os.environ.copy()
     env["COMIC_NO_PAUSE"] = "1"
     run_checked(
@@ -120,14 +122,21 @@ def verify_bootstrap(cfg: dict) -> None:
 
 
 def verify_source_contract(cfg: dict) -> None:
+    """Check the run launcher and both setup launchers for this CUDA runtime.
+
+    The run launcher never provisions anything, so its contract check is the
+    cheap gate CI relies on; the setup launchers share the same file list via
+    scripts/bootstrap_windows.ps1 -SourceVerify.
+    """
     env = os.environ.copy()
     env["COMIC_VERIFY_ONLY"] = "1"
     env["COMIC_NO_PAUSE"] = "1"
-    run_checked(
-        ["cmd.exe", "/d", "/c", f"call {cfg['bat']}"],
-        label=f"{cfg['label']} launcher-source contract",
-        env=env,
-    )
+    for bat in (cfg["bat"], *cfg["setup_bats"]):
+        run_checked(
+            ["cmd.exe", "/d", "/c", f"call .\\{bat}"],
+            label=f"{cfg['label']} launcher-source contract ({bat})",
+            env=env,
+        )
 
 
 def verify_smoke(cfg: dict) -> None:
@@ -135,7 +144,7 @@ def verify_smoke(cfg: dict) -> None:
         "set CT_DISABLE_UPDATE_CHECK=1 && "
         "set COMIC_SKIP_STARTUP_MODELS=1 && "
         "set COMIC_SMOKE_EXIT_MS=1500 && "
-        f"call {cfg['bat']}"
+        f"call .\\{cfg['bat']}"
     )
     env = os.environ.copy()
     env["COMIC_NO_PAUSE"] = "1"

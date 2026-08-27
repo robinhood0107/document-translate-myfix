@@ -4,8 +4,8 @@ param(
     # Reseal 은 이미 검증된 볼륨 내용을 그대로 두고, 현재 llama.cpp image 로 실제
     # smoke 를 다시 통과시킨 뒤 ready manifest 만 다시 쓴다.  업스트림이 지원 태그를
     # 갱신해 image digest 가 움직였을 때 원본 파일 없이 복구하는 유일한 경로다.
-    # Auto 는 볼륨 상태를 보고 Prepare 와 Reseal 중 맞는 쪽을 고른다. 앱의 자가복구
-    # 경로가 쓰는 모드다.
+    # Auto 는 유효한 봉인을 즉시 재사용하고, 봉인이 낡았으면 Reseal, 모델이 빠졌으면
+    # Prepare 를 고른다. 앱의 자가복구 경로가 쓰는 모드다.
     [ValidateSet('Prepare', 'Verify', 'Reseal', 'Auto')]
     [string]$Mode = 'Prepare',
 
@@ -66,49 +66,9 @@ $ModelSpecs = @(
     }
 )
 
-Initialize-ManagedRuntimeDocker `
-    -ImageRef $ImageRef `
-    -VolumeName $VolumeName `
-    -ContainerName $ManagedContainerName `
-    -RuntimeName $RuntimeName `
-    -PreparationVersion $PreparationVersion `
-    -ReadyManifestName $ReadyManifestName `
-    -ModelSpecs $ModelSpecs
+function Assert-ManifestContract {
+    param([Parameter(Mandatory = $true)]$Manifest)
 
-$ImageId = Get-PinnedImageId
-
-if ($Mode -eq 'Auto') {
-    if (Test-VolumeHoldsEveryModel) {
-        Write-Host 'Auto mode: the volume already holds every verified model; resealing.'
-        $Mode = 'Reseal'
-    }
-    else {
-        Write-Host 'Auto mode: the volume is missing a verified model; preparing.'
-        $Mode = 'Prepare'
-    }
-}
-
-if ($Mode -eq 'Verify') {
-    $VolumeInspect = Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)
-    if ($VolumeInspect.ExitCode -ne 0) {
-        throw "Gemma volume to verify does not exist: $VolumeName"
-    }
-    Assert-VolumeLabels
-
-    $ManifestText = Invoke-Docker -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "READY_MANIFEST=$ReadyManifestName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', 'set -eu; cat "/models/$READY_MANIFEST"'
-    )
-    try {
-        $Manifest = $ManifestText | ConvertFrom-Json
-    }
-    catch {
-        throw "Unable to read ready manifest JSON: $ReadyManifestName"
-    }
     if (
         [int]$Manifest.schema_version -ne $ManifestSchemaVersion -or
         [int]$Manifest.preparation_version -ne $PreparationVersion -or
@@ -150,8 +110,6 @@ if ($Mode -eq 'Verify') {
     if (@($Manifest.files).Count -ne $ModelSpecs.Count) {
         throw 'Ready manifest model registry does not match the product registry.'
     }
-
-    $VerifiedFiles = @()
     foreach ($Spec in $ModelSpecs) {
         $Entry = @($Manifest.files | Where-Object { $_.name -eq $Spec.Name })
         if ($Entry.Count -ne 1) {
@@ -164,6 +122,65 @@ if ($Mode -eq 'Verify') {
         ) {
             throw "Ready manifest model contract mismatch: $($Spec.Name)"
         }
+    }
+}
+
+Initialize-ManagedRuntimeDocker `
+    -ImageRef $ImageRef `
+    -VolumeName $VolumeName `
+    -ContainerName $ManagedContainerName `
+    -RuntimeName $RuntimeName `
+    -PreparationVersion $PreparationVersion `
+    -ReadyManifestName $ReadyManifestName `
+    -ModelSpecs $ModelSpecs
+
+$ImageId = Get-PinnedImageId
+
+if ($Mode -eq 'Auto') {
+    if (Test-VolumeHoldsEveryModel) {
+        try {
+            Assert-VolumeLabels
+            $Manifest = Read-ReadyManifest
+            Assert-ManifestContract -Manifest $Manifest
+            Write-Host (
+                'Auto mode: ready manifest and model sizes match the current image; ' +
+                'reusing the sealed volume without a full hash or GPU smoke.'
+            )
+            [ordered]@{
+                mode = 'Reuse'
+                reused = $true
+                prepared = $true
+                volume_name = $VolumeName
+                image_ref = $ImageRef
+                image_id = $ImageId
+            } | ConvertTo-Json -Depth 10
+            return
+        }
+        catch {
+            Write-Host (
+                'Auto mode: the sealed volume needs repair; resealing. ' +
+                $_.Exception.Message
+            )
+            $Mode = 'Reseal'
+        }
+    }
+    else {
+        Write-Host 'Auto mode: the volume is missing a verified model; preparing.'
+        $Mode = 'Prepare'
+    }
+}
+
+if ($Mode -eq 'Verify') {
+    $VolumeInspect = Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)
+    if ($VolumeInspect.ExitCode -ne 0) {
+        throw "Gemma volume to verify does not exist: $VolumeName"
+    }
+    Assert-VolumeLabels
+    $Manifest = Read-ReadyManifest
+    Assert-ManifestContract -Manifest $Manifest
+
+    $VerifiedFiles = @()
+    foreach ($Spec in $ModelSpecs) {
         $ActualHash = Get-VolumeFileHash -FileName $Spec.Name
         if ($ActualHash -ne $Spec.Sha256) {
             throw (
