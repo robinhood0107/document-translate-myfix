@@ -222,6 +222,12 @@ class PreparationRunnerTests(unittest.TestCase):
             DEFAULT_GEMMA_MODEL_VOLUME,
         )
         self.assertIn("-AllowDownload", cmd)
+        self.assertIn("-DownloadDirectory", cmd)
+        cache_path = cmd[cmd.index("-DownloadDirectory") + 1]
+        self.assertTrue(
+            cache_path.endswith("models\\managed-runtime-sources")
+            or cache_path.endswith("models/managed-runtime-sources")
+        )
         self.assertIn("-NonInteractive", cmd)
         self.assertTrue(cmd[cmd.index("-File") + 1].endswith("prepare_gemma_runtime.ps1"))
 
@@ -377,6 +383,30 @@ class PrepareScriptContractTests(unittest.TestCase):
                 script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
                 self.assertIn("$NormalizedArguments", script)
                 self.assertIn('-replace "`r`n", "`n"', script)
+
+    def test_every_prepare_script_accepts_both_launcher_cuda_images(self) -> None:
+        for name in PREPARE_SCRIPTS:
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertIn("[string]$ImageRef", script)
+                self.assertIn("[int64]$MinimumFreeBytes = 0", script)
+                self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", script)
+                self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", script)
+
+    def test_prepare_does_not_mount_a_missing_volume_before_creation(self) -> None:
+        for name in PREPARE_SCRIPTS[:4]:
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertIn("$VolumeExistsBeforePrepare -and", script)
+
+    def test_shared_model_download_retries_without_discarding_partial_data(self) -> None:
+        source = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeModelSource.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function Invoke-ManagedRuntimeDownloadAttempt", source)
+        self.assertIn("[int]$MaximumAttempts = 5", source)
+        self.assertIn("Resuming in", source)
+        self.assertIn("$RequiredBytes = $Bytes + 536870912L", source)
 
     def test_every_contracted_model_has_a_registered_download_source(self) -> None:
         # 원본이 없으면 자가복구가 볼륨을 채울 수 없다. 등록된 출처를 계약으로 고정해

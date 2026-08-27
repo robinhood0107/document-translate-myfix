@@ -22,6 +22,8 @@ Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘�
 - 폰트 바이너리(`*.ttf`, `*.otf`, `*.woff`, `*.woff2`, `*.ttc`, `*.fon`)와 루트 `fonts/` 디렉터리는 Git에 올리지 않는다.
 - 테스트 원본, 실제 작품명, 사용자 로컬 절대경로, OCR/번역/인페인트/렌더 결과물, benchmark raw output은 파일 경로와 문서/테스트 내용 양쪽 모두에서 Git에 올리지 않는다.
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
+- `run_comic.bat`과 `run_comic_cuda13.bat`은 각각 CUDA12/CUDA13 전용 진입점으로 유지하고 공통 Windows PowerShell bootstrap을 사용한다. Python 3.12 x64, WSL2, Docker Desktop, NVIDIA driver는 준비물이며, launcher가 선택 venv와 기본 Gemma/HunyuanOCR/PaddleOCR volume의 설치·검증·재사용을 관리한다.
+- Windows launcher CI는 source contract, PowerShell parse, release dependency closure만 빠르게 검사한다. 깨끗한 Windows에서 package/model 전체를 다시 받는 bootstrap CI는 만들지 않으며, 공식 source ZIP은 bootstrap이 import하는 module과 README/quickstart의 필수 로컬 문서를 빠짐없이 포함해야 한다.
 - 현재 공식 Windows 개발 PC에서는 공통 Python 검사와 빠른 단위 테스트를 가능한 한 `.venv-win`, `.venv-win-cuda13` 양쪽에서 실행한다. CUDA 버전에 종속된 실행·패키징 검사는 해당 환경에서 따로 수행하고 결과를 구분해 기록한다.
 - 같은 checkout에서 두 Windows 환경의 Python 검사를 동시에 실행하지 않는다. `__pycache__` 파일 잠금 충돌을 피하도록 `.venv-win` 검사 후 `.venv-win-cuda13` 검사를 순차 실행하고, 필요하면 Python `-B` 옵션을 사용한다.
 - repository workflow, artifact handling, validation, branch, release, 또는 agent policy를 바꾸면 `AGENTS.md`, `CLAUDE.md`, `rules.md`를 같은 커밋과 PR에서 함께 갱신한다. 이 동기화는 local pre-commit hook과 PR CI가 검사한다. 기계적으로 강제할 수 있는 규칙이면 validator, hook, CI workflow, GitHub ruleset도 같은 PR에서 갱신한다.

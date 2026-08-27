@@ -153,6 +153,7 @@ def download_url_to_file(
                         downloaded = 0
 
                 mode = 'ab' if partial_size else 'wb'
+                last_progress_at = 0.0
                 with open(tmp_dst, mode) as f:
                     while True:
                         chunk = response.read(CHUNK_SIZE)
@@ -162,7 +163,12 @@ def download_url_to_file(
                         downloaded += len(chunk)
                         if sha256:
                             sha256.update(chunk)
-                        if progress:
+                        now = time.monotonic()
+                        should_report = (
+                            now - last_progress_at >= 0.25
+                            or (total is not None and downloaded >= total)
+                        )
+                        if progress and should_report:
                             if total:
                                 pct = min(downloaded / total * 100, 100)
                                 bar_len = 30
@@ -178,6 +184,7 @@ def download_url_to_file(
                             
                             if sys.stderr:
                                 sys.stderr.flush()
+                            last_progress_at = now
 
             if progress:
                 if sys.stderr:
