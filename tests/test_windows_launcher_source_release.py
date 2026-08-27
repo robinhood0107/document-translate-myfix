@@ -66,6 +66,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("scripts/verify_windows_runtime.py", paths)
         self.assertIn("scripts/bootstrap_windows.ps1", paths)
         self.assertIn("scripts/lib/WindowsBootstrap.psm1", paths)
+        self.assertIn("scripts/lib/ManagedRuntimeDocker.psm1", paths)
         self.assertIn("scripts/lib/ManagedRuntimeModelSource.psm1", paths)
         self.assertIn("scripts/prepare_hunyuanocr_llamacpp_runtime.ps1", paths)
         self.assertIn("docs/setup/quickstart-ko.md", paths)
@@ -190,9 +191,12 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         )
         self.assertIn("venv = '.venv-win'", bootstrap)
         self.assertIn("venv = '.venv-win-cuda13'", bootstrap)
-        self.assertIn("llama.cpp:server-cuda'", bootstrap)
-        self.assertIn("llama.cpp:server-cuda13'", bootstrap)
-        self.assertIn("fallback_llama_image", bootstrap)
+        image_policy = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("llama.cpp:server-cuda'", image_policy)
+        self.assertIn("llama.cpp:server-cuda13'", image_policy)
+        self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
         self.assertIn("preferred llama.cpp image failed", bootstrap)
         self.assertLess(
             bootstrap.index("label = 'HunyuanOCR'"),

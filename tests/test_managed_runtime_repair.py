@@ -364,6 +364,30 @@ class GemmaSelfRepairTests(unittest.TestCase):
 
 
 class PrepareScriptContractTests(unittest.TestCase):
+    def test_docker_volume_helpers_have_one_owner(self) -> None:
+        module = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
+        ).read_text(encoding="utf-8")
+        helpers = (
+            "Invoke-DockerResult",
+            "Invoke-Docker",
+            "Get-PinnedImageId",
+            "Assert-ManagedContainerStopped",
+            "Assert-VolumeLabels",
+            "Get-VolumeFileHash",
+            "Read-ReadyManifest",
+            "Get-VolumeFileSize",
+            "Test-VolumeHoldsEveryModel",
+        )
+        for helper in helpers:
+            self.assertIn(f"function {helper}", module)
+        for name in PREPARE_SCRIPTS:
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertIn("Initialize-ManagedRuntimeDocker", script)
+                for helper in helpers:
+                    self.assertNotIn(f"function {helper}", script)
+
     def test_every_prepare_script_offers_reseal_and_auto(self) -> None:
         for name in PREPARE_SCRIPTS:
             with self.subTest(script=name):
@@ -378,20 +402,24 @@ class PrepareScriptContractTests(unittest.TestCase):
     def test_every_prepare_script_normalizes_crlf_for_container_shells(self) -> None:
         # 컨테이너의 /bin/sh 는 dash 다. here-string 의 CR 이 그대로 넘어가면
         # 첫 줄 `set -eu` 부터 "Illegal option -" 로 죽는다.
-        for name in PREPARE_SCRIPTS:
-            with self.subTest(script=name):
-                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-                self.assertIn("$NormalizedArguments", script)
-                self.assertIn('-replace "`r`n", "`n"', script)
+        module = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("$NormalizedArguments", module)
+        self.assertIn('-replace "`r`n", "`n"', module)
 
     def test_every_prepare_script_accepts_both_launcher_cuda_images(self) -> None:
+        module = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", module)
+        self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", module)
         for name in PREPARE_SCRIPTS:
             with self.subTest(script=name):
                 script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
                 self.assertIn("[string]$ImageRef", script)
                 self.assertIn("[int64]$MinimumFreeBytes = 0", script)
-                self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", script)
-                self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", script)
+                self.assertIn("Get-ManagedLlamaCppImagePolicy", script)
 
     def test_prepare_does_not_mount_a_missing_volume_before_creation(self) -> None:
         for name in PREPARE_SCRIPTS[:4]:
