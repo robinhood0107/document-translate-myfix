@@ -12,7 +12,8 @@
 
 `run_comic.bat`은 `ghcr.io/ggml-org/llama.cpp:server-cuda`,
 `run_comic_cuda13.bat`은 `:server-cuda13`을 사용합니다. 선택한 image가 로컬에
-없을 때만 pull하고, 모델 원본은 LocalAppData의 bootstrap cache에서 이어받습니다.
+없을 때만 pull하고, 모델 원본은 설치 폴더의
+`models/managed-runtime-sources` cache에서 이어받습니다.
 
 ## 서버 실행
 

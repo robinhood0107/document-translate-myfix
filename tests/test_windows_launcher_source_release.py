@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 import hashlib
-import json
 import re
 import sys
 import tempfile
@@ -66,7 +65,6 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         )
         self.assertIn("scripts/verify_windows_runtime.py", paths)
         self.assertIn("scripts/bootstrap_windows.ps1", paths)
-        self.assertIn("scripts/windows_bootstrap.json", paths)
         self.assertIn("scripts/lib/WindowsBootstrap.psm1", paths)
         self.assertIn("scripts/lib/ManagedRuntimeModelSource.psm1", paths)
         self.assertIn("scripts/prepare_hunyuanocr_llamacpp_runtime.ps1", paths)
@@ -180,29 +178,22 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("include-system-site-packages", bootstrap)
 
     def test_bootstrap_configuration_keeps_cuda_variants_separate(self) -> None:
-        config = json.loads(
-            (ROOT / "scripts" / "windows_bootstrap.json").read_text(encoding="utf-8")
+        bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
+            encoding="utf-8"
         )
-        self.assertEqual(config["schema_version"], 1)
-        self.assertEqual(config["python"], {
-            "major": 3,
-            "minor": 12,
-            "implementation": "CPython",
-            "bits": 64,
-        })
-        self.assertEqual(config["runtimes"]["cuda12"]["venv"], ".venv-win")
-        self.assertEqual(
-            config["runtimes"]["cuda12"]["llama_image"],
-            "ghcr.io/ggml-org/llama.cpp:server-cuda",
+        self.assertIn("venv = '.venv-win'", bootstrap)
+        self.assertIn("venv = '.venv-win-cuda13'", bootstrap)
+        self.assertIn("llama.cpp:server-cuda'", bootstrap)
+        self.assertIn("llama.cpp:server-cuda13'", bootstrap)
+        self.assertLess(
+            bootstrap.index("label = 'HunyuanOCR'"),
+            bootstrap.index("label = 'PaddleOCR VL'"),
         )
-        self.assertEqual(
-            config["runtimes"]["cuda13"]["llama_image"],
-            "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+        self.assertLess(
+            bootstrap.index("label = 'PaddleOCR VL'"),
+            bootstrap.index("label = 'Gemma IQ4_NL'"),
         )
-        self.assertEqual(
-            [entry["label"] for entry in config["managed_runtimes"]],
-            ["HunyuanOCR", "PaddleOCR VL", "Gemma IQ4_NL"],
-        )
+        self.assertNotIn("windows_bootstrap.json", bootstrap)
 
     def test_release_dependency_closure_rejects_missing_local_targets(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "PowerShell module dependency"):

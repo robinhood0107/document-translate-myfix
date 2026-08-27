@@ -221,8 +221,8 @@ run_comic_cuda13.bat
 ```
 
 The first run is non-interactive. It prepares the selected venv, required app
-models, HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. Downloads resume from the
-shared `%LOCALAPPDATA%` cache and only size/SHA-verified files enter Docker
+models, HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. Downloads resume from
+`models/managed-runtime-sources` under the installation folder and only size/SHA-verified files enter Docker
 volumes. Later runs skip verified work. Use `run_comic.bat --doctor` or
 `run_comic_cuda13.bat --doctor` for a read-only status report.
 

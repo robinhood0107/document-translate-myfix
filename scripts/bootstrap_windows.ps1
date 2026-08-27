@@ -12,8 +12,31 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $Root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'lib\WindowsBootstrap.psm1') -Force -DisableNameChecking
-$Config = Import-WindowsBootstrapConfig -Path (Join-Path $PSScriptRoot 'windows_bootstrap.json')
-$RuntimeConfig = $Config.runtimes.$Runtime
+$PythonContract = [pscustomobject]@{
+    major = 3; minor = 12; implementation = 'CPython'; bits = 64
+}
+$PipTools = [pscustomobject]@{
+    pip = '26.0.1'; wheel = '0.46.3'; setuptools = '80.9.0'
+}
+$RuntimeConfig = @{
+    cuda12 = [pscustomobject]@{
+        venv = '.venv-win'
+        requirements = 'requirements-cuda12.txt'
+        expected_cuda = '12.8'
+        llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
+    }
+    cuda13 = [pscustomobject]@{
+        venv = '.venv-win-cuda13'
+        requirements = 'requirements-cuda13.txt'
+        expected_cuda = '13.0'
+        llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    }
+}[$Runtime]
+$ManagedRuntimes = @(
+    [pscustomobject]@{ label = 'HunyuanOCR'; script = 'scripts/prepare_hunyuanocr_llamacpp_runtime.ps1' },
+    [pscustomobject]@{ label = 'PaddleOCR VL'; script = 'scripts/prepare_paddleocr_llamacpp_runtime.ps1' },
+    [pscustomobject]@{ label = 'Gemma IQ4_NL'; script = 'scripts/prepare_gemma_runtime.ps1' }
+)
 
 $RequiredFiles = @(
     'comic.py', 'controller.py', 'app\version.py', 'requirements-base.txt',
@@ -21,7 +44,7 @@ $RequiredFiles = @(
     'hunyuanocr_docker_files\docker-compose.yaml',
     'paddleocr_vl_docker_files\docker-compose.yaml',
     'resources\translations\compiled\ct_ko.qm',
-    'scripts\bootstrap_windows.ps1', 'scripts\windows_bootstrap.json',
+    'scripts\bootstrap_windows.ps1',
     'scripts\lib\WindowsBootstrap.psm1',
     'scripts\lib\ManagedRuntimeModelSource.psm1',
     'scripts\prepare_gemma_runtime.ps1',
@@ -41,10 +64,9 @@ if ($SourceVerify) {
 
 $Doctor = $RemainingArguments.Count -gt 0 -and $RemainingArguments[0] -eq '--doctor'
 if ($Doctor) { $RemainingArguments = @($RemainingArguments | Select-Object -Skip 1) }
-$LocalAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [Environment]::GetFolderPath('LocalApplicationData') }
-$BootstrapRoot = Join-Path $LocalAppData 'ComicTranslate\Bootstrap'
-$ModelCache = Join-Path $LocalAppData 'ComicTranslate\ModelCache'
-$LogDirectory = Join-Path $BootstrapRoot 'logs'
+$BootstrapRoot = Join-Path $Root '.comic-bootstrap'
+$ModelCache = Join-Path $Root 'models\managed-runtime-sources'
+$LogDirectory = Join-Path $Root 'logs\bootstrap'
 $LogPath = Join-Path $LogDirectory ("bootstrap-{0}-{1}.log" -f $Runtime, (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $VenvRoot = Join-Path $Root ([string]$RuntimeConfig.venv)
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
@@ -80,16 +102,18 @@ try {
     if ($ExistingVenvValid) {
         Write-BootstrapMessage 'The existing isolated Python 3.12 environment is reusable; seed interpreter lookup skipped.' 'SKIP'
     } else {
-        $Python = Resolve-BootstrapPython312 -PythonContract $Config.python
+        $Python = Resolve-BootstrapPython312 -PythonContract $PythonContract
         Write-BootstrapMessage "Using Python seed interpreter: $($Python.ResolvedExecutable)" 'OK'
     }
     if (-not $Doctor) {
         Test-BootstrapWritableDirectory -Path $Root
         Test-BootstrapWritableDirectory -Path $BootstrapRoot
-        Assert-BootstrapFreeSpace -Path $Root -MinimumBytes 12884901888 -Label 'Python runtime environment'
+        if (-not $ExistingVenvValid) {
+            $VenvMinimumBytes = if ($Runtime -eq 'cuda12') { 8589934592 } else { 6442450944 }
+            Assert-BootstrapFreeSpace -Path $Root -MinimumBytes $VenvMinimumBytes -Label 'Python runtime environment'
+        }
         if (-not $DeveloperPythonOnly -and -not $UiSmokeOnly) {
             Test-BootstrapWritableDirectory -Path $ModelCache
-            Assert-BootstrapFreeSpace -Path $ModelCache -MinimumBytes 64424509440 -Label 'Local models and Docker runtime'
         }
     }
 
@@ -158,7 +182,6 @@ try {
         '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
     )
     if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments) -ne 0) {
-        $PipTools = $Config.pip_tools
         Invoke-BootstrapRetry -Operation 'pip tool installation' -Attempts 4 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--retries', '5', '--timeout', '60', '--upgrade', "pip==$($PipTools.pip)", "wheel==$($PipTools.wheel)", "setuptools==$($PipTools.setuptools)") -WorkingDirectory $Root
         }
@@ -204,7 +227,7 @@ try {
         Stop-BootstrapManagedContainer -Docker $Docker -Name 'hunyuanocr-local-server' -OwnershipLabel 'com.comictranslate.hunyuanocr-model-volume'
         Stop-BootstrapManagedContainer -Docker $Docker -Name 'paddleocr-llamacpp' -OwnershipLabel 'com.comictranslate.paddleocr-model-volume'
         Stop-BootstrapManagedContainer -Docker $Docker -Name 'gemma-local-server' -OwnershipLabel 'comic-translate.runtime'
-        foreach ($Managed in $Config.managed_runtimes) {
+        foreach ($Managed in $ManagedRuntimes) {
             $Script = Join-Path $Root ([string]$Managed.script)
             Write-BootstrapMessage "Preparing $($Managed.label)..."
             Invoke-BootstrapRetry -Operation "$($Managed.label) preparation" -Attempts 3 -Action {

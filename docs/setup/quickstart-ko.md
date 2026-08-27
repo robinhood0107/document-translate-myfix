@@ -8,8 +8,12 @@
 - Python 3.12 x64(CPython, `py -3.12` 또는 PATH에서 실행 가능)
 - WSL2 backend와 GPU 지원이 켜진 Docker Desktop
 - NVIDIA 드라이버와 CUDA 호환 GPU
-- 모델 cache와 Docker volume을 위한 `C:` 여유 공간 60 GiB 이상
+- 선택한 venv용 약 6~8 GiB와, 아직 없는 모델 파일의 실제 크기만큼의 여유 공간
 - 소스 checkout을 사용할 때만 Git
+
+현재 pinned `mahotas` Windows wheel이 CPython 3.12까지만 제공되므로 Python
+3.13/3.14만 설치된 PC는 지원 대상이 아닙니다. 다른 Python과 나란히 3.12 x64를
+설치하면 launcher가 `py -3.12`를 우선 사용하며 전역 package는 가져오지 않습니다.
 
 ## 2. 저장소 실행
 
@@ -40,7 +44,7 @@ llama.cpp server image가 로컬에 없을 때만 가져옵니다.
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf`(약 13.58 GiB)
 
-Docker 원본 모델은 `%LOCALAPPDATA%\ComicTranslate\ModelCache`에서 재사용하고,
+Docker 원본 모델은 설치 폴더의 `models\managed-runtime-sources`에서 재사용하고,
 중단된 다운로드는 다음 BAT 실행에서 이어받습니다. 모든 항목은 크기·SHA-256과
 실제 model-load smoke를 통과해야 준비 완료로 인정합니다. 읽기 전용 상태 검사는
 `run_comic.bat --doctor` 또는 `run_comic_cuda13.bat --doctor`를 사용합니다.
@@ -60,6 +64,27 @@ py -3.12 -m venv .venv-win-cuda13
 ```
 
 `requirements.txt`는 기본 Windows CUDA12 런타임용 별칭이며, 공통 의존성은 `requirements-base.txt`에 모아둡니다.
+
+### 설치 위치
+
+- CUDA12 venv: 설치 폴더의 `.venv-win`(현재 패키지 기준 약 5.9GB)
+- CUDA13 venv: 설치 폴더의 `.venv-win-cuda13`(약 4.3GB)
+- GGUF 원본 cache: 설치 폴더의 `models\managed-runtime-sources`
+- bootstrap log/state: 설치 폴더의 `logs\bootstrap`, `.comic-bootstrap`
+- 준비된 GGUF: Docker external named volume
+
+따라서 저장소가 `D:`에 있으면 venv, 원본 cache, log/state도 `D:`에 생깁니다.
+Docker named volume의 실제 물리 위치는 Docker Desktop의 disk image location을
+따르므로 Docker 설정이 `C:`이면 그 복사본은 `C:`를 사용합니다. 기본 3종 모델
+원본 합계는 약 16.50GiB이며 Docker volume에도 비슷한 크기의 준비본이 저장됩니다.
+bootstrap은 고정 60GiB를 요구하지 않고, 빠진 파일마다 정확한 크기 + 512MiB만
+검사합니다.
+
+별도 CUDA Toolkit 설치는 필요하지 않습니다. PyTorch/ONNX Runtime의 CUDA
+사용자 공간 DLL은 선택한 venv에 설치되고 launcher가 그 경로를 우선합니다.
+llama.cpp의 CUDA 사용자 공간은 선택한 Docker image 안에 있습니다. 단, 실제 GPU를
+구동하는 NVIDIA display driver와 Docker Desktop/WSL2 GPU passthrough는 시스템
+준비물이라 venv 안에 넣을 수 없습니다.
 
 ## 3. 로컬 런타임 수동 관리
 
@@ -170,8 +195,8 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 참고하세요.
 
 `-ModelDirectory`를 생략하면 저장소의 gitignore된 `testmodel/`과 그 바로 아래
-하위 폴더를 먼저 찾습니다. launcher 경로는 저장소가 아니라 LocalAppData의 공유
-model cache를 명시해 릴리스 폴더가 바뀌어도 재사용합니다.
+하위 폴더를 먼저 찾습니다. launcher 경로는 설치 폴더의 ignored
+`models\managed-runtime-sources` cache를 명시합니다.
 
 과거 HunyuanOCR은 `testmodel` 폴더를 bind mount하고 Gemma와 이름이 겹치는
 `LLAMA_CTX_SIZE` 같은 일반 환경변수를 읽었습니다. 이제는 준비된 volume과
