@@ -40,6 +40,48 @@ jobs:
           echo "::error::Invalid branch name: $branch"
           exit 1
 
+  windows-launcher-contract:
+    runs-on: windows-latest
+    needs: branch-name
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Parse Windows bootstrap scripts
+        shell: pwsh
+        run: |
+          $files = @(
+            "scripts/bootstrap_windows.ps1",
+            "scripts/lib/WindowsBootstrap.psm1",
+            "scripts/lib/ManagedRuntimeModelSource.psm1",
+            "scripts/prepare_gemma_runtime.ps1",
+            "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1",
+            "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
+            "scripts/prepare_paddleocr_spotting_llamacpp_runtime.ps1",
+            "scripts/prepare_mangalmm_llamacpp_runtime.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "$file failed PowerShell parsing: $($errors -join '; ')"
+            }
+          }
+
+      - name: Verify launcher source contracts without installation
+        shell: pwsh
+        run: |
+          $env:COMIC_VERIFY_ONLY = "1"
+          $env:COMIC_NO_PAUSE = "1"
+          cmd.exe /d /c "call run_comic.bat"
+          if ($LASTEXITCODE -ne 0) { throw "CUDA12 source contract failed." }
+          cmd.exe /d /c "call run_comic_cuda13.bat"
+          if ($LASTEXITCODE -ne 0) { throw "CUDA13 source contract failed." }
+
   validate-pr-flow:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

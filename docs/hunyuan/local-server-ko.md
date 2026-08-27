@@ -4,20 +4,24 @@
 
 ## 준비
 
-- `testmodel/` 폴더에 아래 두 파일을 둡니다.
-  - `HunyuanOCR-BF16.gguf`
-  - `mmproj-HunyuanOCR-BF16.gguf`
-- 현재 기준 Docker image는 `ghcr.io/ggml-org/llama.cpp:server-cuda13`입니다. `:server-cuda`도 지원합니다.
-- 최신 이미지를 실제로 반영하려면 실행 전에 `docker compose pull --policy always`를 먼저 수행한 뒤 `up -d --force-recreate`를 사용하세요.
-- 구현 시점에 직접 확인한 내부 `llama-server --version`은 `8740`입니다. 이 값은 moving tag 특성상 앞으로 바뀔 수 있습니다.
+두 Windows launcher는 첫 실행에 아래 Q8 계약을 자동으로 준비합니다.
+
+- `HunyuanOCR.Q8_0.gguf`
+- `HunyuanOCR.mmproj-Q8_0.gguf`
+- external volume: `comic-translate-hunyuanocr-models-v2`
+
+`run_comic.bat`은 `ghcr.io/ggml-org/llama.cpp:server-cuda`,
+`run_comic_cuda13.bat`은 `:server-cuda13`을 사용합니다. 선택한 image가 로컬에
+없을 때만 pull하고, 모델 원본은 LocalAppData의 bootstrap cache에서 이어받습니다.
 
 ## 서버 실행
 
-저장소 루트에서 실행:
+정상 실행에는 아래 명령이 필요하지 않습니다. 수동 검증·복구가 필요할 때만:
 
-```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml pull --policy always
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recreate
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_hunyuanocr_llamacpp_runtime.ps1 `
+  -Mode Auto -AllowDownload
 ```
 
 앱 설정:
@@ -59,7 +63,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 - `ctx-size=4096`
 - `n_parallel=1`
 - `threads=12`
-- `n_gpu_layers=99`
+- `n_gpu_layers=80`
 
 ## 참고
 

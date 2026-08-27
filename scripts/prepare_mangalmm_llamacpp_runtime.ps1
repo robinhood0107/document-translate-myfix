@@ -18,6 +18,18 @@ param(
 
     [string]$VolumeName = 'comic-translate-mangalmm-models-v2',
 
+    [ValidateSet(
+        'ghcr.io/ggml-org/llama.cpp:server-cuda',
+        'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    )]
+    [string]$ImageRef = $(
+        if ($env:MANGALMM_LLAMA_CPP_IMAGE) {
+            $env:MANGALMM_LLAMA_CPP_IMAGE
+        }
+        elseif ($env:LLAMA_CPP_IMAGE) { $env:LLAMA_CPP_IMAGE }
+        else { 'ghcr.io/ggml-org/llama.cpp:server-cuda13' }
+    ),
+
     [ValidateRange(1024, 65535)]
     [int]$SmokePort = 18085,
 
@@ -38,7 +50,6 @@ $PreparationVersion = 2
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-mangalmm-ready-v2.json'
 $RuntimeName = 'MangaLMM-llama.cpp'
-$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
 # CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
 $SupportedImageRefs = @(
     'ghcr.io/ggml-org/llama.cpp:server-cuda13',

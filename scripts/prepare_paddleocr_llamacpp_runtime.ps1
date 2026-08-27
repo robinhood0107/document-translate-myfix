@@ -18,6 +18,18 @@ param(
 
     [string]$VolumeName = 'comic-translate-paddleocr-vl-llamacpp-models-v1',
 
+    [ValidateSet(
+        'ghcr.io/ggml-org/llama.cpp:server-cuda',
+        'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    )]
+    [string]$ImageRef = $(
+        if ($env:PADDLEOCR_LLAMA_CPP_IMAGE) {
+            $env:PADDLEOCR_LLAMA_CPP_IMAGE
+        }
+        elseif ($env:LLAMA_CPP_IMAGE) { $env:LLAMA_CPP_IMAGE }
+        else { 'ghcr.io/ggml-org/llama.cpp:server-cuda13' }
+    ),
+
     [ValidateSet('CUDA', 'CPU')]
     [string]$SmokeDevice = 'CUDA',
 
@@ -41,7 +53,6 @@ $PreparationVersion = 1
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'
 $RuntimeName = 'PaddleOCR-VL-llama.cpp'
-$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
 # CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
 $SupportedImageRefs = @(
     'ghcr.io/ggml-org/llama.cpp:server-cuda13',
