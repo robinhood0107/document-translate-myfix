@@ -200,9 +200,13 @@ PaddleOCR VL Spotting과 MangaLMM은 기본 bootstrap에 포함하지 않으며,
 
 ### 1. 앱 실행
 
-준비물은 Windows 10/11 x64, Python 3.12 x64, WSL2 기반 Docker Desktop,
+준비물은 Windows 10/11 x64,
+[공식 Python 3.12.10 Windows x64](https://www.python.org/downloads/release/python-31210/),
+WSL2 기반 Docker Desktop,
 NVIDIA 드라이버와 CUDA 호환 GPU입니다. Docker Desktop은 설치되어 있어야 하며,
 꺼져 있으면 런처가 시작하고 준비될 때까지 기다립니다.
+Python installer에서는 `py` launcher를 포함하세요. 시스템 Python은 전용 venv
+생성에만 사용하고 전역 package는 가져오지 않습니다.
 
 
 CUDA12 전체 런타임(Python cu128 + llama.cpp `server-cuda`):

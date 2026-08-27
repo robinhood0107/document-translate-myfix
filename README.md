@@ -203,9 +203,13 @@ For a more explicit setup path, see:
 
 ### 1. Launch the application
 
-Prerequisites are Windows 10/11 x64, Python 3.12 x64, Docker Desktop with its
+Prerequisites are Windows 10/11 x64,
+[the official Python 3.12.10 Windows x64 installer](https://www.python.org/downloads/release/python-31210/),
+Docker Desktop with its
 WSL2 backend, an NVIDIA driver, and a CUDA-capable GPU. Docker Desktop must be
 installed; the launcher starts it and waits when its Linux engine is stopped.
+Keep the `py` launcher enabled in the Python installer. System Python is used
+only to create the isolated venv; global packages are never imported.
 
 
 CUDA12 runtime end to end (Python cu128 plus llama.cpp `server-cuda`):
