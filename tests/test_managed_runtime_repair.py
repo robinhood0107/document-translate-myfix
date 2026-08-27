@@ -222,6 +222,12 @@ class PreparationRunnerTests(unittest.TestCase):
             DEFAULT_GEMMA_MODEL_VOLUME,
         )
         self.assertIn("-AllowDownload", cmd)
+        self.assertIn("-DownloadDirectory", cmd)
+        cache_path = cmd[cmd.index("-DownloadDirectory") + 1]
+        self.assertTrue(
+            cache_path.endswith("models\\managed-runtime-sources")
+            or cache_path.endswith("models/managed-runtime-sources")
+        )
         self.assertIn("-NonInteractive", cmd)
         self.assertTrue(cmd[cmd.index("-File") + 1].endswith("prepare_gemma_runtime.ps1"))
 
