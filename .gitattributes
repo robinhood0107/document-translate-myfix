@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell hooks must remain executable by both WSL bash and Git for Windows bash.
+*.sh text eol=lf
+.githooks/* text eol=lf
