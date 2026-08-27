@@ -6,7 +6,9 @@
 
 Windows PowerShell에서 저장소 루트를 연 뒤 실행합니다.
 
-기본 `Prepare` 실행은 `C:` 여유 공간이 30 GiB 이상인지 확인합니다. `gemma-local-server` 컨테이너가 실행 중이면 앱을 정상 종료해 컨테이너를 중지한 뒤 다시 실행합니다.
+기본 `Prepare` 실행은 다운로드 대상 drive에 모델 크기 + 512 MiB가 남았는지
+검사합니다. `gemma-local-server` 컨테이너가 실행 중이면 앱을 정상 종료해
+컨테이너를 중지한 뒤 다시 실행합니다.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -59,8 +61,9 @@ image identity만 어긋납니다. 이때는 `-Mode Reseal`이 원본 없이 스
 - `-VolumeName`: 기본값은 `comic-translate-gemma-models-v2`입니다. 다른 이름을 쓰면 앱 실행 전 `GEMMA_MODEL_VOLUME`에도 같은 값을 설정해야 합니다.
 - `-SmokePort`: 실제 GPU smoke 서버의 로컬 포트이며 기본값은 `18082`입니다.
 - `-SmokeTimeoutSec`: smoke 준비 제한 시간이며 `30`~`900`초, 기본값은 `420`초입니다.
-- `-MinimumFreeBytes`: `C:` 최소 여유 공간이며 기본값은 `32212254720` bytes(30 GiB)입니다.
-- `-SkipFreeSpaceCheck`: 공간을 별도로 확인한 경우에만 `C:` 여유 공간 검사를 건너뜁니다.
+- `-MinimumFreeBytes`: 선택적인 추가 최소 여유 공간입니다. 기본값은 `0`이며,
+  실제 다운로드 직전에 모델 파일 크기 + 512 MiB를 자동 검사합니다.
+- `-SkipFreeSpaceCheck`: 자동 파일별 여유 공간 검사까지 명시적으로 건너뜁니다.
 
 ## 앱 설정
 

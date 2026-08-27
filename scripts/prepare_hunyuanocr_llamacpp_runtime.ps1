@@ -18,13 +18,25 @@ param(
 
     [string]$VolumeName = 'comic-translate-hunyuanocr-models-v2',
 
+    [ValidateSet(
+        'ghcr.io/ggml-org/llama.cpp:server-cuda',
+        'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    )]
+    [string]$ImageRef = $(
+        if ($env:HUNYUAN_OCR_LLAMA_CPP_IMAGE) {
+            $env:HUNYUAN_OCR_LLAMA_CPP_IMAGE
+        }
+        elseif ($env:LLAMA_CPP_IMAGE) { $env:LLAMA_CPP_IMAGE }
+        else { 'ghcr.io/ggml-org/llama.cpp:server-cuda13' }
+    ),
+
     [ValidateRange(1024, 65535)]
     [int]$SmokePort = 18086,
 
     [ValidateRange(30, 600)]
     [int]$SmokeTimeoutSec = 300,
 
-    [int64]$MinimumFreeBytes = 5368709120,
+    [int64]$MinimumFreeBytes = 0,
 
     [switch]$SkipFreeSpaceCheck
 )
@@ -38,7 +50,6 @@ $PreparationVersion = 1
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-hunyuanocr-ready-v1.json'
 $RuntimeName = 'HunyuanOCR-llama.cpp'
-$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
 # CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
 $SupportedImageRefs = @(
     'ghcr.io/ggml-org/llama.cpp:server-cuda13',
@@ -437,7 +448,7 @@ Assert-ManagedContainerStopped
 # 않으므로 원본 경로도, 복사할 여유 공간도 필요 없다.
 if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
-    if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
+    if ($MinimumFreeBytes -gt 0 -and [int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
             "Insufficient free C: space. required={0:N2} GiB, actual={1:N2} GiB" -f
             ($MinimumFreeBytes / 1GB),
@@ -448,10 +459,16 @@ if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
 
 $PreparedSources = @()
 if (-not $IsReseal) {
+    $VolumeExistsBeforePrepare = (
+        Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)
+    ).ExitCode -eq 0
     foreach ($Spec in $ModelSpecs) {
         # 볼륨이 이미 계약된 파일을 담고 있으면 원본을 아예 찾지 않는다. 대형
         # GGUF 를 헛되이 내려받거나 해시하지 않기 위해서다.
-        if ((Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256) {
+        if (
+            $VolumeExistsBeforePrepare -and
+            (Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256
+        ) {
             Write-Host "Reusing verified volume file: $($Spec.Name)"
             continue
         }
@@ -462,7 +479,8 @@ if (-not $IsReseal) {
             -RequestedPath $ModelDirectory `
             -DownloadUrl ([string]$Spec.DownloadUrl) `
             -DownloadDirectory $DownloadDirectory `
-            -AllowDownload:$AllowDownload
+            -AllowDownload:$AllowDownload `
+            -SkipFreeSpaceCheck:$SkipFreeSpaceCheck
         $PreparedSources += [pscustomobject]@{
             Spec = $Spec
             Directory = $Resolved.Directory
@@ -483,8 +501,8 @@ if ($IsReseal) {
 else {
     Invoke-Docker -Arguments @(
         'volume', 'create',
-        '--label', "comic-translate.runtime=$RuntimeName",
-        '--label', "comic-translate.preparation-version=$PreparationVersion",
+        "--label=comic-translate.runtime=$RuntimeName",
+        "--label=comic-translate.preparation-version=$PreparationVersion",
         $VolumeName
     ) | Out-Null
 }
