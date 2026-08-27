@@ -25,7 +25,6 @@ ALLOWLIST_FILES = frozenset(
         "LICENSE",
         "README.md",
         "README_ko.md",
-        "rules.md",
         "docs/architecture/codebase-map-ko.md",
         "docs/runtime/managed-llamacpp-only-ko.md",
         "docs/runtime/managed-volume-repair-ko.md",
@@ -185,6 +184,7 @@ POWERSHELL_MODULE_RE = re.compile(
     re.IGNORECASE,
 )
 MARKDOWN_LINK_RE = re.compile(rb"\]\(([^)]+)\)")
+NON_BUNDLE_DOCUMENT_LINKS = frozenset({"rules.md"})
 
 
 @dataclass(frozen=True)
@@ -364,6 +364,8 @@ def validate_release_dependency_closure(files: dict[str, bytes]) -> None:
                 continue
             normalized = target.lstrip("/") if target.startswith("/") else str(parent / target)
             normalized = posixpath.normpath(normalized)
+            if normalized in NON_BUNDLE_DOCUMENT_LINKS:
+                continue
             if normalized not in paths:
                 raise RuntimeError(
                     f"Markdown dependency is missing from release: {path} -> {normalized}"
