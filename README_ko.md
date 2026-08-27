@@ -215,7 +215,8 @@ CUDA12 전체 런타임(Python cu128 + llama.cpp `server-cuda`):
 run_comic.bat
 ```
 
-CUDA13 전체 런타임(Python cu130 + llama.cpp `server-cuda13`):
+CUDA13 Python 런타임(cu130, Docker는 `server-cuda13` 우선 후 드라이버가
+지원하지 않으면 `server-cuda` 자동 fallback):
 
 ```bat
 run_comic_cuda13.bat
