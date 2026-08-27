@@ -64,6 +64,7 @@ class ModelID(Enum):
     RTDETR_V2_ONNX = "rtdetr-v2-onnx"
     CTD_TORCH = "ctd-torch"
     CTD_ONNX = "ctd-onnx"
+    CTD_POSITIVE_CLAIM_ONNX = "ctd-positive-claim-onnx"
     LAMA_LARGE_512PX = "lama-large-512px-ckpt"
     LAMA_MPE = "lama-mpe-ckpt"
     
@@ -468,6 +469,17 @@ def _register_defaults():
         url='https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/',
         files=['comictextdetector.pt.onnx'],
         sha256=['1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f'],
+        save_dir=os.path.join(models_base_dir, 'detection')
+    ))
+
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.CTD_POSITIVE_CLAIM_ONNX,
+        url=(
+            'https://github.com/robinhood0107/document-translate-myfix/'
+            'releases/download/inpaint-ctd-1280-v1/'
+        ),
+        files=['comictextdetector-1280.onnx'],
+        sha256=['c954820c56e611a0470bf9cc119c4a5ffa73c1c15bbdb028c8cd1b58cb008277'],
         save_dir=os.path.join(models_base_dir, 'detection')
     ))
 

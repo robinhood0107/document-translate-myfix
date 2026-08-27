@@ -16,6 +16,7 @@ from modules.inpainting.runtime_contract import (
     validate_learned_inpaint_runtime,
 )
 from modules.inpainting.source_lama_blockwise import SourceLaMaLarge
+from modules.utils.inpaint_evidence import SourceLamaBlockwiseResult
 from modules.inpainting.ffc_torch import FourierUnit
 from pipeline.inpainting import InpaintingHandler
 
@@ -365,9 +366,13 @@ def test_handler_losslessly_restores_every_pixel_outside_edit_mask() -> None:
     unsafe_result = np.full_like(image, 200)
 
     with mock.patch(
-        "pipeline.inpainting.source_lama_blockwise_inpaint",
-        return_value=(unsafe_result, mask.copy(), []),
-    ):
+        "pipeline.inpainting.source_lama_blockwise_inpaint_result",
+        return_value=SourceLamaBlockwiseResult(
+            image=unsafe_result,
+            edit_mask=mask.copy(),
+            diagnostics=[],
+        ),
+    ) as run_lama:
         result = handler.inpaint_with_blocks(
             image,
             mask,
@@ -375,6 +380,7 @@ def test_handler_losslessly_restores_every_pixel_outside_edit_mask() -> None:
             config=object(),
         )
 
+    assert run_lama.call_args.kwargs["check_need_inpaint"] is True
     np.testing.assert_array_equal(result[mask <= 0], image[mask <= 0])
     np.testing.assert_array_equal(result[mask > 0], unsafe_result[mask > 0])
     assert (

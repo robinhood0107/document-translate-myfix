@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -12,11 +13,14 @@ import imkit as imk  # noqa: E402
 
 from modules.utils.inpaint_cleanup import (  # noqa: E402
     apply_duplicate_bubble_inner_fill,
-    refine_bubble_residue_inpaint,
 )
 from modules.utils.inpaint_composite import (  # noqa: E402
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
+)
+from modules.utils.inpaint_evidence import (  # noqa: E402
+    BlockInpaintEvidence,
+    MaskPatch,
 )
 from pipeline.inpaint_cleanup_job import (  # noqa: E402
     InpaintCleanupInput,
@@ -42,9 +46,7 @@ def _reference(image, inpainted, mask, mask_details, blocks, config, label, edit
     work_mask = mask
     if edit_mask is not None:
         work_mask = np.where((work_mask > 0) | (edit_mask > 0), 255, 0).astype(np.uint8)
-    out, work_mask, stats = refine_bubble_residue_inpaint(
-        out, work_mask, blocks, None, config, page_label=label
-    )
+    stats = {"autonomous_residue_cleanup": "disabled"}
     out, work_mask, stats = apply_duplicate_bubble_inner_fill(
         out, work_mask, mask_details, stats
     )
@@ -102,6 +104,30 @@ class CleanupEquivalenceTests(unittest.TestCase):
         # 합집합이 실제로 반영됐는지도 본다.
         self.assertTrue(bool(result.mask[110, 30]))
 
+    def test_protected_corner_mask_is_restored_and_removed_from_final_mask(self) -> None:
+        image, inpainted, mask = _scene()
+        protected = np.zeros(mask.shape, dtype=np.uint8)
+        protected[20:30, 30:40] = 255
+
+        result = run_inpaint_cleanup(
+            InpaintCleanupInput(
+                image=image,
+                inpaint_input_img=inpainted,
+                mask=mask,
+                mask_details={"protected_corner_mask": protected},
+                inpaint_blocks=[],
+                config=None,
+                page_label="1/1",
+            )
+        )
+
+        self.assertEqual(int(np.count_nonzero(result.mask[protected > 0])), 0)
+        np.testing.assert_array_equal(
+            result.inpaint_input_img[protected > 0],
+            image[protected > 0],
+        )
+        self.assertGreater(int(np.count_nonzero(result.mask[30:60, 40:90])), 0)
+
     def test_several_scenes_stay_equivalent(self) -> None:
         for seed in (1, 7, 4242):
             with self.subTest(seed=seed):
@@ -111,6 +137,56 @@ class CleanupEquivalenceTests(unittest.TestCase):
 
 
 class CleanupContractTests(unittest.TestCase):
+    def test_sparse_routing_evidence_is_released_after_cleanup(self) -> None:
+        image, inpainted, mask = _scene()
+        job = InpaintCleanupInput(
+            image=image,
+            inpaint_input_img=inpainted,
+            mask=mask,
+            mask_details={},
+            inpaint_blocks=[],
+            config=None,
+            page_label="1/1",
+            routing_evidence=(
+                BlockInpaintEvidence(
+                    block_id="b0",
+                    block_index=0,
+                    source_owned=MaskPatch(
+                        (30, 20, 90, 60),
+                        mask[20:60, 30:90],
+                    ),
+                ),
+            ),
+        )
+
+        result = run_inpaint_cleanup(job)
+
+        self.assertEqual(result.cleanup_stats["routing_evidence_block_count"], 1)
+        self.assertEqual(job.routing_evidence, ())
+
+    def test_product_job_never_calls_autonomous_residue_cleanup(self) -> None:
+        image, inpainted, mask = _scene()
+        with mock.patch(
+            "modules.utils.inpaint_cleanup.refine_bubble_residue_inpaint",
+            side_effect=AssertionError("autonomous cleanup must stay retired"),
+        ):
+            result = run_inpaint_cleanup(
+                InpaintCleanupInput(
+                    image=image,
+                    inpaint_input_img=inpainted,
+                    mask=mask,
+                    mask_details={},
+                    inpaint_blocks=[object()],
+                    config=None,
+                    page_label="1/1",
+                )
+            )
+
+        self.assertEqual(
+            result.cleanup_stats["autonomous_residue_cleanup"],
+            "disabled",
+        )
+
     def test_the_result_is_contiguous_uint8(self) -> None:
         # 하류가 이 배열을 그대로 저장하고 해시한다.
         image, inpainted, mask = _scene()

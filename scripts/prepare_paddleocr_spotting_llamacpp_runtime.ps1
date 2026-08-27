@@ -21,6 +21,8 @@ param(
         'comic-translate-paddleocr-vl-spotting-llamacpp-models-v2'
     ),
 
+    [string]$ImageRef = '',
+
     [ValidateRange(1024, 65535)]
     [int]$SmokePort = 18085,
 
@@ -30,7 +32,7 @@ param(
     [ValidateRange(0, 65536)]
     [int]$MaximumBackgroundGpuMiB = 2048,
 
-    [int64]$MinimumFreeBytes = 5368709120,
+    [int64]$MinimumFreeBytes = 0,
 
     [switch]$SkipFreeSpaceCheck
 )
@@ -38,6 +40,7 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeDocker.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Force
 
 $PreparationVersion = 2
@@ -46,12 +49,12 @@ $ReadyManifestName = (
     '.comic-translate-paddleocr-vl-spotting-llamacpp-ready-v2.json'
 )
 $RuntimeName = 'PaddleOCR-VL-Spotting-llama.cpp'
-$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
 # CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
-$SupportedImageRefs = @(
-    'ghcr.io/ggml-org/llama.cpp:server-cuda13',
-    'ghcr.io/ggml-org/llama.cpp:server-cuda'
-)
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
+$ImageRef = Resolve-ManagedLlamaCppImageRef `
+    -RequestedImage $ImageRef `
+    -RuntimeOverride $env:PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE
+$SupportedImageRefs = $ImagePolicy.Supported
 $ManagedContainerName = 'paddleocr-spotting-llamacpp'
 $ModelAlias = 'PaddleOCR-VL-1.6-Spotting'
 $SpottingPrompt = 'Spotting:'
@@ -104,64 +107,6 @@ $ModelSpecs = @(
     }
 )
 
-if ($VolumeName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
-    throw "Invalid Docker volume name: $VolumeName"
-}
-if (-not (Test-Path -LiteralPath $PythonExecutable -PathType Leaf)) {
-    throw (
-        'Supported Windows Python environment was not found: ' +
-        $PythonExecutable
-    )
-}
-if (-not (Test-Path -LiteralPath $DeriveScript -PathType Leaf)) {
-    throw "Spotting projector derivation tool was not found: $DeriveScript"
-}
-
-$DockerCommand = Get-Command 'docker.exe' -ErrorAction SilentlyContinue
-if ($null -eq $DockerCommand) {
-    $DockerCommand = Get-Command 'docker' -ErrorAction Stop
-}
-$DockerExecutable = $DockerCommand.Source
-
-function ConvertTo-NativeArgument {
-    param([AllowEmptyString()][string]$Argument)
-
-    if (
-        -not [string]::IsNullOrEmpty($Argument) -and
-        $Argument -notmatch '[\s"]'
-    ) {
-        return $Argument
-    }
-    $Builder = [System.Text.StringBuilder]::new()
-    [void]$Builder.Append([char]34)
-    $BackslashCount = 0
-    foreach ($Character in $Argument.ToCharArray()) {
-        if ($Character -eq [char]92) {
-            $BackslashCount += 1
-            continue
-        }
-        if ($Character -eq [char]34) {
-            [void]$Builder.Append(
-                [char]92,
-                (($BackslashCount * 2) + 1)
-            )
-            [void]$Builder.Append([char]34)
-            $BackslashCount = 0
-            continue
-        }
-        if ($BackslashCount -gt 0) {
-            [void]$Builder.Append([char]92, $BackslashCount)
-            $BackslashCount = 0
-        }
-        [void]$Builder.Append($Character)
-    }
-    if ($BackslashCount -gt 0) {
-        [void]$Builder.Append([char]92, ($BackslashCount * 2))
-    }
-    [void]$Builder.Append([char]34)
-    return $Builder.ToString()
-}
-
 function Invoke-NativeResult {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
@@ -205,77 +150,6 @@ function Invoke-NativeResult {
     }
 }
 
-function Invoke-DockerResult {
-    param([Parameter(Mandatory = $true)][string[]]$Arguments)
-
-    # PowerShell here-strings carry CRLF line endings. The container's /bin/sh is
-    # dash, which reads a trailing CR as part of the token and dies on the first
-    # line with "set: Illegal option -". A CR is never meaningful in a docker
-    # argument, so normalize every argument in one place.
-    $NormalizedArguments = @(
-        $Arguments | ForEach-Object { [string]$_ -replace "`r`n", "`n" }
-    )
-    return Invoke-NativeResult `
-        -Executable $DockerExecutable `
-        -Arguments $NormalizedArguments
-}
-
-function Invoke-Docker {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [switch]$ShowOutput
-    )
-    $Result = Invoke-DockerResult -Arguments $Arguments
-    if ($ShowOutput -and -not [string]::IsNullOrWhiteSpace($Result.Output)) {
-        Write-Host $Result.Output
-    }
-    if ($Result.ExitCode -ne 0) {
-        throw (
-            "Docker command failed (exit={0}): docker {1}`n{2}" -f
-            $Result.ExitCode,
-            ($Arguments -join ' '),
-            $Result.Output
-        )
-    }
-    return $Result.Output.Trim()
-}
-
-function Get-PinnedImageId {
-    $Inspect = Invoke-DockerResult -Arguments @(
-        'image', 'inspect', '--format', '{{.Id}}', $ImageRef
-    )
-    if (
-        $Inspect.ExitCode -ne 0 -or
-        [string]::IsNullOrWhiteSpace($Inspect.Output)
-    ) {
-        Write-Host "Pulling the pinned llama.cpp image once: $ImageRef"
-        Invoke-Docker -Arguments @('pull', $ImageRef) -ShowOutput |
-            Out-Null
-        $Inspect = Invoke-DockerResult -Arguments @(
-            'image', 'inspect', '--format', '{{.Id}}', $ImageRef
-        )
-    }
-    if (
-        $Inspect.ExitCode -ne 0 -or
-        [string]::IsNullOrWhiteSpace($Inspect.Output)
-    ) {
-        throw "Unable to inspect the pinned llama.cpp image: $ImageRef"
-    }
-    return $Inspect.Output.Trim()
-}
-
-function Assert-ManagedContainerStopped {
-    $Inspect = Invoke-DockerResult -Arguments @(
-        'inspect', '--format', '{{.State.Running}}', $ManagedContainerName
-    )
-    if ($Inspect.ExitCode -eq 0 -and $Inspect.Output.Trim() -eq 'true') {
-        throw (
-            "$ManagedContainerName is running. Stop the app normally, " +
-            'then prepare the Spotting model volume again.'
-        )
-    }
-}
-
 function Assert-BackgroundGpuUsage {
     if ($MaximumBackgroundGpuMiB -le 0) {
         return
@@ -309,63 +183,6 @@ function Assert-BackgroundGpuUsage {
             "$UsedMiB MiB > $MaximumBackgroundGpuMiB MiB."
         )
     }
-}
-
-function Assert-VolumeLabels {
-    $LabelsText = Invoke-Docker -Arguments @(
-        'volume', 'inspect', '--format', '{{json .Labels}}', $VolumeName
-    )
-    $Labels = $LabelsText | ConvertFrom-Json
-    if (
-        [string]$Labels.'comic-translate.runtime' -ne $RuntimeName -or
-        [int]$Labels.'comic-translate.preparation-version' -ne
-            $PreparationVersion
-    ) {
-        throw (
-            "PaddleOCR-VL Spotting volume labels do not match: " +
-            "$VolumeName. Use a new versioned volume name."
-        )
-    }
-}
-
-function Get-VolumeFileHash {
-    param(
-        [Parameter(Mandatory = $true)][string]$FileName,
-        [switch]$AllowMissing
-    )
-    $Shell = if ($AllowMissing) {
-        'if test -f "/models/$MODEL_FILE"; then sha256sum "/models/$MODEL_FILE" | cut -d " " -f 1; fi'
-    }
-    else {
-        'set -eu; test -f "/models/$MODEL_FILE"; sha256sum "/models/$MODEL_FILE" | cut -d " " -f 1'
-    }
-    $Result = Invoke-DockerResult -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "MODEL_FILE=$FileName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', $Shell
-    )
-    if ($Result.ExitCode -ne 0) {
-        if ($AllowMissing) {
-            return ''
-        }
-        throw "Volume SHA-256 verification failed: $FileName`n$($Result.Output)"
-    }
-    return $Result.Output.Trim().ToLowerInvariant()
-}
-
-function Read-ReadyManifest {
-    $ManifestText = Invoke-Docker -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "READY_MANIFEST=$ReadyManifestName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', 'set -eu; cat "/models/$READY_MANIFEST"'
-    )
-    return $ManifestText | ConvertFrom-Json
 }
 
 function Assert-ManifestContract {
@@ -433,50 +250,16 @@ function Assert-ManifestContract {
     }
 }
 
+Initialize-ManagedRuntimeDocker `
+    -ImageRef $ImageRef `
+    -VolumeName $VolumeName `
+    -ContainerName $ManagedContainerName `
+    -RuntimeName $RuntimeName `
+    -PreparationVersion $PreparationVersion `
+    -ReadyManifestName $ReadyManifestName `
+    -ModelSpecs $ModelSpecs
+
 $ImageId = Get-PinnedImageId
-
-function Get-VolumeFileSize {
-    param([Parameter(Mandatory = $true)][string]$FileName)
-
-    $Result = Invoke-DockerResult -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "MODEL_FILE=$FileName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', 'if test -f "/models/$MODEL_FILE"; then stat -c %s "/models/$MODEL_FILE"; fi'
-    )
-    if ($Result.ExitCode -ne 0) {
-        return [int64]-1
-    }
-    $Text = $Result.Output.Trim()
-    if ([string]::IsNullOrWhiteSpace($Text)) {
-        return [int64]-1
-    }
-    return [int64]$Text
-}
-
-function Test-VolumeHoldsEveryModel {
-    <#
-    .SYNOPSIS
-    Report whether the volume already holds every contracted file, by size.
-
-    .DESCRIPTION
-    Used only to let Auto pick between Prepare and Reseal. Size alone keeps this
-    from hashing large GGUFs twice. The authoritative judgement is the SHA-256
-    pass Reseal runs before the smoke, and a mismatch there still fails.
-    #>
-
-    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
-        return $false
-    }
-    foreach ($Spec in $ModelSpecs) {
-        if ((Get-VolumeFileSize -FileName $Spec.Name) -ne $Spec.Bytes) {
-            return $false
-        }
-    }
-    return $true
-}
 
 if ($Mode -eq 'Auto') {
     if (Test-VolumeHoldsEveryModel) {
@@ -553,7 +336,7 @@ Assert-ManagedContainerStopped
 Assert-BackgroundGpuUsage
 # Reseal leaves volume contents alone and copies nothing, so it needs neither a
 # source directory nor room for a copy.
-if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
+if (-not $IsReseal -and -not $SkipFreeSpaceCheck -and $MinimumFreeBytes -gt 0) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
     if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
@@ -600,7 +383,8 @@ try {
                 -RequestedPath $ModelDirectory `
                 -DownloadUrl ([string]$TargetSpec.DownloadUrl) `
                 -DownloadDirectory $DownloadDirectory `
-                -AllowDownload:$AllowDownload).Path
+                -AllowDownload:$AllowDownload `
+                -SkipFreeSpaceCheck:$SkipFreeSpaceCheck).Path
         }
         $TargetHash = (
             Get-FileHash -LiteralPath $TargetSourcePath -Algorithm SHA256
@@ -637,7 +421,8 @@ try {
                 -RequestedPath $ModelDirectory `
                 -DownloadUrl ([string]$ProjectorSpec.SourceDownloadUrl) `
                 -DownloadDirectory $DownloadDirectory `
-                -AllowDownload:$AllowDownload).Path
+                -AllowDownload:$AllowDownload `
+                -SkipFreeSpaceCheck:$SkipFreeSpaceCheck).Path
         }
         $DerivedProjectorPath = Join-Path $TemporaryRoot $ProjectorSpec.Name
         $Derive = Invoke-NativeResult `

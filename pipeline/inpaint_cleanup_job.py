@@ -27,12 +27,13 @@ import numpy as np
 
 from modules.utils.inpaint_cleanup import (
     apply_duplicate_bubble_inner_fill,
-    refine_bubble_residue_inpaint,
 )
 from modules.utils.inpaint_composite import (
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
+    normalize_edit_mask,
 )
+from modules.utils.inpaint_evidence import BlockInpaintEvidence
 
 
 @dataclass
@@ -48,6 +49,7 @@ class InpaintCleanupInput:
     page_label: str
     # 모델이 실제로 고친 영역. 없으면 마스크를 그대로 쓴다.
     inpaint_edit_mask: np.ndarray | None = None
+    routing_evidence: tuple[BlockInpaintEvidence, ...] = ()
 
 
 @dataclass
@@ -82,28 +84,33 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
             0,
         ).astype(np.uint8)
 
-    inpainted, mask, cleanup_stats = refine_bubble_residue_inpaint(
-        inpainted,
-        mask,
-        job.inpaint_blocks,
-        # 이 인자는 원 구현에서도 쓰이지 않는다. 계약을 바꾸지 않으려고 자리만
-        # 지킨다.
-        None,
-        job.config,
-        page_label=job.page_label,
-    )
+    cleanup_stats = {
+        "autonomous_residue_cleanup": "disabled",
+        "routing_evidence_block_count": len(job.routing_evidence),
+    }
     inpainted, mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
         inpainted,
         mask,
         job.mask_details,
         cleanup_stats,
     )
+    protected_corner_mask = normalize_edit_mask(
+        job.mask_details.get("protected_corner_mask"),
+        job.image.shape,
+    )
+    if np.any(protected_corner_mask):
+        mask = np.where(
+            (normalize_edit_mask(mask, job.image.shape) > 0)
+            & (protected_corner_mask <= 0),
+            255,
+            0,
+        ).astype(np.uint8)
 
     outside_before = count_changed_outside_edit_mask(job.image, inpainted, mask)
     inpainted = composite_with_edit_mask(job.image, inpainted, mask)
     outside_after = count_changed_outside_edit_mask(job.image, inpainted, mask)
 
-    return InpaintCleanupResult(
+    result = InpaintCleanupResult(
         inpaint_input_img=np.ascontiguousarray(inpainted, dtype=np.uint8),
         mask=np.ascontiguousarray(mask, dtype=np.uint8),
         cleanup_stats=cleanup_stats,
@@ -111,3 +118,8 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
         outside_after_restore=int(outside_after),
         worker_seconds=max(0.0, time.monotonic() - started),
     )
+    # Sparse routing evidence is page-scoped.  Release the caller-owned
+    # reference once cleanup/composite has consumed it so masks do not remain
+    # resident across the next page.
+    job.routing_evidence = ()
+    return result

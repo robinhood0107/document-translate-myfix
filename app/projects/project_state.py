@@ -66,7 +66,7 @@ def save_state_to_proj_file(
 
 def close_state_store(file_name: str | None = None) -> None:
     close_state_v2_cached_connection(file_name)
-    # Release cached pdfplumber objects to free memory.
+    # Release native PDF handles so Windows can unlock imported source files.
     close_pdf_cache()
     close_comic_cache()
 

@@ -138,6 +138,35 @@ def serialize_inpaint_block(block, index: int) -> dict:
     return {
         "index": int(index),
         "xyxy": [int(float(v)) for v in getattr(block, "xyxy", (0, 0, 0, 0))[:4]],
+        "mask_anchor_xyxy": (
+            [int(float(v)) for v in getattr(block, "_mask_anchor_xyxy", ())[:4]]
+            if getattr(block, "_mask_anchor_xyxy", None) is not None
+            else None
+        ),
+        "mask_anchor_source": str(
+            getattr(block, "_mask_anchor_source", "") or ""
+        ),
+        "mask_anchor_relation": str(
+            getattr(block, "_mask_anchor_relation", "") or ""
+        ),
+        "render_original_xyxy": (
+            [int(float(v)) for v in getattr(block, "_render_original_xyxy", ())[:4]]
+            if getattr(block, "_render_original_xyxy", None) is not None
+            else None
+        ),
+        "render_area_xyxy": (
+            [int(float(v)) for v in getattr(block, "_render_area_xyxy", ())[:4]]
+            if getattr(block, "_render_area_xyxy", None) is not None
+            else None
+        ),
+        "render_bubble_xyxy": (
+            [int(float(v)) for v in getattr(block, "_render_bubble_xyxy", ())[:4]]
+            if getattr(block, "_render_bubble_xyxy", None) is not None
+            else None
+        ),
+        "render_area_source": str(
+            getattr(block, "_render_area_source", "") or ""
+        ),
         "translation_raw": str(
             getattr(block, "_render_translation_raw", getattr(block, "translation", "")) or ""
         ),
@@ -220,6 +249,20 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "mask_actual_pixel_count": int(
             getattr(block, "mask_actual_pixel_count", 0) or 0
         ),
+        "detector_origin": str(
+            getattr(block, "detector_origin", "") or ""
+        ),
+        "detector_text_bbox": (
+            [
+                int(float(value))
+                for value in getattr(block, "detector_text_bbox", ())[:4]
+            ]
+            if getattr(block, "detector_text_bbox", None) is not None
+            else None
+        ),
+        "detector_provider": str(
+            getattr(block, "detector_provider", "") or ""
+        ),
         "inpaint_bboxes": inpaint_boxes,
         "text_free_erase_envelope_xyxy": (
             [int(v) for v in text_free_envelope]
@@ -298,6 +341,8 @@ def build_inpaint_debug_metadata(
     hard_box_reason_totals: dict | None = None,
     mask_quality_policy: str = "",
     mask_policy_bubble_clamp_applied_count: int = 0,
+    mask_policy_bubble_silhouette_applied_count: int = 0,
+    mask_policy_bubble_silhouette_fallback_count: int = 0,
     mask_policy_text_free_glyph_applied_count: int = 0,
     mask_policy_removed_pixel_count: int = 0,
     mask_policy_outside_bubble_removed_pixel_count: int = 0,
@@ -366,6 +411,12 @@ def build_inpaint_debug_metadata(
         "hard_box_reason_totals": dict(hard_box_reason_totals or {}),
         "mask_quality_policy": str(mask_quality_policy or ""),
         "mask_policy_bubble_clamp_applied_count": int(mask_policy_bubble_clamp_applied_count or 0),
+        "mask_policy_bubble_silhouette_applied_count": int(
+            mask_policy_bubble_silhouette_applied_count or 0
+        ),
+        "mask_policy_bubble_silhouette_fallback_count": int(
+            mask_policy_bubble_silhouette_fallback_count or 0
+        ),
         "mask_policy_text_free_glyph_applied_count": int(mask_policy_text_free_glyph_applied_count or 0),
         "mask_policy_removed_pixel_count": int(mask_policy_removed_pixel_count or 0),
         "mask_policy_outside_bubble_removed_pixel_count": int(mask_policy_outside_bubble_removed_pixel_count or 0),
@@ -399,6 +450,9 @@ def build_inpaint_debug_metadata(
         "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
         "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
         "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
+        "residue_pass_truncated_block_count": int(
+            cleanup_stats.get("residue_pass_truncated_block_count", 0) or 0
+        ),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "duplicate_bubble_inner_fill_applied": bool(duplicate_bubble_inner_fill.get("applied", False)),
         "duplicate_bubble_inner_fill_pixel_count": int(

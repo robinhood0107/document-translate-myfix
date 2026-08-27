@@ -24,6 +24,7 @@ The fork is maintained around a practical desktop workflow:
 - Inpainting add, exclude, and restore tools with saved mask and patch state.
 - TXT/MD source export and translation import with OCR and translation correction dictionaries.
 - CBZ/CBR comic archive import with lazy page materialization.
+- PDF import preserves one work image per page, copies safe embedded images without re-encoding, and renders complex pages at high resolution before OCR.
 - Bottom-left automatic pipeline status panel with overlay locking and latest-result preview.
 
 ## Supporting Features
@@ -88,10 +89,13 @@ Automatically downloaded by the app when missing:
 - Inpainting checkpoints such as `AOT`, `lama_large_512px`, and `lama_mpe`
 - OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
 
-Provided separately by the user or local runtime bundle:
-- Gemma GGUF files imported once into the versioned external model volume
-- HunyuanOCR GGUF and mmproj files
-- PaddleOCR VL Docker/runtime bundle files
+Downloaded by the Windows launcher on first use and prepared in verified external volumes:
+- the `gemma-4-26B-IQ4_NL.gguf` translation model
+- HunyuanOCR Q8 GGUF and mmproj
+- PaddleOCR VL 1.6 GGUF and mmproj
+
+PaddleOCR VL Spotting and MangaLMM remain optional on-demand runtimes and are
+not part of the default bootstrap.
 
 ## Release Policy
 
@@ -104,8 +108,9 @@ This repository now uses a strict `main + develop + tag` model.
   `comic-translate-vX.Y.Z-windows-launcher-source.zip` plus
   `SHA256SUMS.txt`.
 - The ZIP contains allowlisted product source, both first-run Windows
-  launchers, pinned CUDA12/CUDA13 requirements, runtime Compose/config files,
-  the Gemma/PaddleOCR preparation scripts, translations/resources, README files, and the
+  launchers, pinned CUDA12/CUDA13 requirements, the shared bootstrap,
+  runtime Compose/config files, Gemma/HunyuanOCR/PaddleOCR preparation scripts,
+  translations/resources, README files, and the
   license.
 - Virtual environments, models, caches, benchmark runners/results, local
   paths, and secrets are not bundled. The launchers install their supported
@@ -198,44 +203,48 @@ For a more explicit setup path, see:
 
 ### 1. Launch the application
 
-The launchers create or update their own local runtime environment on first run.
+Prerequisites are Windows 10/11 x64,
+[the official Python 3.12.10 Windows x64 installer](https://www.python.org/downloads/release/python-31210/),
+Docker Desktop with its
+WSL2 backend, an NVIDIA driver, and a CUDA-capable GPU. Docker Desktop must be
+installed; the launcher starts it and waits when its Linux engine is stopped.
+Keep the `py` launcher enabled in the Python installer. System Python is used
+only to create the isolated venv; global packages are never imported.
 
 
-Default Windows runtime:
+CUDA12 runtime end to end (Python cu128 plus llama.cpp `server-cuda`):
 
 ```bat
 run_comic.bat
 ```
 
-CUDA13 runtime:
+CUDA13 Python runtime (cu130; Docker prefers `server-cuda13` and automatically
+falls back to `server-cuda` when the installed driver cannot start it):
 
 ```bat
 run_comic_cuda13.bat
 ```
 
-### 2. Optional local translation runtime
+The first run is non-interactive. It prepares the selected venv, required app
+models, HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. Downloads resume from
+`models/managed-runtime-sources` under the installation folder and only size/SHA-verified files enter Docker
+volumes. Later runs skip verified work. Use `run_comic.bat --doctor` or
+`run_comic_cuda13.bat --doctor` for a read-only status report.
 
-Prepare the versioned Gemma model volume once from Windows PowerShell:
+### 2. Local translation runtime
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
-```
-
-Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute the model hash, run the same script with `-Mode Verify`.
+The default `Custom Local Server(Gemma)` setting uses the launcher's prepared
+read-only `gemma-4-26B-IQ4_NL.gguf` volume. Run
+`scripts/prepare_gemma_runtime.ps1 -Mode Verify` only for an explicit full hash check.
 
 The **User Dictionaries** settings page also controls the persistent block-result cache and exact translation memory. Result-cache entries use the complete translation/runtime identity. Exact source-to-translation pairs bypass Gemma only after explicit approval; imported approved entries require confirmation. These databases contain sensitive local text, remain in the app user-data directory, and are never silently deleted after a lock or corruption error. See [the translation-memory guide](docs/gemma/translation-memory.md).
 
-### 3. Optional local OCR runtimes
+### 3. Local OCR runtimes
 
-HunyuanOCR:
-
-```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
-```
-
-PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
+The launcher also prepares both runtimes used by
+`Optimal (HunyuanOCR / PaddleOCR VL)`. See the
+[HunyuanOCR guide](docs/hunyuan/local-server-ko.md) and
+[PaddleOCR VL bundle](paddleocr_vl_docker_files/README.md) for their contracts.
 
 The optional full-page `Spotting:` route has an independent projector,
 container, named volume, and cache identity. Its setup is documented in

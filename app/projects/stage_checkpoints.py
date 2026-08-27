@@ -52,19 +52,21 @@ PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 4
 PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 3
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
-DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
+DETECTION_POSTPROCESS_SCHEMA_VERSION = (
+    "comic-text-bubble-blocks-detector-provenance-v2"
+)
 DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
 DETECTION_MASK_SCHEMA_VERSION = "precomputed-mask-details-v1"
-DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
+DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v2"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
 OCR_POSTPROCESS_SCHEMA_VERSION = (
     "text-first-exact-canonical-quality-retry-drop-guards-v2"
 )
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
 INPAINT_INPUT_SCHEMA_VERSION = (
-    "semantic-action-mask-deterministic-ordered-input-brush-v4"
+    "semantic-action-mask-deterministic-ordered-input-brush-v5"
 )
-INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v2"
+INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v3"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
 INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
@@ -130,6 +132,9 @@ _DETECTION_BLOCK_FIELDS = (
     "cleanup_roi_xyxy",
     "mask_roi_xyxy",
     "text_class",
+    "detector_origin",
+    "detector_text_bbox",
+    "detector_provider",
     "angle",
     "tr_origin_point",
     "lines",
@@ -1296,6 +1301,12 @@ def build_inpaint_identity(
         "model": _json_safe(dict(model_identity)),
         "hd_strategy": _json_safe(dict(hd_strategy)),
         "mask_settings": _json_safe(dict(mask_settings)),
+        "positive_claim_model": {
+            "id": ModelID.CTD_POSITIVE_CLAIM_ONNX.value,
+            "sha256": _registered_model_sha256(
+                ModelID.CTD_POSITIVE_CLAIM_ONNX
+            ),
+        },
         "ocr_processing_contract_schema": (
             OCR_PROCESSING_CONTRACT_SCHEMA_VERSION
         ),

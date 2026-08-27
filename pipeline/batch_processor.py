@@ -51,7 +51,8 @@ from modules.utils.inpaint_debug import (
     export_inpaint_debug_artifacts,
     has_debug_exports,
 )
-from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill
+from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
@@ -1186,6 +1187,32 @@ class BatchProcessor:
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
+        pdf_preflight = getattr(
+            self.main_page.file_handler, "preflight_for_processing", None
+        )
+        pdf_count = (
+            pdf_preflight(image_list, should_cancel=self._is_cancelled)
+            if callable(pdf_preflight)
+            else 0
+        )
+        if pdf_count:
+            logger.info("Validated %d PDF-backed pages before batch processing.", pdf_count)
+            warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
+            if warnings:
+                pages = ", ".join(str(item["page_number"]) for item in warnings)
+                sizes = "; ".join(
+                    "{page_number}: {requested_width}×{requested_height} → "
+                    "{applied_width}×{applied_height}".format(**item)
+                    for item in warnings
+                )
+                self.main_page.batch_report_ctrl.register_preflight_warning(
+                    QCoreApplication.translate(
+                        "PdfImport", "PDF import memory limit applied"
+                    ),
+                    QCoreApplication.translate(
+                        "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
+                    ).replace("{pages}", pages).replace("{sizes}", sizes),
+                )
         try:
             if self.main_page.file_handler.should_pre_materialize(image_list):
                 count = self.main_page.file_handler.pre_materialize(image_list)
@@ -1874,6 +1901,13 @@ class BatchProcessor:
                         mask,
                         inpaint_blocks,
                         config=config,
+                        raw_source_mask=raw_mask,
+                        positive_claim_raw_mask=mask_details.get(
+                            "positive_claim_raw_mask"
+                        ),
+                        protected_corner_mask=mask_details.get(
+                            "protected_corner_mask"
+                        ),
                     )
                     inpaint_input_img = imk.convert_scale_abs(
                         inpaint_input_img
@@ -1889,18 +1923,19 @@ class BatchProcessor:
                             255,
                             0,
                         ).astype(np.uint8)
-                    (
-                        inpaint_input_img,
-                        mask,
-                        cleanup_stats,
-                    ) = refine_bubble_residue_inpaint(
-                        inpaint_input_img,
-                        mask,
-                        inpaint_blocks,
-                        self.inpainting.inpainter_cache,
-                        config,
-                        page_label=f"{index + 1}/{total_images}",
-                    )
+                    cleanup_stats = {
+                        "autonomous_residue_cleanup": "disabled",
+                        "routing_evidence_block_count": len(
+                            tuple(
+                                getattr(
+                                    self.inpainting,
+                                    "last_inpaint_evidence",
+                                    (),
+                                )
+                                or ()
+                            )
+                        ),
+                    }
                     self._report_residue_cleanup(
                         index=index,
                         total=total_images,
@@ -1917,6 +1952,23 @@ class BatchProcessor:
                         mask_details,
                         cleanup_stats,
                     )
+                    protected_corner_mask = normalize_edit_mask(
+                        mask_details.get("protected_corner_mask"),
+                        image.shape,
+                    )
+                    if np.any(protected_corner_mask):
+                        mask = np.where(
+                            (normalize_edit_mask(mask, image.shape) > 0)
+                            & (protected_corner_mask <= 0),
+                            255,
+                            0,
+                        ).astype(np.uint8)
+                    inpaint_input_img = composite_with_edit_mask(
+                        image,
+                        inpaint_input_img,
+                        mask,
+                    )
+                    self.inpainting.last_inpaint_evidence = ()
                 else:
                     raw_mask = np.zeros(
                         image.shape[:2],
