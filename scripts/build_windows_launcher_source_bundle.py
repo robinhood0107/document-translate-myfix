@@ -89,6 +89,7 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "docs/setup/quickstart.md",
         "docs/setup/quickstart-ko.md",
         "scripts/bootstrap_windows.ps1",
+        "scripts/lib/ManagedRuntimeDocker.psm1",
         "scripts/lib/ManagedRuntimeModelSource.psm1",
         "scripts/lib/WindowsBootstrap.psm1",
         "scripts/prepare_gemma_runtime.ps1",

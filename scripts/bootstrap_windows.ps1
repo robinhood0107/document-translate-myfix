@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $Root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'lib\WindowsBootstrap.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeDocker.psm1') -Force -DisableNameChecking
 $PythonContract = [pscustomobject]@{
     major = 3; minor = 12; implementation = 'CPython'; bits = 64
 }
@@ -23,23 +24,32 @@ $RuntimeConfig = @{
         venv = '.venv-win'
         requirements = 'requirements-cuda12.txt'
         expected_cuda = '12.8'
-        llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
-        fallback_llama_image = ''
     }
     cuda13 = [pscustomobject]@{
         venv = '.venv-win-cuda13'
         requirements = 'requirements-cuda13.txt'
         expected_cuda = '13.0'
-        llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
-        fallback_llama_image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
     }
 }[$Runtime]
 $ManagedRuntimes = @(
-    [pscustomobject]@{ label = 'HunyuanOCR'; script = 'scripts/prepare_hunyuanocr_llamacpp_runtime.ps1' },
-    [pscustomobject]@{ label = 'PaddleOCR VL'; script = 'scripts/prepare_paddleocr_llamacpp_runtime.ps1' },
-    [pscustomobject]@{ label = 'Gemma IQ4_NL'; script = 'scripts/prepare_gemma_runtime.ps1' }
+    [pscustomobject]@{
+        label = 'HunyuanOCR'
+        script = 'scripts/prepare_hunyuanocr_llamacpp_runtime.ps1'
+        volume = 'comic-translate-hunyuanocr-models-v2'
+    },
+    [pscustomobject]@{
+        label = 'PaddleOCR VL'
+        script = 'scripts/prepare_paddleocr_llamacpp_runtime.ps1'
+        volume = 'comic-translate-paddleocr-vl-llamacpp-models-v1'
+    },
+    [pscustomobject]@{
+        label = 'Gemma IQ4_NL'
+        script = 'scripts/prepare_gemma_runtime.ps1'
+        volume = 'comic-translate-gemma-models-v2'
+    }
 )
-$ActiveLlamaImage = [string]$RuntimeConfig.llama_image
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime $Runtime
+$ActiveLlamaImage = [string]$ImagePolicy.Preferred
 
 $RequiredFiles = @(
     'comic.py', 'controller.py', 'app\version.py', 'requirements-base.txt',
@@ -49,6 +59,7 @@ $RequiredFiles = @(
     'resources\translations\compiled\ct_ko.qm',
     'scripts\bootstrap_windows.ps1',
     'scripts\lib\WindowsBootstrap.psm1',
+    'scripts\lib\ManagedRuntimeDocker.psm1',
     'scripts\lib\ManagedRuntimeModelSource.psm1',
     'scripts\prepare_gemma_runtime.ps1',
     'scripts\prepare_hunyuanocr_llamacpp_runtime.ps1',
@@ -93,8 +104,8 @@ try {
     Write-Host 'Comic Translate Windows bootstrap' -ForegroundColor Cyan
     Write-BootstrapMessage "Runtime: $Runtime / Python environment: $($RuntimeConfig.venv)"
     Write-BootstrapMessage "llama.cpp preferred image: $ActiveLlamaImage"
-    if ($RuntimeConfig.fallback_llama_image) {
-        Write-BootstrapMessage "llama.cpp compatibility fallback: $($RuntimeConfig.fallback_llama_image)"
+    if ($ImagePolicy.Fallback) {
+        Write-BootstrapMessage "llama.cpp compatibility fallback: $($ImagePolicy.Fallback)"
     }
     Write-BootstrapMessage 'Automatic local runtimes: HunyuanOCR, PaddleOCR VL, Gemma IQ4_NL (~16.5 GiB source models)'
     if (-not $Doctor) { Write-BootstrapMessage "Log: $LogPath" }
@@ -177,21 +188,15 @@ try {
             }
             else { Write-BootstrapMessage 'Pinned packages need repair.' 'WARN' }
         }
-        foreach ($Image in @(
-            [string]$RuntimeConfig.llama_image,
-            [string]$RuntimeConfig.fallback_llama_image
-        ) | Where-Object { $_ }) {
+        foreach ($Image in @($ImagePolicy.Preferred, $ImagePolicy.Fallback) |
+            Where-Object { $_ }) {
             if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -eq 0) {
                 Write-BootstrapMessage "Docker image is installed: $Image" 'OK'
             } else {
                 Write-BootstrapMessage "Docker image is not installed yet: $Image" 'WARN'
             }
         }
-        foreach ($Volume in @(
-            'comic-translate-hunyuanocr-models-v2',
-            'comic-translate-paddleocr-vl-llamacpp-models-v1',
-            'comic-translate-gemma-models-v2'
-        )) {
+        foreach ($Volume in $ManagedRuntimes.volume) {
             if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('volume', 'inspect', $Volume)) -eq 0) {
                 Write-BootstrapMessage "Docker model volume is installed: $Volume" 'OK'
             } else {
@@ -241,8 +246,8 @@ try {
         Write-BootstrapMessage 'Managed model volume preparation skipped by smoke/test environment.' 'SKIP'
     } else {
         $ImageCandidates = @($ActiveLlamaImage)
-        if ($RuntimeConfig.fallback_llama_image) {
-            $ImageCandidates += [string]$RuntimeConfig.fallback_llama_image
+        if ($ImagePolicy.Fallback) {
+            $ImageCandidates += [string]$ImagePolicy.Fallback
         }
         $Provisioned = $false
         for ($ImageIndex = 0; $ImageIndex -lt $ImageCandidates.Count; $ImageIndex++) {
