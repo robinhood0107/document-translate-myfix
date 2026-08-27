@@ -393,6 +393,12 @@ class PrepareScriptContractTests(unittest.TestCase):
                 self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", script)
                 self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", script)
 
+    def test_prepare_does_not_mount_a_missing_volume_before_creation(self) -> None:
+        for name in PREPARE_SCRIPTS[:4]:
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertIn("$VolumeExistsBeforePrepare -and", script)
+
     def test_shared_model_download_retries_without_discarding_partial_data(self) -> None:
         source = (
             ROOT / "scripts" / "lib" / "ManagedRuntimeModelSource.psm1"
