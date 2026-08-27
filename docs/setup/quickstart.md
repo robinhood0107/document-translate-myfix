@@ -18,27 +18,30 @@ installing 3.12 x64 side by side is sufficient. The launcher prefers
 Keep the `py` launcher enabled in the installer. Adding Python to PATH is
 optional because `py -3.12` is checked first.
 
-## 2. Clone and launch
+## 2. Provision once
+
+Setup and launch are separate entry points. Setup does all the slow work; the
+run launcher does none of it.
 
 For the CUDA12 path (Python cu128 plus llama.cpp `server-cuda`):
 
 ```bat
-run_comic.bat
+setup.bat
 ```
 
 For the CUDA13 Python path (cu130; Docker prefers `server-cuda13` and falls
 back to `server-cuda` when the host driver cannot start the preferred image):
 
 ```bat
-run_comic_cuda13.bat
+setup_cuda13.bat
 ```
 
-The BAT files are separate entry points backed by one PowerShell bootstrap.
-System Python is used only to create the selected venv; global packages and
-Python environment variables are ignored. The launcher starts Docker Desktop
-when necessary and pulls the selected llama.cpp image only when it is missing.
+Both are backed by one PowerShell bootstrap. System Python is used only to
+create the selected venv; global packages and Python environment variables are
+ignored. Setup starts Docker Desktop when necessary and pulls the selected
+llama.cpp image only when it is missing.
 
-The non-interactive first run prepares:
+The non-interactive setup prepares:
 
 - the selected `.venv-win` or `.venv-win-cuda13` and pinned packages
 - required CTD/LaMa application models
@@ -46,11 +49,35 @@ The non-interactive first run prepares:
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf` (about 13.58 GiB)
 
+`setup_full.bat` and `setup_full_cuda13.bat` add MangaLMM and PaddleOCR VL
+Spotting to that list. The core tier is a subset of the full tier, so running
+`setup.bat` after `setup_full.bat` does not discard the extra volumes.
+
 Docker model sources are reused from `models\managed-runtime-sources` under
 the installation folder. Interrupted downloads resume on the
-next launch. Completion requires exact size/SHA-256 validation and real model
-load smokes. Use `run_comic.bat --doctor` or
-`run_comic_cuda13.bat --doctor` for a read-only report.
+next run. Completion requires exact size/SHA-256 validation and real model
+load smokes. Use `setup.bat --doctor` or
+`setup_cuda13.bat --doctor` for a read-only report.
+
+## 3. Launch
+
+```bat
+run_comic.bat
+```
+
+```bat
+run_comic_cuda13.bat
+```
+
+The run launchers only verify the venv and start the application, so a warm
+launch takes seconds. They never pull images or seal model volumes. If a
+runtime was never provisioned, the application prepares it on first use from
+inside the GUI, which works but is much slower than running setup first.
+
+Before creating a container, the CUDA13 launcher compares the image's
+`NVIDIA_REQUIRE_CUDA` value with the driver compatibility version. After setup,
+it reuses volumes whose ready manifest, image ID, and model sizes still match,
+so later launches do not repeat full hashes or GPU smokes.
 
 The CUDA13 path uses the official ONNX Runtime CUDA13 nightly feed.
 
@@ -89,7 +116,7 @@ llama.cpp user-space CUDA libraries live inside the selected Docker image. The
 NVIDIA display driver and Docker Desktop/WSL2 GPU passthrough remain system
 prerequisites and cannot be isolated inside a Python venv.
 
-## 3. Manual local runtime management
+## 4. Manual local runtime management
 
 Normal first runs do not require the commands below. Use them only for explicit
 full hash verification, custom volumes, or optional runtime maintenance.
@@ -187,10 +214,10 @@ records the result in the ready manifest. Use `-Mode Verify` to re-check only.
 
 ### When a prepared volume is suddenly rejected
 
-Every preparation script accepts `-Mode Auto`: it prepares an empty volume and
-reseals one that already holds the contracted files. When upstream refreshes the
-llama.cpp tag the image digest moves, so the models stay correct while the ready
-manifest no longer matches; `Auto` (internally `Reseal`) recovers that without
+Every preparation script accepts `-Mode Auto`: it immediately reuses a valid
+seal and prepares an empty volume. When upstream refreshes the llama.cpp tag the
+image digest moves, so the models stay correct while the ready manifest no
+longer matches; only then does `Auto` choose `Reseal` and recover without
 the original source files. The app detects the same state and repairs it once on
 its own. See the Korean guide at
 [docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
@@ -204,7 +231,7 @@ environment names such as `LLAMA_CTX_SIZE`, which it shared with Gemma. It now
 uses the prepared volume and dedicated `HUNYUAN_OCR_LLAMA_*` names, so tuning
 one engine no longer changes another.
 
-## 4. Recommended app settings
+## 5. Recommended app settings
 
 - Workflow mode: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
@@ -223,7 +250,7 @@ Routing summary:
 - Chinese -> `HunyuanOCR`
 - Japanese / other languages -> `PaddleOCR VL`
 
-## 5. Optional ntfy notifications
+## 6. Optional ntfy notifications
 
 Open:
 
@@ -244,7 +271,7 @@ Official ntfy references:
 - [ntfy publish docs](https://docs.ntfy.sh/publish/)
 - [ntfy config docs](https://docs.ntfy.sh/config/)
 
-## 6. Upstream model/runtime references used by this product
+## 7. Upstream model/runtime references used by this product
 
 Detection / masking:
 
@@ -269,14 +296,14 @@ Inpainting:
 - [lama_mpe](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3)
 - [MI-GAN](https://github.com/Sanster/models/releases/tag/migan)
 
-## 7. Related docs
+## 8. Related docs
 
 - [/README.md](/README.md)
 - [/README_ko.md](/README_ko.md)
 - [/docs/gemma/local-server-ko.md](/docs/gemma/local-server-ko.md)
 - [/docs/hunyuan/local-server-ko.md](/docs/hunyuan/local-server-ko.md)
 
-## 8. Official Windows release packages
+## 9. Official Windows release packages
 
 Official Windows release packages are published only from `vX.Y.Z` tags that point to commits already contained in `main`.
 

@@ -34,7 +34,12 @@ param(
 
     [int64]$MinimumFreeBytes = 0,
 
-    [switch]$SkipFreeSpaceCheck
+    [switch]$SkipFreeSpaceCheck,
+
+    # Interpreter used to derive the spotting projector. Empty falls back to the
+    # CUDA 12 environment. setup_full_cuda13.bat only creates .venv-win-cuda13,
+    # so the caller passes its own interpreter instead of assuming .venv-win.
+    [string]$PythonExecutable = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,7 +68,9 @@ $SpottingImageMaxPixels = 1605632
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptRoot
 $DeriveScript = Join-Path $ScriptRoot 'derive_paddleocr_spotting_mmproj.py'
-$PythonExecutable = Join-Path $RepositoryRoot '.venv-win\Scripts\python.exe'
+if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
+    $PythonExecutable = Join-Path $RepositoryRoot '.venv-win\Scripts\python.exe'
+}
 
 $ModelSpecs = @(
     [pscustomobject][ordered]@{

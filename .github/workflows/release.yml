@@ -93,17 +93,18 @@ jobs:
               throw "Extracted bundle unexpectedly contains $venvName."
             }
           }
-          $cuda12 = Start-Process -FilePath $env:COMSPEC `
-            -ArgumentList @("/d", "/c", "call run_comic.bat") `
-            -WorkingDirectory $bundleRoot -Wait -NoNewWindow -PassThru
-          if ($cuda12.ExitCode -ne 0) {
-            throw "CUDA 12 launcher-source contract failed: $($cuda12.ExitCode)"
-          }
-          $cuda13 = Start-Process -FilePath $env:COMSPEC `
-            -ArgumentList @("/d", "/c", "call run_comic_cuda13.bat") `
-            -WorkingDirectory $bundleRoot -Wait -NoNewWindow -PassThru
-          if ($cuda13.ExitCode -ne 0) {
-            throw "CUDA 13 launcher-source contract failed: $($cuda13.ExitCode)"
+          $launchers = @(
+            "run_comic.bat", "run_comic_cuda13.bat",
+            "setup.bat", "setup_cuda13.bat",
+            "setup_full.bat", "setup_full_cuda13.bat"
+          )
+          foreach ($launcher in $launchers) {
+            $probe = Start-Process -FilePath $env:COMSPEC `
+              -ArgumentList @("/d", "/c", "call .\$launcher") `
+              -WorkingDirectory $bundleRoot -Wait -NoNewWindow -PassThru
+            if ($probe.ExitCode -ne 0) {
+              throw "$launcher launcher-source contract failed: $($probe.ExitCode)"
+            }
           }
           foreach ($venvName in @(".venv-win", ".venv-win-cuda13")) {
             if (Test-Path (Join-Path $bundleRoot $venvName)) {

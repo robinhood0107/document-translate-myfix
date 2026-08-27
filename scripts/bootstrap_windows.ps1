@@ -4,6 +4,7 @@ param(
     [ValidateSet('cuda12', 'cuda13')]
     [string]$Runtime,
     [switch]$SourceVerify,
+    [switch]$Full,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArguments = @()
 )
@@ -31,13 +32,16 @@ $RuntimeConfig = @{
         expected_cuda = '13.0'
     }
 }[$Runtime]
-$ManagedRuntimes = @(
+$AllManagedRuntimes = @(
     [pscustomobject]@{
         label = 'HunyuanOCR'
         script = 'scripts/prepare_hunyuanocr_llamacpp_runtime.ps1'
         volume = 'comic-translate-hunyuanocr-models-v2'
         runtime_name = 'HunyuanOCR-llama.cpp'
         preparation_version = 1
+        container = 'hunyuanocr-local-server'
+        ownership_label = 'com.comictranslate.hunyuanocr-model-volume'
+        tier = 'core'
     },
     [pscustomobject]@{
         label = 'PaddleOCR VL'
@@ -45,6 +49,9 @@ $ManagedRuntimes = @(
         volume = 'comic-translate-paddleocr-vl-llamacpp-models-v1'
         runtime_name = 'PaddleOCR-VL-llama.cpp'
         preparation_version = 1
+        container = 'paddleocr-llamacpp'
+        ownership_label = 'com.comictranslate.paddleocr-model-volume'
+        tier = 'core'
     },
     [pscustomobject]@{
         label = 'Gemma IQ4_NL'
@@ -52,7 +59,34 @@ $ManagedRuntimes = @(
         volume = 'comic-translate-gemma-models-v2'
         runtime_name = 'Gemma'
         preparation_version = 2
+        container = 'gemma-local-server'
+        ownership_label = 'comic-translate.runtime'
+        tier = 'core'
+    },
+    [pscustomobject]@{
+        label = 'MangaLMM'
+        script = 'scripts/prepare_mangalmm_llamacpp_runtime.ps1'
+        volume = 'comic-translate-mangalmm-models-v2'
+        runtime_name = 'MangaLMM-llama.cpp'
+        preparation_version = 2
+        container = 'mangalmm-local-server'
+        ownership_label = 'com.comictranslate.mangalmm-model-volume'
+        tier = 'full'
+    },
+    [pscustomobject]@{
+        label = 'PaddleOCR VL Spotting'
+        script = 'scripts/prepare_paddleocr_spotting_llamacpp_runtime.ps1'
+        volume = 'comic-translate-paddleocr-vl-spotting-llamacpp-models-v2'
+        runtime_name = 'PaddleOCR-VL-Spotting-llama.cpp'
+        preparation_version = 2
+        container = 'paddleocr-spotting-llamacpp'
+        ownership_label = 'com.comictranslate.paddleocr-spotting-model-volume'
+        tier = 'full'
     }
+)
+$ProvisioningTier = if ($Full) { 'full' } else { 'core' }
+$ManagedRuntimes = @(
+    $AllManagedRuntimes | Where-Object { $Full -or $_.tier -eq 'core' }
 )
 $ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime $Runtime
 $ActiveLlamaImage = [string]$ImagePolicy.Preferred
@@ -88,13 +122,13 @@ $BootstrapRoot = Join-Path $Root '.comic-bootstrap'
 $ManagedRuntimeStatePath = Join-Path $BootstrapRoot ("managed-runtimes-{0}.json" -f $Runtime)
 $ModelCache = Join-Path $Root 'models\managed-runtime-sources'
 $LogDirectory = Join-Path $Root 'logs\bootstrap'
-$LogPath = Join-Path $LogDirectory ("bootstrap-{0}-{1}.log" -f $Runtime, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$LogPath = Join-Path $LogDirectory ("setup-{0}-{1}-{2}.log" -f $Runtime, $ProvisioningTier, (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $VenvRoot = Join-Path $Root ([string]$RuntimeConfig.venv)
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $Lock = $null
 $TranscriptStarted = $false
 $VenvBackup = ''
-$TotalStages = 7
+$TotalStages = 6
 $DeveloperPythonOnly = [bool]$env:COMIC_BOOTSTRAP_ONLY
 $SkipRuntimeSetup = [bool]$env:COMIC_SKIP_STARTUP_MODELS
 $ExistingVenvValid = $false
@@ -115,7 +149,13 @@ try {
     if ($ImagePolicy.Fallback) {
         Write-BootstrapMessage "llama.cpp compatibility fallback: $($ImagePolicy.Fallback)"
     }
-    Write-BootstrapMessage 'Automatic local runtimes: HunyuanOCR, PaddleOCR VL, Gemma IQ4_NL (~16.5 GiB source models)'
+    Write-BootstrapMessage (
+        "Provisioning tier: $ProvisioningTier (" +
+        (@($ManagedRuntimes | ForEach-Object { [string]$_.label }) -join ', ') + ')'
+    )
+    if (-not $Full) {
+        Write-BootstrapMessage 'MangaLMM and PaddleOCR VL Spotting are not provisioned here; use setup_full.bat for those.'
+    }
     if (-not $Doctor) { Write-BootstrapMessage "Log: $LogPath" }
 
     Write-BootstrapStage 1 $TotalStages 'Checking Python 3.12 x64 and local paths'
@@ -293,21 +333,31 @@ try {
                     break
                 }
                 Set-BootstrapRuntimeEnvironment -LlamaImage $CandidateImage -VenvRoot $VenvRoot
-                Stop-BootstrapManagedContainer -Docker $Docker -Name 'hunyuanocr-local-server' -OwnershipLabel 'com.comictranslate.hunyuanocr-model-volume'
-                Stop-BootstrapManagedContainer -Docker $Docker -Name 'paddleocr-llamacpp' -OwnershipLabel 'com.comictranslate.paddleocr-model-volume'
-                Stop-BootstrapManagedContainer -Docker $Docker -Name 'gemma-local-server' -OwnershipLabel 'comic-translate.runtime'
+                foreach ($Managed in $ManagedRuntimes) {
+                    Stop-BootstrapManagedContainer `
+                        -Docker $Docker `
+                        -Name ([string]$Managed.container) `
+                        -OwnershipLabel ([string]$Managed.ownership_label)
+                }
                 foreach ($Managed in $ManagedRuntimes) {
                     $Script = Join-Path $Root ([string]$Managed.script)
+                    # The spotting projector is derived locally, so that script needs a
+                    # real interpreter. Hand it this runtime's venv rather than letting
+                    # it assume .venv-win, which does not exist for a cuda13-only setup.
+                    $PrepareExtraArguments = @()
+                    if ([string]$Managed.runtime_name -eq 'PaddleOCR-VL-Spotting-llama.cpp') {
+                        $PrepareExtraArguments = @('-PythonExecutable', $VenvPython)
+                    }
                     Write-BootstrapMessage "Preparing $($Managed.label) with $CandidateImage..."
                     Invoke-BootstrapRetry `
                         -Operation "$($Managed.label) preparation" `
                         -Attempts $(if ($HasFallback) { 1 } else { 3 }) `
                         -Action {
-                            Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments @(
+                            Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments (@(
                                 '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
                                 '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
                                 '-ImageRef', $CandidateImage
-                            ) -WorkingDirectory $Root
+                            ) + $PrepareExtraArguments) -WorkingDirectory $Root
                         }
                     Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
                 }
@@ -334,9 +384,10 @@ try {
         }
     }
 
-    Write-BootstrapStage 7 $TotalStages 'Launching Comic Translate'
-    Write-BootstrapMessage 'Bootstrap completed. Future launches reuse verified packages, downloads, images, and model volumes.' 'OK'
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments (@('-B', '-s', (Join-Path $Root 'comic.py')) + @($RemainingArguments)) -WorkingDirectory $Root -Quiet
+    Write-BootstrapMessage (
+        "Setup completed for tier '$ProvisioningTier'. Start the application with " +
+        $(if ($Runtime -eq 'cuda13') { 'run_comic_cuda13.bat' } else { 'run_comic.bat' }) + '.'
+    ) 'OK'
 }
 catch {
     if ($VenvBackup -and (Test-Path -LiteralPath $VenvBackup)) {
