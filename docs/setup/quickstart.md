@@ -26,7 +26,8 @@ For the CUDA12 path (Python cu128 plus llama.cpp `server-cuda`):
 run_comic.bat
 ```
 
-For the CUDA13 path (Python cu130 plus llama.cpp `server-cuda13`):
+For the CUDA13 Python path (cu130; Docker prefers `server-cuda13` and falls
+back to `server-cuda` when the host driver cannot start the preferred image):
 
 ```bat
 run_comic_cuda13.bat

@@ -218,7 +218,8 @@ CUDA12 runtime end to end (Python cu128 plus llama.cpp `server-cuda`):
 run_comic.bat
 ```
 
-CUDA13 runtime end to end (Python cu130 plus llama.cpp `server-cuda13`):
+CUDA13 Python runtime (cu130; Docker prefers `server-cuda13` and automatically
+falls back to `server-cuda` when the installed driver cannot start it):
 
 ```bat
 run_comic_cuda13.bat
