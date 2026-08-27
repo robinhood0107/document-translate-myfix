@@ -75,7 +75,7 @@ $TranscriptStarted = $false
 $VenvBackup = ''
 $TotalStages = 8
 $DeveloperPythonOnly = [bool]$env:COMIC_BOOTSTRAP_ONLY
-$UiSmokeOnly = [bool]$env:COMIC_SMOKE_EXIT_MS
+$SkipRuntimeSetup = [bool]$env:COMIC_SKIP_STARTUP_MODELS
 $ExistingVenvValid = $false
 $Python = $null
 
@@ -112,13 +112,13 @@ try {
             $VenvMinimumBytes = if ($Runtime -eq 'cuda12') { 8589934592 } else { 6442450944 }
             Assert-BootstrapFreeSpace -Path $Root -MinimumBytes $VenvMinimumBytes -Label 'Python runtime environment'
         }
-        if (-not $DeveloperPythonOnly -and -not $UiSmokeOnly) {
+        if (-not $DeveloperPythonOnly -and -not $SkipRuntimeSetup) {
             Test-BootstrapWritableDirectory -Path $ModelCache
         }
     }
 
     Write-BootstrapStage 2 $TotalStages 'Checking WSL, Docker Desktop, Compose, and NVIDIA GPU'
-    if ($DeveloperPythonOnly -or $UiSmokeOnly) {
+    if ($DeveloperPythonOnly -or $SkipRuntimeSetup) {
         Write-BootstrapMessage 'External runtime checks skipped by developer bootstrap/smoke mode.' 'SKIP'
         $Docker = ''
     } else {
@@ -219,14 +219,14 @@ try {
     }
 
     Write-BootstrapStage 5 $TotalStages 'Preparing required application models'
-    if (-not $env:COMIC_SKIP_STARTUP_MODELS -and -not $env:COMIC_SMOKE_EXIT_MS) {
+    if (-not $SkipRuntimeSetup) {
         Invoke-BootstrapRetry -Operation 'required application model preparation' -Attempts 3 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', '-c', 'from modules.utils.download import ensure_startup_runtime_models; ensure_startup_runtime_models(prefer_cuda=True)') -WorkingDirectory $Root
         }
     } else { Write-BootstrapMessage 'Application model preparation skipped by smoke/test environment.' 'SKIP' }
 
     Write-BootstrapStage 6 $TotalStages 'Ensuring the selected llama.cpp CUDA server image'
-    $SkipManagedBootstrap = [bool]$env:COMIC_SKIP_STARTUP_MODELS -or [bool]$env:COMIC_SMOKE_EXIT_MS
+    $SkipManagedBootstrap = $SkipRuntimeSetup
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed llama.cpp image preparation skipped by smoke/test environment.' 'SKIP'
     } else {

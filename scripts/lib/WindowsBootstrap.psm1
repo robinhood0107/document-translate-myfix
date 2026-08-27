@@ -146,7 +146,7 @@ function Resolve-BootstrapPython312 {
         catch { $Failures.Add("$($Command.Source): $($_.Exception.Message)") }
     }
     $Detail = if ($Failures.Count -gt 0) { " Candidates: " + ($Failures -join '; ') } else { '' }
-    throw ('Python 3.12 x64 (CPython) is required. Install it from python.org and enable the py launcher or PATH entry.' + $Detail)
+    throw ('Python 3.12 x64 (CPython) is required. Install the official 64-bit Python 3.12.10 package and enable the py launcher: https://www.python.org/downloads/release/python-31210/.' + $Detail)
 }
 
 function Enter-BootstrapLock {
