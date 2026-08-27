@@ -46,9 +46,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 업스트림이 지원 llama.cpp 태그를 갱신하면 모델은 멀쩡한데 manifest에 봉인된
 image identity만 어긋납니다. 이때는 `-Mode Reseal`이 원본 없이 스모크를 다시
 통과시키고 manifest만 다시 씁니다. 앱도 같은 상태를 스스로 감지해 한 번
-복구합니다. 자세한 내용은
-[관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
-참고하세요.
+복구합니다. 준비 스크립트를 직접 돌릴 때는 `-Mode Auto`가 볼륨 상태를 보고
+`Prepare`와 `Reseal` 중에 고릅니다.
 
 준비 스크립트의 공개 옵션은 아래와 같습니다.
 
@@ -150,6 +149,5 @@ batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같�
 
 벤치마크 preset, raw 결과, 보고서, 차트는 제품 브랜치가 아니라 `benchmarking/lab` 또는 Git 밖의 검증 로그 폴더에서 관리합니다.
 
-현재 모델·요청·runtime 후보의 최종 품질/속도 판정은
-[Optimal++ v1.3.0 Gemma 결정 기록](../performance-and-bugfix-audits/optimal-plus-v1.3.0/03-gemma-translation-and-model-decision-ko.md)을
-참고하세요.
+현재 모델·요청·runtime 후보의 최종 품질/속도 판정 기록과 sampler 캠페인 결과도
+`benchmarking/lab`의 벤치마크 문서 세트에서 관리합니다.
