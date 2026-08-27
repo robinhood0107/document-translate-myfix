@@ -383,6 +383,7 @@ class PrepareScriptContractTests(unittest.TestCase):
             with self.subTest(script=name):
                 script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
                 self.assertIn("[string]$ImageRef", script)
+                self.assertIn("[int64]$MinimumFreeBytes = 0", script)
                 self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", script)
                 self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", script)
 
@@ -393,6 +394,7 @@ class PrepareScriptContractTests(unittest.TestCase):
         self.assertIn("function Invoke-ManagedRuntimeDownloadAttempt", source)
         self.assertIn("[int]$MaximumAttempts = 5", source)
         self.assertIn("Resuming in", source)
+        self.assertIn("$RequiredBytes = $Bytes + 536870912L", source)
 
     def test_every_contracted_model_has_a_registered_download_source(self) -> None:
         # 원본이 없으면 자가복구가 볼륨을 채울 수 없다. 등록된 출처를 계약으로 고정해

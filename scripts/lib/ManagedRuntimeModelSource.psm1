@@ -318,7 +318,9 @@ function Resolve-ManagedRuntimeModelSource {
         # 내려받은 파일을 둘 위치. 기본값은 저장소의 `testmodel/`.
         [AllowEmptyString()][string]$DownloadDirectory = '',
 
-        [switch]$AllowDownload
+        [switch]$AllowDownload,
+
+        [switch]$SkipFreeSpaceCheck
     )
 
     $Sha256 = $Sha256.ToLowerInvariant()
@@ -439,6 +441,20 @@ function Resolve-ManagedRuntimeModelSource {
     }
 
     $Destination = Join-Path $TargetDirectory $FileName
+    if (-not $SkipFreeSpaceCheck) {
+        $DriveRoot = [System.IO.Path]::GetPathRoot($TargetDirectory)
+        $Drive = [System.IO.DriveInfo]::new($DriveRoot)
+        $RequiredBytes = $Bytes + 536870912L
+        if ($Drive.AvailableFreeSpace -lt $RequiredBytes) {
+            throw (
+                "Not enough free space for {0}: required={1:N2} GiB, available={2:N2} GiB, drive={3}" -f
+                $FileName,
+                ($RequiredBytes / 1GB),
+                ($Drive.AvailableFreeSpace / 1GB),
+                $DriveRoot
+            )
+        }
+    }
     Write-Host (
         "Downloading the registered model source ({0:N2} GiB): {1}" -f
         ($Bytes / 1GB),

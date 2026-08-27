@@ -218,7 +218,8 @@ run_comic_cuda13.bat
 ```
 
 첫 실행은 질문 없이 전용 venv, 앱 필수 모델, HunyuanOCR, PaddleOCR VL,
-Gemma IQ4_NL을 순서대로 준비합니다. 다운로드는 `%LOCALAPPDATA%`의 공유 cache에서
+Gemma IQ4_NL을 순서대로 준비합니다. 다운로드는 설치 폴더의
+`models/managed-runtime-sources` cache에서
 이어받고 크기와 SHA-256을 통과한 파일만 Docker volume에 넣습니다. 다음 실행은
 이미 검증된 항목을 건너뜁니다. 설치 상태만 읽기 전용으로 확인하려면
 `run_comic.bat --doctor` 또는 `run_comic_cuda13.bat --doctor`를 실행합니다.
