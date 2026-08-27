@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('cuda12', 'cuda13')]
@@ -36,16 +36,22 @@ $ManagedRuntimes = @(
         label = 'HunyuanOCR'
         script = 'scripts/prepare_hunyuanocr_llamacpp_runtime.ps1'
         volume = 'comic-translate-hunyuanocr-models-v2'
+        runtime_name = 'HunyuanOCR-llama.cpp'
+        preparation_version = 1
     },
     [pscustomobject]@{
         label = 'PaddleOCR VL'
         script = 'scripts/prepare_paddleocr_llamacpp_runtime.ps1'
         volume = 'comic-translate-paddleocr-vl-llamacpp-models-v1'
+        runtime_name = 'PaddleOCR-VL-llama.cpp'
+        preparation_version = 1
     },
     [pscustomobject]@{
         label = 'Gemma IQ4_NL'
         script = 'scripts/prepare_gemma_runtime.ps1'
         volume = 'comic-translate-gemma-models-v2'
+        runtime_name = 'Gemma'
+        preparation_version = 2
     }
 )
 $ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime $Runtime
@@ -79,6 +85,7 @@ if ($SourceVerify) {
 $Doctor = $RemainingArguments.Count -gt 0 -and $RemainingArguments[0] -eq '--doctor'
 if ($Doctor) { $RemainingArguments = @($RemainingArguments | Select-Object -Skip 1) }
 $BootstrapRoot = Join-Path $Root '.comic-bootstrap'
+$ManagedRuntimeStatePath = Join-Path $BootstrapRoot ("managed-runtimes-{0}.json" -f $Runtime)
 $ModelCache = Join-Path $Root 'models\managed-runtime-sources'
 $LogDirectory = Join-Path $Root 'logs\bootstrap'
 $LogPath = Join-Path $LogDirectory ("bootstrap-{0}-{1}.log" -f $Runtime, (Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -92,6 +99,7 @@ $DeveloperPythonOnly = [bool]$env:COMIC_BOOTSTRAP_ONLY
 $SkipRuntimeSetup = [bool]$env:COMIC_SKIP_STARTUP_MODELS
 $ExistingVenvValid = $false
 $Python = $null
+$HostCudaCompatibility = $null
 
 try {
     if (-not $Doctor) {
@@ -147,6 +155,10 @@ try {
         Ensure-DockerDesktopReady -Docker $Docker -ReadOnly:$Doctor
         Assert-DockerCompose -Docker $Docker
         Assert-NvidiaHost
+        $HostCudaCompatibility = Get-NvidiaCudaCompatibilityVersion
+        Write-BootstrapMessage (
+            "NVIDIA driver CUDA compatibility: $HostCudaCompatibility"
+        ) 'OK'
         Write-BootstrapMessage 'Docker Desktop, Compose, WSL2, and NVIDIA checks passed.' 'OK'
     }
 
@@ -254,6 +266,32 @@ try {
             $CandidateImage = $ImageCandidates[$ImageIndex]
             $HasFallback = $ImageIndex -lt ($ImageCandidates.Count - 1)
             try {
+                $Compatibility = Get-BootstrapDockerImageCudaCompatibility `
+                    -Docker $Docker `
+                    -Image $CandidateImage `
+                    -HostCudaVersion $HostCudaCompatibility
+                if (-not $Compatibility.Compatible) {
+                    Write-BootstrapMessage (
+                        "Skipping incompatible llama.cpp image ${CandidateImage}: " +
+                        "image requires CUDA >= $($Compatibility.RequiredCudaVersion), " +
+                        "installed driver supports CUDA $($Compatibility.HostCudaVersion)."
+                    ) 'WARN'
+                    continue
+                }
+                if (Test-BootstrapManagedRuntimeState `
+                    -Docker $Docker `
+                    -Path $ManagedRuntimeStatePath `
+                    -ImageRef $CandidateImage `
+                    -ImageId $Compatibility.ImageId `
+                    -ManagedRuntimes $ManagedRuntimes) {
+                    Write-BootstrapMessage (
+                        'Managed runtime seals, volumes, and image identity are unchanged; ' +
+                        'skipping model revalidation.'
+                    ) 'SKIP'
+                    $ActiveLlamaImage = $CandidateImage
+                    $Provisioned = $true
+                    break
+                }
                 Set-BootstrapRuntimeEnvironment -LlamaImage $CandidateImage -VenvRoot $VenvRoot
                 Stop-BootstrapManagedContainer -Docker $Docker -Name 'hunyuanocr-local-server' -OwnershipLabel 'com.comictranslate.hunyuanocr-model-volume'
                 Stop-BootstrapManagedContainer -Docker $Docker -Name 'paddleocr-llamacpp' -OwnershipLabel 'com.comictranslate.paddleocr-model-volume'
@@ -274,14 +312,19 @@ try {
                     Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
                 }
                 $ActiveLlamaImage = $CandidateImage
+                Write-BootstrapManagedRuntimeState `
+                    -Path $ManagedRuntimeStatePath `
+                    -ImageRef $CandidateImage `
+                    -ImageId $Compatibility.ImageId `
+                    -ManagedRuntimes $ManagedRuntimes
                 $Provisioned = $true
                 break
             }
             catch {
                 if (-not $HasFallback) { throw }
                 Write-BootstrapMessage (
-                    "The preferred llama.cpp image failed its real GPU smoke. " +
-                    "Retrying every managed runtime with the compatibility image: " +
+                    "The preferred llama.cpp image could not complete managed runtime preparation. " +
+                    "Retrying with the compatibility image: " +
                     $ImageCandidates[$ImageIndex + 1]
                 ) 'WARN'
             }
