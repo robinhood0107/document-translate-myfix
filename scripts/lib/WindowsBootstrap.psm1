@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 function Write-BootstrapMessage {
     param(
@@ -234,12 +234,217 @@ function Assert-NvidiaHost {
     }
 }
 
+function ConvertTo-BootstrapNativeArgument {
+    param([AllowEmptyString()][string]$Argument)
+
+    if (-not [string]::IsNullOrEmpty($Argument) -and $Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+    $Builder = [System.Text.StringBuilder]::new()
+    [void]$Builder.Append([char]34)
+    $BackslashCount = 0
+    foreach ($Character in $Argument.ToCharArray()) {
+        if ($Character -eq [char]92) {
+            $BackslashCount += 1
+            continue
+        }
+        if ($Character -eq [char]34) {
+            [void]$Builder.Append([char]92, (($BackslashCount * 2) + 1))
+            [void]$Builder.Append([char]34)
+            $BackslashCount = 0
+            continue
+        }
+        if ($BackslashCount -gt 0) {
+            [void]$Builder.Append([char]92, $BackslashCount)
+            $BackslashCount = 0
+        }
+        [void]$Builder.Append($Character)
+    }
+    if ($BackslashCount -gt 0) {
+        [void]$Builder.Append([char]92, ($BackslashCount * 2))
+    }
+    [void]$Builder.Append([char]34)
+    return $Builder.ToString()
+}
+
+function Invoke-BootstrapCapturedCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $StartInfo.FileName = $FilePath
+    $StartInfo.Arguments = ($Arguments | ForEach-Object {
+        ConvertTo-BootstrapNativeArgument -Argument $_
+    }) -join ' '
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.CreateNoWindow = $true
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    $Process = [System.Diagnostics.Process]::new()
+    $Process.StartInfo = $StartInfo
+    try {
+        if (-not $Process.Start()) { throw "Unable to start command: $FilePath" }
+        $OutputTask = $Process.StandardOutput.ReadToEndAsync()
+        $ErrorTask = $Process.StandardError.ReadToEndAsync()
+        $Process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = [int]$Process.ExitCode
+            Output = (@(
+                $OutputTask.GetAwaiter().GetResult().TrimEnd(),
+                $ErrorTask.GetAwaiter().GetResult().TrimEnd()
+            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n"
+        }
+    }
+    finally { $Process.Dispose() }
+}
+
+function Get-NvidiaCudaCompatibilityVersion {
+    $Command = Get-Command 'nvidia-smi.exe' -ErrorAction SilentlyContinue
+    if ($null -eq $Command) { $Command = Get-Command 'nvidia-smi' -ErrorAction SilentlyContinue }
+    if ($null -eq $Command) { throw 'NVIDIA driver tools were not found (nvidia-smi).' }
+
+    $Result = Invoke-BootstrapCapturedCommand -FilePath $Command.Source
+    if ($Result.ExitCode -ne 0) {
+        throw 'Unable to read NVIDIA driver CUDA compatibility from nvidia-smi.'
+    }
+
+    $Match = [regex]::Match($Result.Output, 'CUDA Version:\s*(?<version>\d+(?:\.\d+){1,2})')
+    if (-not $Match.Success) {
+        throw 'nvidia-smi did not report the NVIDIA driver CUDA compatibility version.'
+    }
+    return [version]$Match.Groups['version'].Value
+}
+
+function Get-BootstrapDockerImageCudaCompatibility {
+    param(
+        [Parameter(Mandatory = $true)][string]$Docker,
+        [Parameter(Mandatory = $true)][string]$Image,
+        [Parameter(Mandatory = $true)][version]$HostCudaVersion
+    )
+
+    if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -ne 0) {
+        Write-BootstrapMessage "Pulling llama.cpp image for compatibility inspection: $Image"
+        Invoke-BootstrapCommand -FilePath $Docker -Arguments @('pull', $Image)
+    }
+
+    $Inspect = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
+        'image', 'inspect', '--format', '{{.Id}}|{{json .Config.Env}}', $Image
+    )
+    if ($Inspect.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($Inspect.Output)) {
+        throw "Unable to inspect llama.cpp image CUDA requirements: $Image"
+    }
+    $InspectParts = $Inspect.Output -split '\|', 2
+    if ($InspectParts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($InspectParts[0])) {
+        throw "Unable to inspect llama.cpp image identity: $Image"
+    }
+
+    try { $Environment = $InspectParts[1] | ConvertFrom-Json }
+    catch { throw "Unable to parse llama.cpp image environment: $Image" }
+    $Requirement = @($Environment | Where-Object {
+        [string]$_ -match '^NVIDIA_REQUIRE_CUDA='
+    }) | Select-Object -First 1
+    $RequiredVersion = $null
+    if ($Requirement) {
+        $Match = [regex]::Match([string]$Requirement, '(?:=|\s)cuda>=(?<version>\d+(?:\.\d+){1,2})')
+        if ($Match.Success) { $RequiredVersion = [version]$Match.Groups['version'].Value }
+    }
+
+    return [pscustomobject]@{
+        Image = $Image
+        ImageId = $InspectParts[0].Trim()
+        HostCudaVersion = $HostCudaVersion
+        RequiredCudaVersion = $RequiredVersion
+        Compatible = $null -eq $RequiredVersion -or $HostCudaVersion -ge $RequiredVersion
+    }
+}
+
+function Test-BootstrapManagedRuntimeState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Docker,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ImageRef,
+        [Parameter(Mandatory = $true)][string]$ImageId,
+        [Parameter(Mandatory = $true)][object[]]$ManagedRuntimes
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $State = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        if (
+            [int]$State.schema_version -ne 1 -or
+            [string]$State.image_ref -ne $ImageRef -or
+            [string]$State.image_id -ne $ImageId -or
+            @($State.volumes).Count -ne @($ManagedRuntimes).Count
+        ) {
+            return $false
+        }
+        foreach ($Managed in $ManagedRuntimes) {
+            $Recorded = @($State.volumes | Where-Object {
+                [string]$_.name -eq [string]$Managed.volume
+            })
+            if ($Recorded.Count -ne 1) { return $false }
+            $Inspect = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
+                'volume', 'inspect', '--format', '{{json .Labels}}', [string]$Managed.volume
+            )
+            if ($Inspect.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($Inspect.Output)) {
+                return $false
+            }
+            $Labels = $Inspect.Output | ConvertFrom-Json
+            if (
+                [string]$Labels.'comic-translate.runtime' -ne [string]$Managed.runtime_name -or
+                [int]$Labels.'comic-translate.preparation-version' -ne [int]$Managed.preparation_version
+            ) {
+                return $false
+            }
+        }
+        return $true
+    }
+    catch { return $false }
+}
+
+function Write-BootstrapManagedRuntimeState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ImageRef,
+        [Parameter(Mandatory = $true)][string]$ImageId,
+        [Parameter(Mandatory = $true)][object[]]$ManagedRuntimes
+    )
+
+    $Directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    $Payload = [ordered]@{
+        schema_version = 1
+        image_ref = $ImageRef
+        image_id = $ImageId
+        volumes = @($ManagedRuntimes | ForEach-Object {
+            [ordered]@{
+                name = [string]$_.volume
+                runtime_name = [string]$_.runtime_name
+                preparation_version = [int]$_.preparation_version
+            }
+        })
+    }
+    $TemporaryPath = "$Path.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $Payload | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $TemporaryPath -Encoding UTF8
+        Move-Item -LiteralPath $TemporaryPath -Destination $Path -Force
+    }
+    finally {
+        Remove-Item -LiteralPath $TemporaryPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Stop-BootstrapManagedContainer {
     param(
         [Parameter(Mandatory = $true)][string]$Docker,
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$OwnershipLabel
     )
+    if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('inspect', $Name)) -ne 0) {
+        return
+    }
     $PreviousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
@@ -295,6 +500,8 @@ Export-ModuleMember -Function @(
     'Resolve-BootstrapPython312',
     'Enter-BootstrapLock', 'Test-BootstrapWritableDirectory', 'Assert-BootstrapFreeSpace',
     'Get-DockerExecutable', 'Test-DockerReady', 'Ensure-DockerDesktopReady',
-    'Assert-DockerCompose', 'Assert-NvidiaHost', 'Stop-BootstrapManagedContainer',
+    'Assert-DockerCompose', 'Assert-NvidiaHost', 'Get-NvidiaCudaCompatibilityVersion',
+    'Get-BootstrapDockerImageCudaCompatibility', 'Test-BootstrapManagedRuntimeState',
+    'Write-BootstrapManagedRuntimeState', 'Stop-BootstrapManagedContainer',
     'Set-BootstrapRuntimeEnvironment'
 )
