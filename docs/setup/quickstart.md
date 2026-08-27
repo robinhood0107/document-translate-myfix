@@ -192,8 +192,9 @@ reseals one that already holds the contracted files. When upstream refreshes the
 llama.cpp tag the image digest moves, so the models stay correct while the ready
 manifest no longer matches; `Auto` (internally `Reseal`) recovers that without
 the original source files. The app detects the same state and repairs it once on
-its own. See the Korean guide at
-[docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
+its own. `Reseal` leaves the volume contents alone, re-verifies the model
+SHA-256s, re-runs the GPU smoke against the current image, and rewrites only the
+manifest.
 
 Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and
 its immediate subdirectories first. The launcher instead supplies its shared
