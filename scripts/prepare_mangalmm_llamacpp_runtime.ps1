@@ -457,10 +457,16 @@ if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
 
 $PreparedSources = @()
 if (-not $IsReseal) {
+    $VolumeExistsBeforePrepare = (
+        Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)
+    ).ExitCode -eq 0
     foreach ($Spec in $ModelSpecs) {
         # 볼륨이 이미 계약된 파일을 담고 있으면 원본을 아예 찾지 않는다. 대형
         # GGUF 를 헛되이 내려받거나 해시하지 않기 위해서다.
-        if ((Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256) {
+        if (
+            $VolumeExistsBeforePrepare -and
+            (Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256
+        ) {
             Write-Host "Reusing verified volume file: $($Spec.Name)"
             continue
         }
