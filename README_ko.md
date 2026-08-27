@@ -24,6 +24,7 @@
 - 저장/불러오기까지 유지되는 인페인팅 Add / Exclude / Restore 도구.
 - OCR/번역 교정 사전이 포함된 TXT/MD 원문 export 및 번역 import.
 - lazy page materialization 기반의 CBZ/CBR 만화 아카이브 입력.
+- PDF 입력은 페이지마다 작업 이미지 하나를 유지하고, 안전한 내장 이미지는 재인코딩 없이 복사하며, 복합 페이지는 OCR 전에 고해상도로 렌더링합니다.
 - 좌하단 상태 패널, 오버레이 잠금, 최신 결과 미리보기가 결합된 자동 파이프라인 UI.
 
 ## 서브 기능
@@ -88,10 +89,13 @@ OCR:
 - `AOT`, `lama_large_512px`, `lama_mpe` 같은 인페인팅 체크포인트
 - `MangaOCR`, `Pororo OCR`, `PPOCRv5` 같은 OCR 체크포인트
 
-사용자가 별도로 준비하거나 로컬 런타임 번들이 제공하는 자산:
-- 버전이 지정된 external model volume에 한 번 가져오는 Gemma GGUF 파일
-- HunyuanOCR GGUF 및 mmproj 파일
-- PaddleOCR VL Docker/runtime bundle 파일
+Windows 런처가 첫 실행에 자동 다운로드하고 검증된 external volume에 준비하는 자산:
+- `gemma-4-26B-IQ4_NL.gguf` Gemma 번역 모델
+- HunyuanOCR Q8 GGUF 및 mmproj
+- PaddleOCR VL 1.6 GGUF 및 mmproj
+
+PaddleOCR VL Spotting과 MangaLMM은 기본 bootstrap에 포함하지 않으며, 해당
+선택 기능을 처음 사용할 때 기존 관리형 준비 경로가 처리합니다.
 
 ## 릴리스 정책
 
@@ -104,7 +108,8 @@ OCR:
   `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
   `SHA256SUMS.txt`
 - ZIP 포함 범위: allowlist에 든 제품 source, CUDA12/CUDA13 첫 실행
-  launcher·requirements, Docker Compose/config, Gemma/PaddleOCR 준비 스크립트,
+  launcher·requirements, 공통 bootstrap, Docker Compose/config,
+  Gemma/HunyuanOCR/PaddleOCR 준비 스크립트,
   번역/resources, README, LICENSE
 - ZIP 제외 범위: venv, 모델, 캐시, benchmark runner/raw 결과,
   로컬 절대경로, secret
@@ -195,44 +200,48 @@ OCR:
 
 ### 1. 앱 실행
 
-런처는 첫 실행 시 필요한 로컬 runtime 환경을 스스로 생성하거나 갱신합니다.
+준비물은 Windows 10/11 x64,
+[공식 Python 3.12.10 Windows x64](https://www.python.org/downloads/release/python-31210/),
+WSL2 기반 Docker Desktop,
+NVIDIA 드라이버와 CUDA 호환 GPU입니다. Docker Desktop은 설치되어 있어야 하며,
+꺼져 있으면 런처가 시작하고 준비될 때까지 기다립니다.
+Python installer에서는 `py` launcher를 포함하세요. 시스템 Python은 전용 venv
+생성에만 사용하고 전역 package는 가져오지 않습니다.
 
 
-기본 Windows 런타임:
+CUDA12 전체 런타임(Python cu128 + llama.cpp `server-cuda`):
 
 ```bat
 run_comic.bat
 ```
 
-CUDA13 런타임:
+CUDA13 Python 런타임(cu130, Docker는 `server-cuda13` 우선 후 드라이버가
+지원하지 않으면 `server-cuda` 자동 fallback):
 
 ```bat
 run_comic_cuda13.bat
 ```
 
+첫 실행은 질문 없이 전용 venv, 앱 필수 모델, HunyuanOCR, PaddleOCR VL,
+Gemma IQ4_NL을 순서대로 준비합니다. 다운로드는 설치 폴더의
+`models/managed-runtime-sources` cache에서
+이어받고 크기와 SHA-256을 통과한 파일만 Docker volume에 넣습니다. 다음 실행은
+이미 검증된 항목을 건너뜁니다. 설치 상태만 읽기 전용으로 확인하려면
+`run_comic.bat --doctor` 또는 `run_comic_cuda13.bat --doctor`를 실행합니다.
+
 ### 2. 로컬 번역 서버 사용
 
-Windows PowerShell에서 버전이 지정된 Gemma model volume을 한 번 준비합니다.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass `
-  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
-```
-
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
+앱 기본값인 `Custom Local Server(Gemma)`는 런처가 준비한 read-only volume의
+`gemma-4-26B-IQ4_NL.gguf`를 사용합니다. 전체 SHA-256을 수동으로 다시 검사할
+때만 `scripts/prepare_gemma_runtime.ps1 -Mode Verify`를 사용합니다.
 
 **사용자 사전** 설정에서는 영구 블록 결과 캐시와 정확 일치 번역 메모리도 관리합니다. 결과 캐시는 번역과 runtime의 전체 identity가 같은 경우에만 재사용합니다. 원문→번역 쌍은 사용자가 명시적으로 승인해야 Gemma를 우회하며, 승인 항목이 포함된 파일을 가져올 때도 확인을 요구합니다. DB에는 민감한 로컬 텍스트가 저장되며 앱 user-data 디렉터리에만 남습니다. 잠금·손상 오류가 나도 자동 삭제하지 않습니다. 자세한 내용은 [번역 메모리 가이드](docs/gemma/translation-memory-ko.md)를 참고하세요.
 
 ### 3. 로컬 OCR 서버 사용
 
-HunyuanOCR 실행:
-
-```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
-```
-
-PaddleOCR VL 런타임 기준 파일은 [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
+권장 `Optimal (HunyuanOCR / PaddleOCR VL)` 경로의 두 runtime도 런처가
+자동 준비합니다. 상세 계약은 [HunyuanOCR 문서](docs/hunyuan/local-server-ko.md)와
+[PaddleOCR VL 문서](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
 
 선택형 full-page `Spotting:` 경로는 projector·container·named volume·cache
 identity를 crop OCR과 분리합니다. 준비 방법은

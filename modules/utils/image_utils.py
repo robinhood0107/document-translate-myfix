@@ -15,14 +15,17 @@ from modules.masking import (
     build_protect_mask,
 )
 from modules.masking.protect_mask import ProtectMaskSettings
+from modules.masking.ctd_positive_claim import CTDPositiveClaimProvider
+from modules.utils.bubble_silhouette import extract_bubble_interior_cap_crop
+from modules.utils.inpaint_composite import normalize_edit_mask
 from modules.utils.inpainting_runtime import normalized_mask_refiner_settings
 from modules.utils.mask_inpaint_mode import (
     DEFAULT_MASK_INPAINT_MODE,
     normalize_mask_inpaint_mode,
 )
-from modules.utils.mask_roi import resolve_block_ctd_roi
+from modules.utils.mask_roi import resolve_block_ctd_roi, resolve_inpaint_text_xyxy
 
-MASK_POLICY_VERSION = "ctd_lama_mask_policy_v2"
+MASK_POLICY_VERSION = "ctd_lama_mask_policy_v3"
 MASK_DECISION_ACCEPTED = "accepted"
 MASK_DECISION_REVIEW = "review"
 MASK_CANDIDATE_SOURCE_CTD_REFINED = "ctd_refined"
@@ -86,12 +89,44 @@ def _allows_ctd_hard_box_rescue(block) -> bool:
     return str(getattr(block, "text_class", "") or "") != "text_free"
 
 
-def _build_candidate_window_mask(
+def release_protected_mask_for_explicit_additions(
+    protected_mask: np.ndarray | None,
+    automatic_mask: np.ndarray | None,
+    merged_mask: np.ndarray | None,
     image_shape: tuple[int, ...],
-    block_list,
 ) -> tuple[np.ndarray, int]:
+    """Let persisted positive brush input override automatic corner protection."""
+    protected = normalize_edit_mask(protected_mask, image_shape)
+    if not np.any(protected):
+        return protected, 0
+    automatic = normalize_edit_mask(automatic_mask, image_shape)
+    merged = normalize_edit_mask(merged_mask, image_shape)
+    explicit_additions = (merged > 0) & (automatic <= 0)
+    released = int(np.count_nonzero((protected > 0) & explicit_additions))
+    if released <= 0:
+        return protected, 0
+    updated = np.where(
+        (protected > 0) & ~explicit_additions,
+        255,
+        0,
+    ).astype(np.uint8)
+    return updated, released
+
+
+def _build_candidate_window_mask(
+    image_rgb: np.ndarray,
+    block_list,
+    *,
+    bubble_seed_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, int, np.ndarray, np.ndarray, int, int]:
+    image_shape = image_rgb.shape
     window_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    bubble_cap_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    bubble_cap_roi_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    protected_exclusion_mask = np.zeros(image_shape[:2], dtype=np.uint8)
     bubble_window_count = 0
+    bubble_silhouette_applied_count = 0
+    bubble_silhouette_fallback_count = 0
     for block in list(block_list or []):
         roi = resolve_block_ctd_roi(block, image_shape)
         if roi is None:
@@ -99,10 +134,87 @@ def _build_candidate_window_mask(
         x1, y1, x2, y2 = [int(v) for v in roi]
         if x2 <= x1 or y2 <= y1:
             continue
-        window_mask[y1:y2, x1:x2] = 255
-        if str(getattr(block, "text_class", "") or "") == "text_bubble" and getattr(block, "bubble_xyxy", None) is not None:
+        text_anchor = resolve_inpaint_text_xyxy(block, image_shape)
+        if text_anchor is not None:
+            tx1, ty1, tx2, ty2 = text_anchor
+            protected_exclusion_mask[ty1:ty2, tx1:tx2] = 255
+        is_bubble = (
+            str(getattr(block, "text_class", "") or "") == "text_bubble"
+            and getattr(block, "bubble_xyxy", None) is not None
+        )
+        if is_bubble:
             bubble_window_count += 1
-    return window_mask, bubble_window_count
+            bubble_seed = _build_block_bubble_seed_crop(
+                bubble_seed_mask,
+                block,
+                image_shape,
+            )
+            cap_crop = None
+            if bubble_seed is not None:
+                bubble_roi, seed_crop = bubble_seed
+                bx1, by1, bx2, by2 = bubble_roi
+                cap_crop = extract_bubble_interior_cap_crop(
+                    np.ascontiguousarray(image_rgb[by1:by2, bx1:bx2]),
+                    seed_crop,
+                )
+            if cap_crop is not None:
+                cap_crop = np.where(cap_crop > 0, 255, 0).astype(np.uint8)
+                window_mask[by1:by2, bx1:bx2] = cv2.bitwise_or(
+                    window_mask[by1:by2, bx1:bx2],
+                    cap_crop,
+                )
+                bubble_cap_mask[by1:by2, bx1:bx2] = cv2.bitwise_or(
+                    bubble_cap_mask[by1:by2, bx1:bx2],
+                    cap_crop,
+                )
+                bubble_cap_roi_mask[by1:by2, bx1:bx2] = 255
+                bubble_silhouette_applied_count += 1
+                continue
+            bubble_silhouette_fallback_count += 1
+        window_mask[y1:y2, x1:x2] = 255
+        protected_exclusion_mask[y1:y2, x1:x2] = 255
+    protected_corner_mask = np.where(
+        (bubble_cap_roi_mask > 0)
+        & (bubble_cap_mask <= 0)
+        & (protected_exclusion_mask <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    return (
+        window_mask,
+        bubble_window_count,
+        bubble_cap_mask,
+        protected_corner_mask,
+        bubble_silhouette_applied_count,
+        bubble_silhouette_fallback_count,
+    )
+
+
+def _build_block_bubble_seed_crop(
+    seed_mask: np.ndarray | None,
+    block,
+    image_shape: tuple[int, ...],
+) -> tuple[tuple[int, int, int, int], np.ndarray] | None:
+    if seed_mask is None:
+        return None
+    source = np.asarray(seed_mask)
+    if source.ndim == 3:
+        source = source[:, :, 0]
+    if source.shape[:2] != image_shape[:2]:
+        return None
+    bubble_roi = _normalize_xyxy_for_shape(
+        getattr(block, "bubble_xyxy", None),
+        image_shape,
+    )
+    if bubble_roi is None:
+        return None
+    x1, y1, x2, y2 = bubble_roi
+    crop = np.where(
+        source[y1:y2, x1:x2] > 0,
+        255,
+        0,
+    ).astype(np.uint8)
+    return bubble_roi, np.ascontiguousarray(crop)
 
 
 def _dilate_final_mask(mask: np.ndarray, size: int) -> np.ndarray:
@@ -243,7 +355,7 @@ def annotate_block_mask_attribution(
                 "bubble_panel_mask_source",
                 candidate_source or (MASK_CANDIDATE_SOURCE_CTD_REFINED if count > 0 else MASK_CANDIDATE_SOURCE_NONE),
             )
-        source_box = _normalize_xyxy_for_shape(getattr(block, "xyxy", None), image_shape)
+        source_box = resolve_inpaint_text_xyxy(block, image_shape)
         if bbox is not None and source_box is not None:
             source_w = max(1, source_box[2] - source_box[0])
             source_h = max(1, source_box[3] - source_box[1])
@@ -317,6 +429,42 @@ def _ctd_details(
         255,
         0,
     ).astype(np.uint8)
+    positive_claim_raw_mask = np.zeros(img.shape[:2], dtype=np.uint8)
+    positive_claim_runtime: dict[str, Any] = {
+        "status": "disabled",
+        "provider": "ctd_fixed1280_onnx",
+    }
+    has_detector_provenance = any(
+        str(getattr(block, "detector_origin", "") or "")
+        in {"direct_text", "bubble_text_rescue"}
+        for block in block_list
+    )
+    if bool(cfg.get("positive_text_evidence_enabled", True)) and has_detector_provenance:
+        try:
+            positive_provider = CTDPositiveClaimProvider(
+                device=str(cfg.get("ctd_device", "cuda") or "cuda"),
+                detect_size=int(cfg.get("positive_claim_detect_size", 1280) or 1280),
+                max_batch_size=int(
+                    cfg.get("ctd_det_rearrange_max_batches", 4) or 4
+                ),
+            )
+            positive_result = positive_provider.infer(img)
+            positive_claim_raw_mask = positive_result.raw_mask
+            positive_claim_runtime = {
+                "status": "completed",
+                "provider": "ctd_fixed1280_onnx",
+                "providers": list(positive_result.providers),
+                "detect_size": int(positive_result.detect_size),
+                "model_sha256": positive_result.model_sha256,
+                "model_opset": int(positive_result.model_opset),
+                "pixel_count": int(np.count_nonzero(positive_result.raw_mask)),
+            }
+        except Exception as exc:
+            positive_claim_runtime = {
+                "status": "failed",
+                "provider": "ctd_fixed1280_onnx",
+                "error_type": type(exc).__name__,
+            }
     protect_mask = build_protect_mask(
         img,
         block_list,
@@ -370,6 +518,8 @@ def _ctd_details(
 
     details = {
         "raw_mask": raw_mask,
+        "positive_claim_raw_mask": positive_claim_raw_mask,
+        "positive_claim_runtime": positive_claim_runtime,
         "refined_mask": refined_mask,
         "protect_mask": np.where(np.asarray(protect_mask) > 0, 255, 0).astype(np.uint8),
         "ctd_or_mask_pixel_count": int(np.count_nonzero(ctd_or_mask)),
@@ -457,6 +607,11 @@ def generate_mask(
         details = dict(legacy_details)
         empty_mask = np.zeros(img.shape[:2], dtype=np.uint8)
         details["raw_mask"] = empty_mask.copy()
+        details["positive_claim_raw_mask"] = empty_mask.copy()
+        details["positive_claim_runtime"] = {
+            "status": "unavailable",
+            "provider": "ctd_fixed1280_onnx",
+        }
         details["refined_mask"] = empty_mask.copy()
         details["protect_mask"] = empty_mask.copy()
         details["final_mask_pre_expand"] = empty_mask.copy()
@@ -505,7 +660,18 @@ def generate_mask(
         details["final_mask"] = final_mask
         details["final_mask_pixel_count"] = int(np.count_nonzero(final_mask))
     if str(details.get("mask_refiner", "") or "") == "ctd":
-        window_mask, bubble_window_count = _build_candidate_window_mask(img.shape, blk_list)
+        (
+            window_mask,
+            bubble_window_count,
+            bubble_cap_mask,
+            protected_corner_mask,
+            bubble_silhouette_applied_count,
+            bubble_silhouette_fallback_count,
+        ) = _build_candidate_window_mask(
+            img,
+            blk_list,
+            bubble_seed_mask=details.get("raw_mask"),
+        )
         if np.any(window_mask):
             current_mask = np.where(np.asarray(details.get("final_mask")) > 0, 255, 0).astype(np.uint8)
             clamped_mask = np.where((current_mask > 0) & (window_mask > 0), 255, 0).astype(np.uint8)
@@ -519,6 +685,14 @@ def generate_mask(
                     int(details.get("mask_policy_outside_bubble_removed_pixel_count", 0) or 0) + removed
                 )
         details["mask_policy_bubble_clamp_applied_count"] = int(bubble_window_count)
+        details["bubble_interior_cap_mask"] = bubble_cap_mask
+        details["protected_corner_mask"] = protected_corner_mask
+        details["mask_policy_bubble_silhouette_applied_count"] = int(
+            bubble_silhouette_applied_count
+        )
+        details["mask_policy_bubble_silhouette_fallback_count"] = int(
+            bubble_silhouette_fallback_count
+        )
     details["final_mask_dilate_size"] = final_dilate_size
     annotate_block_mask_attribution(
         blk_list,

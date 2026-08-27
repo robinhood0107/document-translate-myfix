@@ -10,19 +10,27 @@
 
 ## 요구 모델 파일
 
-아래 두 파일이 저장소 루트의 `testmodel/` 폴더에 있어야 합니다.
+현재 제품 계약은 external named volume
+`comic-translate-hunyuanocr-models-v2`에 아래 두 파일을 준비합니다.
 
-- `HunyuanOCR-BF16.gguf`
-- `mmproj-HunyuanOCR-BF16.gguf`
+- `HunyuanOCR.Q8_0.gguf`
+- `HunyuanOCR.mmproj-Q8_0.gguf`
 
-현재 compose는 `../testmodel:/models:ro`를 마운트하고 아래 경로를 사용합니다.
+`run_comic.bat`과 `run_comic_cuda13.bat`의 첫 실행이 등록된 원본을 자동으로
+내려받아 크기·SHA-256·CUDA model-load smoke를 검증합니다. volume은 앱에서
+read-only로 마운트합니다.
 
-- `/models/HunyuanOCR-BF16.gguf`
-- `/models/mmproj-HunyuanOCR-BF16.gguf`
+## 수동 준비와 서버 실행
 
-## 서버 실행
+정상 launcher 실행에는 수동 명령이 필요하지 않습니다. 수동으로 준비하려면:
 
-저장소 루트에서 실행:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_hunyuanocr_llamacpp_runtime.ps1 `
+  -Mode Auto -AllowDownload
+```
+
+준비된 volume으로 서버만 직접 실행하려면 저장소 루트에서:
 
 ```bash
 docker compose -f hunyuanocr_docker_files/docker-compose.yaml pull --policy always
@@ -37,7 +45,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ## 기준 요약
 
 - image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
-- pull policy: `always`
+- pull policy: local image가 없을 때만 pull
 - OpenAI-compatible endpoint: `/v1/chat/completions`
 - health endpoint: `/health`
 - OCR request defaults: `temperature=0`, `top_k=1`, `repetition_penalty=1.0`

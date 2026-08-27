@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import posixpath
 import re
 import subprocess
 import sys
@@ -26,7 +27,9 @@ ALLOWLIST_FILES = frozenset(
         "README_ko.md",
         "docs/architecture/codebase-map-ko.md",
         "docs/runtime/managed-llamacpp-only-ko.md",
+        "docs/runtime/managed-volume-repair-ko.md",
         "docs/runtime/obsolete-vllm-runtime-manifest.json",
+        "docs/repo/github-rulesets-public-free-ko.md",
         "comic.py",
         "controller.py",
         "docker-compose.gemma-host-rollback.yaml",
@@ -37,7 +40,9 @@ ALLOWLIST_FILES = frozenset(
         "requirements.txt",
         "run_comic.bat",
         "run_comic_cuda13.bat",
+        "scripts/bootstrap_windows.ps1",
         "scripts/prepare_gemma_runtime.ps1",
+        "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1",
         "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
         "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
         "scripts/derive_paddleocr_spotting_mmproj.py",
@@ -49,6 +54,9 @@ ALLOWLIST_FILES = frozenset(
 )
 ALLOWLIST_PREFIXES = (
     "app/",
+    "docs/gemma/",
+    "docs/hunyuan/",
+    "docs/setup/",
     "hunyuanocr_docker_files/",
     "imkit/",
     "mangalmm_docker_files/",
@@ -58,6 +66,7 @@ ALLOWLIST_PREFIXES = (
     "paddleocr_vl_spotting_docker_files/",
     "pipeline/",
     "resources/",
+    "scripts/lib/",
 )
 REQUIRED_BUNDLE_FILES = frozenset(
     {
@@ -77,7 +86,14 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "requirements-cuda13.txt",
         "run_comic.bat",
         "run_comic_cuda13.bat",
+        "docs/setup/quickstart.md",
+        "docs/setup/quickstart-ko.md",
+        "scripts/bootstrap_windows.ps1",
+        "scripts/lib/ManagedRuntimeDocker.psm1",
+        "scripts/lib/ManagedRuntimeModelSource.psm1",
+        "scripts/lib/WindowsBootstrap.psm1",
         "scripts/prepare_gemma_runtime.ps1",
+        "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1",
         "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
         "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
         "scripts/derive_paddleocr_spotting_mmproj.py",
@@ -162,6 +178,12 @@ TEXT_SCAN_SUFFIXES = frozenset(
 CRLF_SUFFIXES = frozenset({".bat", ".ps1"})
 SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 APP_VERSION_RE = re.compile(rb'__version__\s*=\s*["\']([^"\']+)["\']')
+POWERSHELL_MODULE_RE = re.compile(
+    rb"Import-Module\s+\(Join-Path\s+\$PSScriptRoot\s+['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+MARKDOWN_LINK_RE = re.compile(rb"\]\(([^)]+)\)")
+NON_BUNDLE_DOCUMENT_LINKS = frozenset({"rules.md"})
 
 
 @dataclass(frozen=True)
@@ -315,6 +337,40 @@ def _scan_release_bytes(path: str, data: bytes) -> None:
             raise RuntimeError(f"Possible secret material found in release file: {path}")
 
 
+def validate_release_dependency_closure(files: dict[str, bytes]) -> None:
+    paths = set(files)
+    for path, data in files.items():
+        if path.lower().endswith(".ps1"):
+            parent = PurePosixPath(path).parent
+            for raw_target in POWERSHELL_MODULE_RE.findall(data):
+                target = str(parent / raw_target.decode("utf-8").replace("\\", "/"))
+                if target not in paths:
+                    raise RuntimeError(
+                        f"PowerShell module dependency is missing from release: {path} -> {target}"
+                    )
+
+    docs_to_check = {
+        "README.md",
+        "README_ko.md",
+        "docs/setup/quickstart.md",
+        "docs/setup/quickstart-ko.md",
+    }
+    for path in docs_to_check & paths:
+        parent = PurePosixPath(path).parent
+        for raw_target in MARKDOWN_LINK_RE.findall(files[path]):
+            target = raw_target.decode("utf-8").split("#", 1)[0].strip()
+            if not target or "://" in target or target.startswith("mailto:"):
+                continue
+            normalized = target.lstrip("/") if target.startswith("/") else str(parent / target)
+            normalized = posixpath.normpath(normalized)
+            if normalized in NON_BUNDLE_DOCUMENT_LINKS:
+                continue
+            if normalized not in paths:
+                raise RuntimeError(
+                    f"Markdown dependency is missing from release: {path} -> {normalized}"
+                )
+
+
 def _zip_datetime(epoch: int) -> tuple[int, int, int, int, int, int]:
     minimum = int(dt.datetime(1980, 1, 1, tzinfo=dt.timezone.utc).timestamp())
     maximum = int(dt.datetime(2107, 12, 31, 23, 59, 58, tzinfo=dt.timezone.utc).timestamp())
@@ -373,6 +429,7 @@ def build_release_bundle(
         data = normalize_release_bytes(entry.path, source_blobs[entry.path])
         _scan_release_bytes(entry.path, data)
         files[entry.path] = data
+    validate_release_dependency_closure(files)
 
     app_version = _read_app_version(files)
     if app_version != version:

@@ -110,15 +110,19 @@ print(json.dumps(payload, ensure_ascii=False))
 
 def verify_bootstrap(cfg: dict) -> None:
     command = f'set COMIC_BOOTSTRAP_ONLY=1 && call {cfg["bat"]}'
+    env = os.environ.copy()
+    env["COMIC_NO_PAUSE"] = "1"
     run_checked(
         ["cmd.exe", "/c", command],
         label=f"{cfg['label']} bootstrap launcher",
+        env=env,
     )
 
 
 def verify_source_contract(cfg: dict) -> None:
     env = os.environ.copy()
     env["COMIC_VERIFY_ONLY"] = "1"
+    env["COMIC_NO_PAUSE"] = "1"
     run_checked(
         ["cmd.exe", "/d", "/c", f"call {cfg['bat']}"],
         label=f"{cfg['label']} launcher-source contract",
@@ -133,10 +137,13 @@ def verify_smoke(cfg: dict) -> None:
         "set COMIC_SMOKE_EXIT_MS=1500 && "
         f"call {cfg['bat']}"
     )
+    env = os.environ.copy()
+    env["COMIC_NO_PAUSE"] = "1"
     run_checked(
         ["cmd.exe", "/c", command],
         timeout=900,
         label=f"{cfg['label']} startup smoke",
+        env=env,
     )
 
 

@@ -6,6 +6,7 @@ import hashlib
 import re
 import sys
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -63,6 +64,12 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             paths,
         )
         self.assertIn("scripts/verify_windows_runtime.py", paths)
+        self.assertIn("scripts/bootstrap_windows.ps1", paths)
+        self.assertIn("scripts/lib/WindowsBootstrap.psm1", paths)
+        self.assertIn("scripts/lib/ManagedRuntimeDocker.psm1", paths)
+        self.assertIn("scripts/lib/ManagedRuntimeModelSource.psm1", paths)
+        self.assertIn("scripts/prepare_hunyuanocr_llamacpp_runtime.ps1", paths)
+        self.assertIn("docs/setup/quickstart-ko.md", paths)
         self.assertNotIn("scripts/benchmark_cold_cache_finalization.py", paths)
         self.assertNotIn("scripts/build_windows_gpu_onefile.ps1", paths)
         self.assertFalse(any(path.startswith("tests/") for path in paths))
@@ -144,26 +151,74 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 self.assertFalse(any(name.lower().endswith(".gguf") for name in names))
 
     def test_launchers_offer_no_install_release_contract(self) -> None:
-        for launcher in ("run_comic.bat", "run_comic_cuda13.bat"):
+        expected_runtime = {
+            "run_comic.bat": "cuda12",
+            "run_comic_cuda13.bat": "cuda13",
+        }
+        for launcher, runtime in expected_runtime.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
             self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
-            self.assertIn("scripts\\prepare_gemma_runtime.ps1", text)
-            self.assertIn(
-                "scripts\\prepare_paddleocr_llamacpp_runtime.ps1",
-                text,
+            self.assertIn("scripts\\bootstrap_windows.ps1", text)
+            self.assertIn(f"-Runtime {runtime}", text)
+            self.assertNotIn("pip install", text)
+
+        bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("prepare_gemma_runtime.ps1", bootstrap)
+        self.assertIn("prepare_hunyuanocr_llamacpp_runtime.ps1", bootstrap)
+        self.assertIn("prepare_paddleocr_llamacpp_runtime.ps1", bootstrap)
+        self.assertNotIn("prepare_mangalmm_llamacpp_runtime.ps1", bootstrap)
+        self.assertNotIn("prepare_paddleocr_spotting_llamacpp_runtime.ps1", bootstrap)
+        module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("$env:PYTHONNOUSERSITE = '1'", module)
+        self.assertIn("$env:PYTHONHOME = ''", module)
+        self.assertIn("$env:PYTHONPATH = ''", module)
+        self.assertIn("include-system-site-packages", bootstrap)
+        self.assertIn("Docker model volume is not installed yet", bootstrap)
+        self.assertIn(
+            "$SkipRuntimeSetup = [bool]$env:COMIC_SKIP_STARTUP_MODELS",
+            bootstrap,
+        )
+        self.assertNotIn("$env:COMIC_SMOKE_EXIT_MS", bootstrap)
+        self.assertNotIn("llama.cpp Docker image pull", bootstrap)
+
+    def test_bootstrap_configuration_keeps_cuda_variants_separate(self) -> None:
+        bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("venv = '.venv-win'", bootstrap)
+        self.assertIn("venv = '.venv-win-cuda13'", bootstrap)
+        image_policy = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("llama.cpp:server-cuda'", image_policy)
+        self.assertIn("llama.cpp:server-cuda13'", image_policy)
+        self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
+        self.assertIn("preferred llama.cpp image failed", bootstrap)
+        self.assertLess(
+            bootstrap.index("label = 'HunyuanOCR'"),
+            bootstrap.index("label = 'PaddleOCR VL'"),
+        )
+        self.assertLess(
+            bootstrap.index("label = 'PaddleOCR VL'"),
+            bootstrap.index("label = 'Gemma IQ4_NL'"),
+        )
+        self.assertNotIn("windows_bootstrap.json", bootstrap)
+
+    def test_release_dependency_closure_rejects_missing_local_targets(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "PowerShell module dependency"):
+            release.validate_release_dependency_closure(
+                {
+                    "scripts/example.ps1": b"Import-Module (Join-Path $PSScriptRoot 'lib/Missing.psm1')",
+                }
             )
-            self.assertIn(
-                "scripts\\prepare_mangalmm_llamacpp_runtime.ps1",
-                text,
+        with self.assertRaisesRegex(RuntimeError, "Markdown dependency"):
+            release.validate_release_dependency_closure(
+                {"README.md": b"[setup](docs/setup/missing.md)"}
             )
-            self.assertIn(
-                "scripts\\prepare_paddleocr_spotting_llamacpp_runtime.ps1",
-                text,
-            )
-            self.assertIn("scripts\\verify_windows_runtime.py", text)
-            self.assertIn("resources\\translations\\compiled\\ct_ko.qm", text)
-            self.assertIn("pip==26.0.1", text)
-            self.assertIn("wheel==0.46.3", text)
 
     def test_runtime_requirements_are_exact_and_complete(self) -> None:
         for requirements_name, expected_cuda in (
@@ -174,7 +229,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 pinned = runtime_verifier.load_pinned_requirements(
                     [ROOT / requirements_name]
                 )
-                self.assertEqual(len(pinned), 35)
+                self.assertEqual(len(pinned), 36)
                 self.assertEqual(pinned["torch"][1], expected_cuda)
                 self.assertEqual(pinned["pillow"][1], "12.3.0")
                 self.assertEqual(pinned["setuptools"][1], "80.9.0")
@@ -182,6 +237,17 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 self.assertEqual(pinned["py7zr"][1], "1.1.3")
                 self.assertEqual(pinned["pyside6"][1], "6.11.0")
                 self.assertEqual(pinned["send2trash"][1], "2.1.0")
+                self.assertEqual(pinned["pikepdf"][1], "10.5.1")
+                self.assertEqual(pinned["pypdfium2"][1], "5.7.0")
+                self.assertNotIn("pdfplumber", pinned)
+
+    def test_pyproject_matches_pdf_runtime_pins(self) -> None:
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        dependencies = set(project["project"]["dependencies"])
+
+        self.assertIn("pikepdf==10.5.1", dependencies)
+        self.assertIn("pypdfium2==5.7.0", dependencies)
+        self.assertFalse(any(item.startswith("pdfplumber") for item in dependencies))
 
     def test_runtime_requirement_parser_rejects_floating_versions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

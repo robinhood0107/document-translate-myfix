@@ -20,6 +20,68 @@ from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageCon
 
 
 class InpainterReleaseTests(unittest.TestCase):
+    def test_targeted_release_includes_positive_claim_onnx_cache(self) -> None:
+        handler = InpaintingHandler(SimpleNamespace())
+        before = {
+            "process": {"available": False},
+            "driver": {"available": False, "primary": None},
+        }
+        gate = {
+            "required": True,
+            "measurement_available": True,
+            "observed": True,
+            "status": "observed",
+        }
+        positive_release = {
+            "cache_entry_count": 1,
+            "cuda_session_count": 1,
+            "cpu_session_count": 0,
+            "unknown_session_count": 0,
+            "expected_process_reclaim_mb": 0.0,
+            "untracked_gpu_resource_count": 1,
+            "gpu_release_expected": True,
+        }
+
+        with mock.patch(
+            "pipeline.inpainting.query_cuda_handoff_metrics",
+            return_value=before,
+        ), mock.patch(
+            "pipeline.inpainting.release_source_lama_cache",
+            return_value={
+                "cache_entry_count": 0,
+                "loaded_model_count": 0,
+                "gpu_loaded_model_count": 0,
+                "expected_process_reclaim_mb": 0.0,
+                "untracked_gpu_resource_count": 0,
+                "gpu_release_expected": False,
+            },
+        ), mock.patch(
+            "pipeline.inpainting.release_ctd_positive_claim_cache",
+            return_value=positive_release,
+        ) as release_positive, mock.patch(
+            "pipeline.inpainting.cleanup_python_cuda_memory",
+            return_value={"gc_collected": 0, "errors": []},
+        ), mock.patch(
+            "pipeline.inpainting.wait_for_vram_release",
+            return_value=gate,
+        ) as wait_for_release:
+            report = handler.release_inpainter_resources()
+
+        release_positive.assert_called_once_with()
+        self.assertEqual(report["positive_claim_release"], positive_release)
+        self.assertTrue(report["gpu_release_expected"])
+        self.assertEqual(report["untracked_gpu_resource_count"], 1)
+        wait_for_release.assert_called_once_with(
+            before,
+            gpu_release_expected=True,
+            expected_process_drop_mb=0.0,
+            untracked_gpu_resource_count=1,
+            driver_baseline=None,
+            timeout_sec=5.0,
+            poll_interval_sec=0.1,
+            min_drop_mb=16.0,
+        )
+
     def test_cpu_inpainter_does_not_acquire_gpu_lease(self) -> None:
         processor = object.__new__(StageBatchedProcessor)
         processor.main_page = SimpleNamespace(settings_page=object())

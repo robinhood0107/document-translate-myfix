@@ -18,13 +18,15 @@ param(
 
     [string]$VolumeName = 'comic-translate-mangalmm-models-v2',
 
+    [string]$ImageRef = '',
+
     [ValidateRange(1024, 65535)]
     [int]$SmokePort = 18085,
 
     [ValidateRange(30, 600)]
     [int]$SmokeTimeoutSec = 300,
 
-    [int64]$MinimumFreeBytes = 21474836480,
+    [int64]$MinimumFreeBytes = 0,
 
     [switch]$SkipFreeSpaceCheck
 )
@@ -32,18 +34,19 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeDocker.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Force
 
 $PreparationVersion = 2
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-mangalmm-ready-v2.json'
 $RuntimeName = 'MangaLMM-llama.cpp'
-$ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
 # CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
-$SupportedImageRefs = @(
-    'ghcr.io/ggml-org/llama.cpp:server-cuda13',
-    'ghcr.io/ggml-org/llama.cpp:server-cuda'
-)
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
+$ImageRef = Resolve-ManagedLlamaCppImageRef `
+    -RequestedImage $ImageRef `
+    -RuntimeOverride $env:MANGALMM_LLAMA_CPP_IMAGE
+$SupportedImageRefs = $ImagePolicy.Supported
 $ManagedContainerName = 'mangalmm-local-server'
 $ModelAlias = 'MangaLMM'
 
@@ -69,223 +72,6 @@ $ModelSpecs = @(
         )
     }
 )
-
-if ($VolumeName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
-    throw "Invalid Docker volume name: $VolumeName"
-}
-
-$DockerCommand = Get-Command 'docker.exe' -ErrorAction SilentlyContinue
-if ($null -eq $DockerCommand) {
-    $DockerCommand = Get-Command 'docker' -ErrorAction Stop
-}
-$DockerExecutable = $DockerCommand.Source
-
-function ConvertTo-NativeArgument {
-    param([AllowEmptyString()][string]$Argument)
-
-    if (
-        -not [string]::IsNullOrEmpty($Argument) -and
-        $Argument -notmatch '[\s"]'
-    ) {
-        return $Argument
-    }
-
-    $Builder = [System.Text.StringBuilder]::new()
-    [void]$Builder.Append([char]34)
-    $BackslashCount = 0
-    foreach ($Character in $Argument.ToCharArray()) {
-        if ($Character -eq [char]92) {
-            $BackslashCount += 1
-            continue
-        }
-        if ($Character -eq [char]34) {
-            [void]$Builder.Append([char]92, (($BackslashCount * 2) + 1))
-            [void]$Builder.Append([char]34)
-            $BackslashCount = 0
-            continue
-        }
-        if ($BackslashCount -gt 0) {
-            [void]$Builder.Append([char]92, $BackslashCount)
-            $BackslashCount = 0
-        }
-        [void]$Builder.Append($Character)
-    }
-    if ($BackslashCount -gt 0) {
-        [void]$Builder.Append([char]92, ($BackslashCount * 2))
-    }
-    [void]$Builder.Append([char]34)
-    return $Builder.ToString()
-}
-
-function Invoke-DockerResult {
-    param([Parameter(Mandatory = $true)][string[]]$Arguments)
-
-    # PowerShell here-string 은 줄 끝을 CRLF 로 담는다. 컨테이너의 `/bin/sh` 가
-    # dash 이면 줄 끝의 CR 을 토큰의 일부로 읽어 첫 줄 `set -eu` 부터
-    # "Illegal option -" 로 죽는다. docker 인자에 CR 이 의미를 갖는 경우는 없으므로
-    # 여기서 한 번에 정규화한다.
-    $NormalizedArguments = @(
-        $Arguments | ForEach-Object { [string]$_ -replace "`r`n", "`n" }
-    )
-
-    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $StartInfo.FileName = $DockerExecutable
-    $StartInfo.Arguments = (
-        $NormalizedArguments |
-            ForEach-Object { ConvertTo-NativeArgument -Argument $_ }
-    ) -join ' '
-    $StartInfo.UseShellExecute = $false
-    $StartInfo.CreateNoWindow = $true
-    $StartInfo.RedirectStandardOutput = $true
-    $StartInfo.RedirectStandardError = $true
-
-    $Process = [System.Diagnostics.Process]::new()
-    $Process.StartInfo = $StartInfo
-    try {
-        if (-not $Process.Start()) {
-            throw "Unable to start Docker: $DockerExecutable"
-        }
-        $OutputTask = $Process.StandardOutput.ReadToEndAsync()
-        $ErrorTask = $Process.StandardError.ReadToEndAsync()
-        $Process.WaitForExit()
-        $Output = $OutputTask.GetAwaiter().GetResult().TrimEnd()
-        $ErrorOutput = $ErrorTask.GetAwaiter().GetResult().TrimEnd()
-        return [pscustomobject]@{
-            ExitCode = [int]$Process.ExitCode
-            Output = (@($Output, $ErrorOutput) |
-                Where-Object {
-                    -not [string]::IsNullOrWhiteSpace($_)
-                }) -join "`n"
-        }
-    }
-    finally {
-        $Process.Dispose()
-    }
-}
-
-function Invoke-Docker {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [switch]$ShowOutput
-    )
-
-    $Result = Invoke-DockerResult -Arguments $Arguments
-    if ($ShowOutput -and -not [string]::IsNullOrWhiteSpace($Result.Output)) {
-        Write-Host $Result.Output
-    }
-    if ($Result.ExitCode -ne 0) {
-        throw (
-            "Docker command failed (exit={0}): docker {1}`n{2}" -f
-            $Result.ExitCode,
-            ($Arguments -join ' '),
-            $Result.Output
-        )
-    }
-    return $Result.Output.Trim()
-}
-
-function Get-PinnedImageId {
-    $Inspect = Invoke-DockerResult -Arguments @(
-        'image', 'inspect', '--format', '{{.Id}}', $ImageRef
-    )
-    if (
-        $Inspect.ExitCode -ne 0 -or
-        [string]::IsNullOrWhiteSpace($Inspect.Output)
-    ) {
-        Write-Host "Pulling the pinned llama.cpp image once: $ImageRef"
-        Invoke-Docker -Arguments @('pull', $ImageRef) -ShowOutput | Out-Null
-        $Inspect = Invoke-DockerResult -Arguments @(
-            'image', 'inspect', '--format', '{{.Id}}', $ImageRef
-        )
-    }
-    if (
-        $Inspect.ExitCode -ne 0 -or
-        [string]::IsNullOrWhiteSpace($Inspect.Output)
-    ) {
-        throw "Unable to inspect the pinned llama.cpp image: $ImageRef"
-    }
-    return $Inspect.Output.Trim()
-}
-
-function Assert-ManagedContainerStopped {
-    $Inspect = Invoke-DockerResult -Arguments @(
-        'inspect', '--format', '{{.State.Running}}', $ManagedContainerName
-    )
-    if ($Inspect.ExitCode -eq 0 -and $Inspect.Output.Trim() -eq 'true') {
-        throw (
-            "$ManagedContainerName is running. Stop the app normally, then " +
-            'prepare the model volume again.'
-        )
-    }
-}
-
-function Assert-VolumeLabels {
-    $LabelsText = Invoke-Docker -Arguments @(
-        'volume', 'inspect', '--format', '{{json .Labels}}', $VolumeName
-    )
-    try {
-        $Labels = $LabelsText | ConvertFrom-Json
-    }
-    catch {
-        throw "Unable to read Docker labels for volume: $VolumeName"
-    }
-    if (
-        [string]$Labels.'comic-translate.runtime' -ne $RuntimeName -or
-        [int]$Labels.'comic-translate.preparation-version' -ne
-            $PreparationVersion
-    ) {
-        throw (
-            "MangaLMM volume labels do not match: $VolumeName. " +
-            'Use a new versioned volume name.'
-        )
-    }
-}
-
-function Get-VolumeFileHash {
-    param(
-        [Parameter(Mandatory = $true)][string]$FileName,
-        [switch]$AllowMissing
-    )
-
-    $Shell = if ($AllowMissing) {
-        'if test -f "/models/$MODEL_FILE"; then sha256sum "/models/$MODEL_FILE" | cut -d " " -f 1; fi'
-    }
-    else {
-        'set -eu; test -f "/models/$MODEL_FILE"; sha256sum "/models/$MODEL_FILE" | cut -d " " -f 1'
-    }
-    $Result = Invoke-DockerResult -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "MODEL_FILE=$FileName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', $Shell
-    )
-    if ($Result.ExitCode -ne 0) {
-        if ($AllowMissing) {
-            return ''
-        }
-        throw "Volume SHA-256 verification failed: $FileName`n$($Result.Output)"
-    }
-    return $Result.Output.Trim().ToLowerInvariant()
-}
-
-function Read-ReadyManifest {
-    $ManifestText = Invoke-Docker -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "READY_MANIFEST=$ReadyManifestName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', 'set -eu; cat "/models/$READY_MANIFEST"'
-    )
-    try {
-        return $ManifestText | ConvertFrom-Json
-    }
-    catch {
-        throw "Unable to parse ready manifest: $ReadyManifestName"
-    }
-}
 
 function Assert-ManifestContract {
     param([Parameter(Mandatory = $true)]$Manifest)
@@ -330,50 +116,16 @@ function Assert-ManifestContract {
     }
 }
 
+Initialize-ManagedRuntimeDocker `
+    -ImageRef $ImageRef `
+    -VolumeName $VolumeName `
+    -ContainerName $ManagedContainerName `
+    -RuntimeName $RuntimeName `
+    -PreparationVersion $PreparationVersion `
+    -ReadyManifestName $ReadyManifestName `
+    -ModelSpecs $ModelSpecs
+
 $ImageId = Get-PinnedImageId
-
-function Get-VolumeFileSize {
-    param([Parameter(Mandatory = $true)][string]$FileName)
-
-    $Result = Invoke-DockerResult -Arguments @(
-        'run', '--rm', '--pull', 'never',
-        '-e', "MODEL_FILE=$FileName",
-        '--mount', "type=volume,source=$VolumeName,target=/models,readonly",
-        '--entrypoint', '/bin/sh',
-        $ImageRef,
-        '-ec', 'if test -f "/models/$MODEL_FILE"; then stat -c %s "/models/$MODEL_FILE"; fi'
-    )
-    if ($Result.ExitCode -ne 0) {
-        return [int64]-1
-    }
-    $Text = $Result.Output.Trim()
-    if ([string]::IsNullOrWhiteSpace($Text)) {
-        return [int64]-1
-    }
-    return [int64]$Text
-}
-
-function Test-VolumeHoldsEveryModel {
-    <#
-    .SYNOPSIS
-    볼륨이 계약된 모든 파일을 이미 담고 있는가(크기 기준).
-
-    .DESCRIPTION
-    `Auto` 가 Prepare 와 Reseal 중 무엇을 할지 고르는 데만 쓴다. 크기만 보는 이유는
-    대형 GGUF 를 두 번 해시하지 않기 위해서다. 권위 있는 판정은 Reseal 이 smoke 앞에서
-    수행하는 SHA-256 검증이고, 거기서 어긋나면 그대로 실패한다.
-    #>
-
-    if ((Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)).ExitCode -ne 0) {
-        return $false
-    }
-    foreach ($Spec in $ModelSpecs) {
-        if ((Get-VolumeFileSize -FileName $Spec.Name) -ne $Spec.Bytes) {
-            return $false
-        }
-    }
-    return $true
-}
 
 if ($Mode -eq 'Auto') {
     if (Test-VolumeHoldsEveryModel) {
@@ -435,7 +187,7 @@ Assert-ManagedContainerStopped
 # 않으므로 원본 경로도, 복사할 여유 공간도 필요 없다.
 if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
     $Drive = Get-PSDrive -Name 'C' -ErrorAction Stop
-    if ([int64]$Drive.Free -lt $MinimumFreeBytes) {
+    if ($MinimumFreeBytes -gt 0 -and [int64]$Drive.Free -lt $MinimumFreeBytes) {
         throw (
             "Insufficient free C: space. required={0:N2} GiB, actual={1:N2} GiB" -f
             ($MinimumFreeBytes / 1GB),
@@ -446,10 +198,16 @@ if (-not $IsReseal -and -not $SkipFreeSpaceCheck) {
 
 $PreparedSources = @()
 if (-not $IsReseal) {
+    $VolumeExistsBeforePrepare = (
+        Invoke-DockerResult -Arguments @('volume', 'inspect', $VolumeName)
+    ).ExitCode -eq 0
     foreach ($Spec in $ModelSpecs) {
         # 볼륨이 이미 계약된 파일을 담고 있으면 원본을 아예 찾지 않는다. 대형
         # GGUF 를 헛되이 내려받거나 해시하지 않기 위해서다.
-        if ((Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256) {
+        if (
+            $VolumeExistsBeforePrepare -and
+            (Get-VolumeFileHash -FileName $Spec.Name -AllowMissing) -eq $Spec.Sha256
+        ) {
             Write-Host "Reusing verified volume file: $($Spec.Name)"
             continue
         }
@@ -460,7 +218,8 @@ if (-not $IsReseal) {
             -RequestedPath $ModelDirectory `
             -DownloadUrl ([string]$Spec.DownloadUrl) `
             -DownloadDirectory $DownloadDirectory `
-            -AllowDownload:$AllowDownload
+            -AllowDownload:$AllowDownload `
+            -SkipFreeSpaceCheck:$SkipFreeSpaceCheck
         $PreparedSources += [pscustomobject]@{
             Spec = $Spec
             Directory = $Resolved.Directory
