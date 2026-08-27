@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 import hashlib
+import json
 import re
 import sys
 import tempfile
@@ -64,6 +65,12 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             paths,
         )
         self.assertIn("scripts/verify_windows_runtime.py", paths)
+        self.assertIn("scripts/bootstrap_windows.ps1", paths)
+        self.assertIn("scripts/windows_bootstrap.json", paths)
+        self.assertIn("scripts/lib/WindowsBootstrap.psm1", paths)
+        self.assertIn("scripts/lib/ManagedRuntimeModelSource.psm1", paths)
+        self.assertIn("scripts/prepare_hunyuanocr_llamacpp_runtime.ps1", paths)
+        self.assertIn("docs/setup/quickstart-ko.md", paths)
         self.assertNotIn("scripts/benchmark_cold_cache_finalization.py", paths)
         self.assertNotIn("scripts/build_windows_gpu_onefile.ps1", paths)
         self.assertFalse(any(path.startswith("tests/") for path in paths))
@@ -145,26 +152,69 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 self.assertFalse(any(name.lower().endswith(".gguf") for name in names))
 
     def test_launchers_offer_no_install_release_contract(self) -> None:
-        for launcher in ("run_comic.bat", "run_comic_cuda13.bat"):
+        expected_runtime = {
+            "run_comic.bat": "cuda12",
+            "run_comic_cuda13.bat": "cuda13",
+        }
+        for launcher, runtime in expected_runtime.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
             self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
-            self.assertIn("scripts\\prepare_gemma_runtime.ps1", text)
-            self.assertIn(
-                "scripts\\prepare_paddleocr_llamacpp_runtime.ps1",
-                text,
+            self.assertIn("scripts\\bootstrap_windows.ps1", text)
+            self.assertIn(f"-Runtime {runtime}", text)
+            self.assertNotIn("pip install", text)
+
+        bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("prepare_gemma_runtime.ps1", bootstrap)
+        self.assertIn("prepare_hunyuanocr_llamacpp_runtime.ps1", bootstrap)
+        self.assertIn("prepare_paddleocr_llamacpp_runtime.ps1", bootstrap)
+        self.assertNotIn("prepare_mangalmm_llamacpp_runtime.ps1", bootstrap)
+        self.assertNotIn("prepare_paddleocr_spotting_llamacpp_runtime.ps1", bootstrap)
+        module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("$env:PYTHONNOUSERSITE = '1'", module)
+        self.assertIn("$env:PYTHONHOME = ''", module)
+        self.assertIn("$env:PYTHONPATH = ''", module)
+        self.assertIn("include-system-site-packages", bootstrap)
+
+    def test_bootstrap_configuration_keeps_cuda_variants_separate(self) -> None:
+        config = json.loads(
+            (ROOT / "scripts" / "windows_bootstrap.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(config["schema_version"], 1)
+        self.assertEqual(config["python"], {
+            "major": 3,
+            "minor": 12,
+            "implementation": "CPython",
+            "bits": 64,
+        })
+        self.assertEqual(config["runtimes"]["cuda12"]["venv"], ".venv-win")
+        self.assertEqual(
+            config["runtimes"]["cuda12"]["llama_image"],
+            "ghcr.io/ggml-org/llama.cpp:server-cuda",
+        )
+        self.assertEqual(
+            config["runtimes"]["cuda13"]["llama_image"],
+            "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+        )
+        self.assertEqual(
+            [entry["label"] for entry in config["managed_runtimes"]],
+            ["HunyuanOCR", "PaddleOCR VL", "Gemma IQ4_NL"],
+        )
+
+    def test_release_dependency_closure_rejects_missing_local_targets(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "PowerShell module dependency"):
+            release.validate_release_dependency_closure(
+                {
+                    "scripts/example.ps1": b"Import-Module (Join-Path $PSScriptRoot 'lib/Missing.psm1')",
+                }
             )
-            self.assertIn(
-                "scripts\\prepare_mangalmm_llamacpp_runtime.ps1",
-                text,
+        with self.assertRaisesRegex(RuntimeError, "Markdown dependency"):
+            release.validate_release_dependency_closure(
+                {"README.md": b"[setup](docs/setup/missing.md)"}
             )
-            self.assertIn(
-                "scripts\\prepare_paddleocr_spotting_llamacpp_runtime.ps1",
-                text,
-            )
-            self.assertIn("scripts\\verify_windows_runtime.py", text)
-            self.assertIn("resources\\translations\\compiled\\ct_ko.qm", text)
-            self.assertIn("pip==26.0.1", text)
-            self.assertIn("wheel==0.46.3", text)
 
     def test_runtime_requirements_are_exact_and_complete(self) -> None:
         for requirements_name, expected_cuda in (

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "python": { "major": 3, "minor": 12, "implementation": "CPython", "bits": 64 },
+  "pip_tools": { "pip": "26.0.1", "wheel": "0.46.3", "setuptools": "80.9.0" },
+  "runtimes": {
+    "cuda12": {
+      "venv": ".venv-win",
+      "requirements": "requirements-cuda12.txt",
+      "expected_cuda": "12.8",
+      "llama_image": "ghcr.io/ggml-org/llama.cpp:server-cuda"
+    },
+    "cuda13": {
+      "venv": ".venv-win-cuda13",
+      "requirements": "requirements-cuda13.txt",
+      "expected_cuda": "13.0",
+      "llama_image": "ghcr.io/ggml-org/llama.cpp:server-cuda13"
+    }
+  },
+  "managed_runtimes": [
+    { "label": "HunyuanOCR", "script": "scripts/prepare_hunyuanocr_llamacpp_runtime.ps1" },
+    { "label": "PaddleOCR VL", "script": "scripts/prepare_paddleocr_llamacpp_runtime.ps1" },
+    { "label": "Gemma IQ4_NL", "script": "scripts/prepare_gemma_runtime.ps1" }
+  ]
+}
