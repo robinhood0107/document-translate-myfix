@@ -5,7 +5,7 @@
 ## 1. 준비물
 
 - Windows 10/11 x64
-- Python 3.12 x64(CPython, `py -3.12` 또는 PATH에서 실행 가능)
+- [공식 Python 3.12.10 Windows installer (64-bit)](https://www.python.org/downloads/release/python-31210/)
 - WSL2 backend와 GPU 지원이 켜진 Docker Desktop
 - NVIDIA 드라이버와 CUDA 호환 GPU
 - 선택한 venv용 약 6~8 GiB와, 아직 없는 모델 파일의 실제 크기만큼의 여유 공간
@@ -14,6 +14,8 @@
 현재 pinned `mahotas` Windows wheel이 CPython 3.12까지만 제공되므로 Python
 3.13/3.14만 설치된 PC는 지원 대상이 아닙니다. 다른 Python과 나란히 3.12 x64를
 설치하면 launcher가 `py -3.12`를 우선 사용하며 전역 package는 가져오지 않습니다.
+Python installer에서는 `py` launcher를 포함하세요. 시스템 PATH 추가는 선택이며,
+launcher는 `py -3.12`를 우선 탐색합니다.
 
 ## 2. 저장소 실행
 
