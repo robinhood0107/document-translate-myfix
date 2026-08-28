@@ -327,6 +327,7 @@ MangaLMM, Router)은 모두 하나의 CUDA 서버 이미지를 씁니다.
 
 - [rules.md](rules.md)
 - [코드 구조와 OCR 전략 경계](docs/architecture/codebase-map-ko.md)
+- [Stage-Batched 파이프라인 작동 원리](docs/architecture/codebase-map-ko.md#stage-batched-파이프라인-작동-원리)
 - [관리형 llama.cpp 전용 런타임 정책](docs/runtime/managed-llamacpp-only-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
