@@ -60,14 +60,19 @@ next run. Completion requires exact size/SHA-256 validation and real model
 load smokes. Use `setup.bat --doctor` or
 `setup_cuda13.bat --doctor` for a read-only report.
 
-The BAT keeps the classic Command Prompt host, uses UTF-8, preserves the
-current/default Command Prompt font, and does not change the registry. The console shows
+The BAT keeps the classic Command Prompt host, uses UTF-8, and preserves the
+parent/default Command Prompt font, window size, and scrollback without changing
+the registry. The console shows
 package-metadata substeps (without loading CUDA DLLs), each model boundary,
 compact 10% download updates, runtime
 preparation boundaries, and the final result. Full child-command output remains
 in the timestamped `logs\bootstrap\*-detail.log` file. A setup opened by
 double-click stays on its final `DONE!` or `FAILED!` screen until a key is
 pressed; automated checks can set `COMIC_NO_PAUSE=1`.
+
+Opening images, archives, PDFs, and projects uses an embedded progress surface.
+The current workspace remains visible until the replacement has been prepared,
+and a failed open leaves the existing workspace unchanged.
 
 ## 3. Launch
 
