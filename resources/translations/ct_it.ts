@@ -218,6 +218,10 @@ Scegli un file di progetto oppure solo file immagine/documento/archivio.</transl
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>L’immagine non può essere elaborata in sicurezza. Il limite supportato è di {pixels} pixel e la memoria viene controllata prima dell’avvio della pipeline.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Verifica la tua connessione Internet.</translation>
         <translation>Modello di riconoscimento testo</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Il runtime OCR selezionato non è installato. Esegui il BAT setup_full corrispondente prima di avviare questa attività.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>Il runtime OCR opzionale non è installato</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>L’inpainter opzionale selezionato non è installato. Esegui il BAT setup_full corrispondente prima di avviare questa attività.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>L’inpainter opzionale non è installato</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

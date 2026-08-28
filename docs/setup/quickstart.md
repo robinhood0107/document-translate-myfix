@@ -44,7 +44,8 @@ llama.cpp image only when it is missing.
 The non-interactive setup prepares:
 
 - the selected `.venv-win` or `.venv-win-cuda13` and pinned packages
-- required CTD/LaMa application models
+- RT-DETR v2 ONNX, font-detector ONNX, CTD Torch/ONNX and positive-claim ONNX
+- LaMa large and LaMa MPE application models
 - HunyuanOCR Q8 model/mmproj
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf` (about 13.58 GiB)
@@ -69,10 +70,11 @@ run_comic.bat
 run_comic_cuda13.bat
 ```
 
-The run launchers only verify the venv and start the application, so a warm
-launch takes seconds. They never pull images or seal model volumes. If a
-runtime was never provisioned, the application prepares it on first use from
-inside the GUI, which works but is much slower than running setup first.
+The run launchers verify the venv and atomic install state, export the exact
+setup-selected llama.cpp image, and start the application. They never install,
+download, pull, create, or reseal anything. Missing core state requires the
+matching setup BAT; missing MangaLMM/Spotting state requires setup_full before
+page processing starts.
 
 Before creating a container, the CUDA13 launcher compares the image's
 `NVIDIA_REQUIRE_CUDA` value with the driver compatibility version. After setup,
@@ -217,9 +219,9 @@ records the result in the ready manifest. Use `-Mode Verify` to re-check only.
 Every preparation script accepts `-Mode Auto`: it immediately reuses a valid
 seal and prepares an empty volume. When upstream refreshes the llama.cpp tag the
 image digest moves, so the models stay correct while the ready manifest no
-longer matches; only then does `Auto` choose `Reseal` and recover without
-the original source files. The app detects the same state and repairs it once on
-its own. See the Korean guide at
+longer matches; only then does setup's `Auto` choose `Reseal` and recover without
+the original source files. The running app reports the stale seal and requires
+the matching setup BAT; it never repairs the volume. See the Korean guide at
 [docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
 
 Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and

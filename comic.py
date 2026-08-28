@@ -9,6 +9,7 @@ from PySide6.QtCore import QSettings, QTranslator, QLocale, \
 from PySide6.QtCore import QLibraryInfo
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox
+from modules.utils.image_safety import configure_pillow_image_policy
 from app.ui.splash_screen import SplashScreen
 
 
@@ -230,6 +231,7 @@ class LoadingWorker(QObject):
 
 
 def main():
+    configure_pillow_image_policy()
     
     # Configure logging
     logging.basicConfig(
@@ -417,29 +419,10 @@ def main():
     worker.failed.connect(coordinator.on_failed, Qt.ConnectionType.QueuedConnection)
     thread.started.connect(worker.run)
     
-    # Show splash and prepare required local runtime models before controller import.
+    # Windows setup owns every application model.  Launch is intentionally
+    # read-only: the BAT preflight has already checked the sealed model files.
     splash.show()
-    if _should_skip_startup_runtime_models(smoke_exit_ms):
-        logging.info("Skipping startup runtime model preparation.")
-    else:
-        try:
-            from modules.utils.download import ensure_startup_runtime_models
-
-            ensure_startup_runtime_models(prefer_cuda=True)
-        except Exception as exc:
-            logging.exception("Failed to prepare required local runtime models: %s", exc)
-            splash.close()
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Icon.Critical)
-            msg.setWindowTitle("Required Model Download Failed")
-            msg.setText("Failed to prepare required local model files under the project models directory.")
-            msg.setInformativeText(str(exc))
-            try:
-                msg.setDetailedText(str(exc))
-            except Exception:
-                pass
-            msg.exec()
-            raise SystemExit(1)
+    logging.info("Startup model provisioning is owned by setup; launch performs no downloads.")
 
     # Defer starting work until the event loop is running so the splash remains clickable.
     QTimer.singleShot(0, thread.start)

@@ -21,11 +21,14 @@ source; Codex relies on this `AGENTS.md` entrypoint.
   `setup_cuda13.bat` provision the core tier (HunyuanOCR, PaddleOCR VL, Gemma)
   and `setup_full.bat` / `setup_full_cuda13.bat` add MangaLMM and PaddleOCR VL
   Spotting; all four are backed by the shared Windows PowerShell bootstrap,
-  which owns venv reconciliation and managed model volumes and never launches
+  which owns venv reconciliation, the complete default application-model seal,
+  and managed model volumes and never launches
   the application. `run_comic.bat` and `run_comic_cuda13.bat` stay separate
-  CUDA12/CUDA13 launch entrypoints and must never pull images, create volumes,
-  or run a `prepare_*` script; the application self-provisions on demand for
-  anything setup did not seal. Python 3.12 x64 (the pinned `mahotas` wheel has
+  CUDA12/CUDA13 launch entrypoints and must never create a venv, install a
+  package, download a model, pull an image, create a volume, or run a
+  `prepare_*` script. The application is read-only with respect to installation;
+  missing core state requires setup and missing optional state requires
+  setup_full before page work starts. Python 3.12 x64 (the pinned `mahotas` wheel has
   no Windows build above cp312), WSL2, Docker Desktop, and an NVIDIA driver are
   prerequisites.
 - Windows launcher CI stays source-contract-only and must not perform a fresh

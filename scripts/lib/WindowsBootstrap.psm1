@@ -42,16 +42,33 @@ function Invoke-BootstrapCommand {
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
         [string]$WorkingDirectory = '',
-        [switch]$Quiet
+        [switch]$Quiet,
+        [switch]$ShowOutput
     )
+    if (-not $Quiet) {
+        $DisplayName = [System.IO.Path]::GetFileName($FilePath)
+        Write-BootstrapMessage "Running $DisplayName..."
+    }
     $Previous = Get-Location
     try {
         if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
-        if (-not $Quiet) { Write-BootstrapMessage ("Running: {0} {1}" -f $FilePath, ($Arguments -join ' ')) }
-        & $FilePath @Arguments
-        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
-        $Code = if ($null -eq $ObservedExitCode) { 0 } else { [int]$ObservedExitCode }
-        if ($Code -ne 0) { throw "Command failed with exit code ${Code}: $FilePath" }
+        $Result = Invoke-BootstrapCapturedCommand -FilePath $FilePath -Arguments $Arguments
+        if (
+            $env:COMIC_BOOTSTRAP_DETAIL_LOG -and
+            -not [string]::IsNullOrWhiteSpace([string]$Result.Output)
+        ) {
+            Add-Content -LiteralPath $env:COMIC_BOOTSTRAP_DETAIL_LOG -Encoding UTF8 -Value @(
+                "[$(Get-Date -Format o)] $FilePath $($Arguments -join ' ')"
+                [string]$Result.Output
+                ''
+            )
+        }
+        if ($Result.ExitCode -ne 0) {
+            throw "Command failed with exit code $($Result.ExitCode): $([System.IO.Path]::GetFileName($FilePath))."
+        }
+        if ($ShowOutput -and -not [string]::IsNullOrWhiteSpace([string]$Result.Output)) {
+            Write-Host ([string]$Result.Output).Trim()
+        }
     }
     finally { Set-Location $Previous }
 }
@@ -61,14 +78,9 @@ function Invoke-BootstrapProbe {
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @()
     )
-    $PreviousPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        & $FilePath @Arguments *> $null
-        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
-        return $(if ($null -eq $ObservedExitCode) { 0 } else { [int]$ObservedExitCode })
-    }
-    finally { $ErrorActionPreference = $PreviousPreference }
+    return [int](
+        Invoke-BootstrapCapturedCommand -FilePath $FilePath -Arguments $Arguments
+    ).ExitCode
 }
 
 function Resolve-BootstrapPython312 {

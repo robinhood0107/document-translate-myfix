@@ -11,6 +11,7 @@ from .archives import (
     materialize_archive_entries,
 )
 from .export_paths import sanitize_export_path_component
+from .image_safety import build_image_memory_plan, inspect_image_dimensions
 from .pdf_pages import (
     PdfImportError,
     PdfPagePlan,
@@ -90,6 +91,7 @@ class FileHandler:
         self.archive_info = []
         self._pdf_import_warnings: list[dict[str, object]] = []
         self._pdf_warning_cursor = 0
+        self._image_memory_plan: dict[str, int | bool] = {}
 
     def prepare_files(self, file_paths: list[str], extend: bool = False):
         all_image_paths = []
@@ -292,7 +294,22 @@ class FileHandler:
                 except OSError:
                     pass
             raise
+        validated_paths: list[str] = []
+        for path in list(paths or []):
+            if should_cancel is not None and should_cancel():
+                from .exceptions import OperationCancelledError
+
+                raise OperationCancelledError("Cancelled during image resource preflight.")
+            abs_path = os.path.abspath(path)
+            if not ensure_prepared_path_materialized(abs_path):
+                raise FileNotFoundError(abs_path)
+            inspect_image_dimensions(abs_path)
+            validated_paths.append(abs_path)
+        self._image_memory_plan = build_image_memory_plan(validated_paths)
         return selected_pdf_paths
+
+    def image_memory_plan(self) -> dict[str, int | bool]:
+        return dict(self._image_memory_plan)
 
     def should_pre_materialize(self, target_paths: list[str] | None = None) -> bool:
         paths = list(target_paths or [])

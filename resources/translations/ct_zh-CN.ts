@@ -218,6 +218,10 @@ Choose either a project file or image/document/archive files.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>无法安全处理该图像。支持的上限为 {pixels} 像素，管线启动前会检查内存。</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1460,8 +1464,24 @@ Please check your internet connection.</source>
         <translation>文本识别模型</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>未安装所选 OCR 运行时。开始此任务前，请运行对应的 setup_full BAT。</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>未安装可选 OCR 运行时</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>未安装所选可选修复模型。开始此任务前，请运行对应的 setup_full BAT。</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>未安装可选修复模型</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

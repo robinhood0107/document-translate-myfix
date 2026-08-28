@@ -218,6 +218,10 @@ Choose either a project file or image/document/archive files.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>Изображение нельзя обработать безопасно. Поддерживаемый предел — {pixels} пикселей; память проверяется до запуска конвейера.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Please check your internet connection.</source>
         <translation>Модель распознавания текста</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Выбранная среда OCR не установлена. Перед запуском задачи выполните соответствующий BAT-файл setup_full.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>Дополнительная среда OCR не установлена</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Выбранный дополнительный модуль восстановления не установлен. Перед запуском задачи выполните соответствующий BAT-файл setup_full.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>Дополнительный модуль восстановления не установлен</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
