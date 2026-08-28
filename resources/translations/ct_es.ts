@@ -218,6 +218,10 @@ Elija un archivo de proyecto o solo archivos de imagen/documento/archivo comprim
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>La imagen no se puede procesar de forma segura. El límite admitido es de {pixels} píxeles y la memoria se comprueba antes de iniciar el flujo.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Por favor, compruebe su conexión a Internet.</translation>
         <translation>Modelo de reconocimiento de texto</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>El entorno OCR seleccionado no está instalado. Ejecute el BAT setup_full correspondiente antes de iniciar esta tarea.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>El entorno OCR opcional no está instalado</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>El inpainting opcional seleccionado no está instalado. Ejecute el BAT setup_full correspondiente antes de iniciar esta tarea.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>El inpainting opcional no está instalado</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

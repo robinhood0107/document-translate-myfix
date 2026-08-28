@@ -218,6 +218,10 @@ Choose either a project file or image/document/archive files.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>画像を安全に処理できません。対応上限は{pixels}ピクセルで、パイプライン開始前にメモリを確認します。</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Open Batch Report to see all skipped images and reasons.</source>
         <translation>テキスト認識モデル</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>選択したOCRランタイムがインストールされていません。この処理を開始する前に対応するsetup_full BATを実行してください。</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>オプションのOCRランタイムがインストールされていません</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>選択したオプションのインペインターがインストールされていません。この処理を開始する前に対応するsetup_full BATを実行してください。</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>オプションのインペインターがインストールされていません</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

@@ -33,6 +33,7 @@ from app.path_materialization import ensure_path_materialized
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
 from modules.utils.pdf_pages import PdfImportError
+from modules.utils.image_safety import ImageResourceLimitError, MAX_IMAGE_PIXELS
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
@@ -1674,6 +1675,40 @@ class ComicTranslate(ComicTranslateUI):
             })
             self.set_pipeline_overlay_active(False)
             self.loading.setVisible(False)
+            return
+
+        if issubclass(exctype, ImageResourceLimitError):
+            message = self.tr(
+                "The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts."
+            ).replace("{pixels}", f"{MAX_IMAGE_PIXELS:,}")
+            detail = str(value)
+            if self._batch_active:
+                self._batch_failed = True
+                self._last_batch_failure_detail = detail
+                self.on_runtime_progress_update({
+                    "phase": "error",
+                    "service": "batch",
+                    "status": "failed",
+                    "step_key": "image_preflight",
+                    "message": message,
+                    "detail": detail,
+                    "page_total": len(self._last_batch_request_paths),
+                    "page_index": 0,
+                    "image_name": "",
+                    "panel_state": "failed",
+                    "panel_message_level": "error",
+                })
+                self.loading.setVisible(False)
+                return
+            Messages.show_error(
+                self,
+                f"{message}\n{detail}",
+                duration=None,
+                closable=True,
+                source="batch",
+            )
+            self.loading.setVisible(False)
+            self.enable_hbutton_group()
             return
 
         if issubclass(exctype, PdfImportError):
