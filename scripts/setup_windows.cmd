@@ -14,7 +14,6 @@ chcp 65001 >nul
 color 07
 mode con cols=120 lines=40 >nul 2>&1
 title Comic Translate Setup - %RUNTIME%
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SCRIPT_DIR%configure_console.ps1" >nul 2>&1
 
 set "BOOTSTRAP_ARGS=-Runtime %RUNTIME%"
 if /I "%TIER%"=="full" set "BOOTSTRAP_ARGS=%BOOTSTRAP_ARGS% -Full"

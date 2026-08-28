@@ -103,7 +103,6 @@ $RequiredFiles = @(
     'paddleocr_vl_docker_files\docker-compose.yaml',
     'resources\translations\compiled\ct_ko.qm',
     'scripts\bootstrap_windows.ps1',
-    'scripts\configure_console.ps1',
     'scripts\lib\WindowsBootstrap.psm1',
     'scripts\lib\ManagedRuntimeDocker.psm1',
     'scripts\lib\ManagedRuntimeModelSource.psm1',
