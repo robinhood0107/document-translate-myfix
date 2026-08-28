@@ -133,7 +133,7 @@ full hash verification, custom volumes, or optional runtime maintenance.
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda` (`:server-cuda13` legacy explicit seals are also supported)
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 

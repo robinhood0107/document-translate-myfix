@@ -256,19 +256,18 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
         ).read_text(encoding="utf-8")
         self.assertIn("llama.cpp:server-cuda'", image_policy)
-        self.assertIn("llama.cpp:server-cuda13'", image_policy)
-        self.assertIn("Preferred = $Cuda12", image_policy)
-        self.assertIn("Fallback = ''", image_policy)
-        self.assertNotIn(
-            "Preferred = if ($Runtime -eq 'cuda12')",
-            image_policy,
-        )
+        self.assertIn("Preferred = $ImageRef", image_policy)
+        self.assertIn("Supported = @($ImageRef)", image_policy)
         self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
         self.assertIn("Get-BootstrapDockerImageCudaCompatibility", bootstrap)
-        self.assertIn("Skipping incompatible llama.cpp image", bootstrap)
+        self.assertNotIn("ImageCandidates", bootstrap)
+        self.assertNotIn("HasFallback", bootstrap)
         windows_module = (
             ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1"
         ).read_text(encoding="utf-8")
+        self.assertIn('line.StartsWith("Downloaded"', windows_module)
+        self.assertIn('line.StartsWith("Resuming download"', windows_module)
+        self.assertIn('line.StartsWith("The server ignored"', windows_module)
         self.assertIn("Get-NvidiaCudaCompatibilityVersion", windows_module)
         self.assertIn("NVIDIA_REQUIRE_CUDA", windows_module)
         self.assertLess(

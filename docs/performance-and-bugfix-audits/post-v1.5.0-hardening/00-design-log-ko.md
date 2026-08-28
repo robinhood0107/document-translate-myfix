@@ -40,7 +40,7 @@ GemmaRuntimeContractError: source_image_digest 불일치
 
 ### 원인
 
-#275 의 회귀다. 기본 이미지를 고정 다이제스트에서 이동 태그 `:server-cuda13` 으로
+#275 의 회귀다. 기본 이미지를 고정 다이제스트에서 호스트와 맞지 않는 이동 태그로
 바꾸면서 `source_image_ref` 검사는 완화했지만 `source_image_digest` 와
 `source_image_id` 는 엄격 동일성으로 남겨뒀다. 업스트림 태그가 한 번 갱신되자
 준비된 볼륨이 **동시에 전부** 무효화됐다.

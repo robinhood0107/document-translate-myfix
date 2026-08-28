@@ -8,22 +8,10 @@ $script:ReadyManifestName = ''
 $script:ModelSpecs = @()
 
 function Get-ManagedLlamaCppImagePolicy {
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateSet('cuda12', 'cuda13')]
-        [string]$Runtime
-    )
-
-    $Cuda12 = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
-    $Cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    $ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
     return [pscustomobject]@{
-        # The Python runtime still follows the selected CUDA12/CUDA13 launcher,
-        # but both Windows setup paths deliberately share llama.cpp's broadly
-        # compatible CUDA image. Keep the CUDA13 tag supported only so an
-        # explicitly selected legacy seal can still be inspected or verified.
-        Preferred = $Cuda12
-        Fallback = ''
-        Supported = @($Cuda12, $Cuda13)
+        Preferred = $ImageRef
+        Supported = @($ImageRef)
     }
 }
 
@@ -33,17 +21,10 @@ function Resolve-ManagedLlamaCppImageRef {
         [string]$RuntimeOverride = ''
     )
 
-    $Policy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
-    $Resolved = @($RequestedImage, $RuntimeOverride, $env:LLAMA_CPP_IMAGE) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($Resolved)) {
-        $Resolved = $Policy.Preferred
-    }
-    if ($Policy.Supported -notcontains $Resolved) {
-        throw "Unsupported llama.cpp image: $Resolved"
-    }
-    return [string]$Resolved
+    # Managed Windows runtimes intentionally use one image contract. Older
+    # environment values or manual arguments are normalized to that image so
+    # setup remains deterministic instead of failing on stale configuration.
+    return [string](Get-ManagedLlamaCppImagePolicy).Preferred
 }
 
 function ConvertTo-NativeArgument {
@@ -162,6 +143,23 @@ function Invoke-Docker {
         )
     }
     return $Result.Output.Trim()
+}
+
+function Test-ManagedRuntimeContainerRunning {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $Result = Invoke-DockerResult -Arguments @(
+        'inspect', '--format', '{{.State.Running}}', $Name
+    )
+    return $Result.ExitCode -eq 0 -and $Result.Output.Trim() -eq 'true'
+}
+
+function Remove-ManagedRuntimeContainer {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    if ((Invoke-DockerResult -Arguments @('inspect', $Name)).ExitCode -eq 0) {
+        Invoke-Docker -Arguments @('rm', '--force', $Name) | Out-Null
+    }
 }
 
 function Get-PinnedImageId {

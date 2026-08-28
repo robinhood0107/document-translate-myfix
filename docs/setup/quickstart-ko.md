@@ -128,7 +128,7 @@ llama.cpp의 CUDA 사용자 공간은 선택한 Docker image 안에 있습니다
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda` (기존 `:server-cuda13` 명시적 봉인도 지원)
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)

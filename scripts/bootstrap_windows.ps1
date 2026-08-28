@@ -93,7 +93,7 @@ $ProvisioningTier = if ($Full) { 'full' } else { 'core' }
 $ManagedRuntimes = @(
     $AllManagedRuntimes | Where-Object { $Full -or $_.tier -eq 'core' }
 )
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime $Runtime
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy
 $ActiveLlamaImage = [string]$ImagePolicy.Preferred
 
 $RequiredFiles = @(
@@ -163,9 +163,6 @@ try {
     Write-Host ("  Runtime : {0,-8}  Python : {1}" -f $Runtime.ToUpperInvariant(), $RuntimeConfig.venv) -ForegroundColor Gray
     Write-Host ("  Tier    : {0,-8}  Models : {1}" -f $ProvisioningTier.ToUpperInvariant(), $ServiceSummary) -ForegroundColor Gray
     Write-Host ("  Image   : {0}" -f $ActiveLlamaImage) -ForegroundColor Gray
-    if ($ImagePolicy.Fallback) {
-        Write-Host ("  Fallback: {0}" -f $ImagePolicy.Fallback) -ForegroundColor Gray
-    }
     if (-not $Doctor) {
         Write-Host ("  Log     : {0}" -f $LogDisplay) -ForegroundColor DarkGray
         Write-Host ("  Details : {0}" -f $DetailLogDisplay) -ForegroundColor DarkGray
@@ -261,13 +258,10 @@ try {
             }
             else { Write-BootstrapMessage 'Pinned packages need repair.' 'WARN' }
         }
-        foreach ($Image in @($ImagePolicy.Preferred, $ImagePolicy.Fallback) |
-            Where-Object { $_ }) {
-            if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -eq 0) {
-                Write-BootstrapMessage "Docker image is installed: $Image" 'OK'
-            } else {
-                Write-BootstrapMessage "Docker image is not installed yet: $Image" 'WARN'
-            }
+        if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $ActiveLlamaImage)) -eq 0) {
+            Write-BootstrapMessage "Docker image is installed: $ActiveLlamaImage" 'OK'
+        } else {
+            Write-BootstrapMessage "Docker image is not installed yet: $ActiveLlamaImage" 'WARN'
         }
         foreach ($Volume in $ManagedRuntimes.volume) {
             if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('volume', 'inspect', $Volume)) -eq 0) {
@@ -342,95 +336,67 @@ try {
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed model volume preparation skipped by smoke/test environment.' 'SKIP'
     } else {
-        $ImageCandidates = @($ActiveLlamaImage)
-        if ($ImagePolicy.Fallback) {
-            $ImageCandidates += [string]$ImagePolicy.Fallback
+        $Compatibility = Get-BootstrapDockerImageCudaCompatibility `
+            -Docker $Docker `
+            -Image $ActiveLlamaImage `
+            -HostCudaVersion $HostCudaCompatibility
+        if (-not $Compatibility.Compatible) {
+            throw (
+                "The required llama.cpp image $ActiveLlamaImage needs CUDA >= " +
+                "$($Compatibility.RequiredCudaVersion), but the installed driver supports " +
+                "CUDA $($Compatibility.HostCudaVersion)."
+            )
         }
-        $Provisioned = $false
-        for ($ImageIndex = 0; $ImageIndex -lt $ImageCandidates.Count; $ImageIndex++) {
-            $CandidateImage = $ImageCandidates[$ImageIndex]
-            $HasFallback = $ImageIndex -lt ($ImageCandidates.Count - 1)
-            try {
-                $Compatibility = Get-BootstrapDockerImageCudaCompatibility `
+        if (Test-BootstrapManagedRuntimeState `
+            -Docker $Docker `
+            -Path $ManagedRuntimeStatePath `
+            -ImageRef $ActiveLlamaImage `
+            -ImageId $Compatibility.ImageId `
+            -ManagedRuntimes $ManagedRuntimes) {
+            Write-BootstrapMessage (
+                'Managed runtime seals, volumes, and image identity are unchanged; ' +
+                'skipping model revalidation.'
+            ) 'SKIP'
+            $ActiveImageCompatibility = $Compatibility
+        } else {
+            Set-BootstrapRuntimeEnvironment -LlamaImage $ActiveLlamaImage -VenvRoot $VenvRoot
+            foreach ($Managed in $ManagedRuntimes) {
+                Stop-BootstrapManagedContainer `
                     -Docker $Docker `
-                    -Image $CandidateImage `
-                    -HostCudaVersion $HostCudaCompatibility
-                if (-not $Compatibility.Compatible) {
-                    Write-BootstrapMessage (
-                        "Skipping incompatible llama.cpp image ${CandidateImage}: " +
-                        "image requires CUDA >= $($Compatibility.RequiredCudaVersion), " +
-                        "installed driver supports CUDA $($Compatibility.HostCudaVersion)."
-                    ) 'WARN'
-                    continue
-                }
-                if (Test-BootstrapManagedRuntimeState `
-                    -Docker $Docker `
-                    -Path $ManagedRuntimeStatePath `
-                    -ImageRef $CandidateImage `
-                    -ImageId $Compatibility.ImageId `
-                    -ManagedRuntimes $ManagedRuntimes) {
-                    Write-BootstrapMessage (
-                        'Managed runtime seals, volumes, and image identity are unchanged; ' +
-                        'skipping model revalidation.'
-                    ) 'SKIP'
-                    $ActiveLlamaImage = $CandidateImage
-                    $ActiveImageCompatibility = $Compatibility
-                    $Provisioned = $true
-                    break
-                }
-                Set-BootstrapRuntimeEnvironment -LlamaImage $CandidateImage -VenvRoot $VenvRoot
-                foreach ($Managed in $ManagedRuntimes) {
-                    Stop-BootstrapManagedContainer `
-                        -Docker $Docker `
-                        -Name ([string]$Managed.container) `
-                        -OwnershipLabel ([string]$Managed.ownership_label)
-                }
-                foreach ($Managed in $ManagedRuntimes) {
-                    $Script = Join-Path $Root ([string]$Managed.script)
-                    # The spotting projector is derived locally, so that script needs a
-                    # real interpreter. Hand it this runtime's venv rather than letting
-                    # it assume .venv-win, which does not exist for a cuda13-only setup.
-                    $PrepareExtraArguments = @()
-                    if ([string]$Managed.runtime_name -eq 'PaddleOCR-VL-Spotting-llama.cpp') {
-                        $PrepareExtraArguments = @('-PythonExecutable', $VenvPython)
-                    }
-                    Write-BootstrapMessage (
-                        "Preparing $($Managed.label) with $CandidateImage " +
-                        '(download/resume and GPU smoke can take several minutes)...'
-                    )
-                    Invoke-BootstrapRetry `
-                        -Operation "$($Managed.label) preparation" `
-                        -Attempts $(if ($HasFallback) { 1 } else { 3 }) `
-                        -Action {
-                            Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments (@(
-                                '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
-                                '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
-                                '-ImageRef', $CandidateImage
-                            ) + $PrepareExtraArguments) -WorkingDirectory $Root -LiveOutput
-                        }
-                    Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
-                }
-                $ActiveLlamaImage = $CandidateImage
-                $ActiveImageCompatibility = $Compatibility
-                Write-BootstrapManagedRuntimeState `
-                    -Path $ManagedRuntimeStatePath `
-                    -ImageRef $CandidateImage `
-                    -ImageId $Compatibility.ImageId `
-                    -ManagedRuntimes $ManagedRuntimes
-                $Provisioned = $true
-                break
+                    -Name ([string]$Managed.container) `
+                    -OwnershipLabel ([string]$Managed.ownership_label)
             }
-            catch {
-                if (-not $HasFallback) { throw }
+            foreach ($Managed in $ManagedRuntimes) {
+                $Script = Join-Path $Root ([string]$Managed.script)
+                # The spotting projector is derived locally, so that script needs a
+                # real interpreter. Hand it this runtime's venv rather than letting
+                # it assume .venv-win, which does not exist for a cuda13-only setup.
+                $PrepareExtraArguments = @()
+                if ([string]$Managed.runtime_name -eq 'PaddleOCR-VL-Spotting-llama.cpp') {
+                    $PrepareExtraArguments = @('-PythonExecutable', $VenvPython)
+                }
                 Write-BootstrapMessage (
-                    "The preferred llama.cpp image could not complete managed runtime preparation. " +
-                    "Retrying with the compatibility image: " +
-                    $ImageCandidates[$ImageIndex + 1]
-                ) 'WARN'
+                    "Preparing $($Managed.label) with $ActiveLlamaImage " +
+                    '(download/resume and GPU smoke can take several minutes)...'
+                )
+                Invoke-BootstrapRetry `
+                    -Operation "$($Managed.label) preparation" `
+                    -Attempts 3 `
+                    -Action {
+                        Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments (@(
+                            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
+                            '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
+                            '-ImageRef', $ActiveLlamaImage
+                        ) + $PrepareExtraArguments) -WorkingDirectory $Root -LiveOutput
+                    }
+                Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
             }
-        }
-        if (-not $Provisioned) {
-            throw 'No supported llama.cpp CUDA image completed managed runtime provisioning.'
+            $ActiveImageCompatibility = $Compatibility
+            Write-BootstrapManagedRuntimeState `
+                -Path $ManagedRuntimeStatePath `
+                -ImageRef $ActiveLlamaImage `
+                -ImageId $Compatibility.ImageId `
+                -ManagedRuntimes $ManagedRuntimes
         }
 
         if ($null -eq $ActiveImageCompatibility) {
