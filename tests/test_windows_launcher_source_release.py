@@ -207,6 +207,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             text = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
             self.assertIn("color 07", text)
             self.assertNotIn("configure_console", text)
+            self.assertNotIn("mode con", text.lower())
 
         module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
             encoding="utf-8-sig"

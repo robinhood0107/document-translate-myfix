@@ -12,7 +12,6 @@ shift
 
 chcp 65001 >nul
 color 07
-mode con cols=120 lines=40 >nul 2>&1
 title Comic Translate Setup - %RUNTIME%
 
 set "BOOTSTRAP_ARGS=-Runtime %RUNTIME%"
