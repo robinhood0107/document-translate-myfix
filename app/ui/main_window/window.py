@@ -15,6 +15,7 @@ from app.ui.pipeline_status_panel import (
     PipelineInteractionOverlay,
     PipelineStatusPanel,
 )
+from app.ui.open_workspace_overlay import OpenWorkspaceOverlay
 from app.ui.series_workspace import SeriesWorkspace
 from app.ui.settings.settings_page import SettingsPage
 from app.ui.startup_home import StartupHomeScreen
@@ -210,6 +211,8 @@ class ComicTranslateUI(
         self.main_layout.addWidget(self._center_stack)
 
         self._runtime_overlay_host = outer_widget
+        self.open_workspace_overlay = OpenWorkspaceOverlay(outer_widget)
+        self.open_workspace_overlay.hide()
         self.pipeline_overlay = PipelineInteractionOverlay(outer_widget)
         self.pipeline_overlay.hide()
         self.pipeline_status_panel = PipelineStatusPanel(outer_widget)
@@ -477,6 +480,10 @@ class ComicTranslateUI(
         if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
             self.pipeline_overlay.setGeometry(area)
             self._update_runtime_overlay_clear_rects()
+        if hasattr(self, "open_workspace_overlay") and self.open_workspace_overlay is not None:
+            self.open_workspace_overlay.setGeometry(area)
+            if self.open_workspace_overlay.isVisible():
+                self.open_workspace_overlay.raise_()
         if hasattr(self, "pipeline_status_panel") and self.pipeline_status_panel is not None:
             self.pipeline_status_panel.set_anchor_rect(area.adjusted(8, 8, -8, -8))
             if self.pipeline_status_panel.isVisible() and (

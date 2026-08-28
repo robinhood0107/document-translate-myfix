@@ -493,18 +493,22 @@ class SeriesController(QtCore.QObject):
             )
             return
 
-        self.main.loading.setVisible(True)
-        busy_dialog = Messages.show_busy(
-            self.main,
-            self.main.tr("Loading series project..."),
-            title=self.main.tr("Series Project"),
-            minimum_visible_ms=300,
-        )
         previous_project = getattr(self.main, "project_file", None)
-        if isinstance(previous_project, str) and previous_project and previous_project != normalized_path:
-            close_state_store(previous_project)
+        coordinator = self.main.open_workspace_ctrl
 
-        def on_result(state: dict[str, object]) -> None:
+        def prepare(report_progress):
+            report_progress(
+                {
+                    "stage": "index",
+                    "message": self.main.tr("Loading series project..."),
+                    "detail": os.path.basename(normalized_path),
+                }
+            )
+            return self._load_series_worker(normalized_path, recovery_loaded)
+
+        def commit(state: dict[str, object]) -> None:
+            if isinstance(previous_project, str) and previous_project and previous_project != normalized_path:
+                close_state_store(previous_project)
             self.main.image_ctrl.clear_state()
             self._clear_active_child_materialization()
             self.series_file = normalized_path
@@ -549,24 +553,13 @@ class SeriesController(QtCore.QObject):
                     source="series",
                 )
 
-        def on_error(error_tuple) -> None:
-            Messages.close_busy(busy_dialog, force=True)
-            self.main.loading.setVisible(False)
-            self.main.default_error_handler(error_tuple)
-
-        def on_finished() -> None:
-            Messages.close_busy(busy_dialog)
-            self.main.loading.setVisible(False)
             self.main.project_ctrl.add_recent_project(normalized_path)
             self.main.project_ctrl._refresh_home_screen()
 
-        self.main.run_threaded(
-            self._load_series_worker,
-            on_result,
-            on_error,
-            on_finished,
-            normalized_path,
-            recovery_loaded,
+        coordinator.run(
+            message=self.main.tr("Loading series project..."),
+            prepare=prepare,
+            commit=commit,
         )
 
     def _build_series_project_worker(
@@ -940,8 +933,30 @@ class SeriesController(QtCore.QObject):
         self.main.outline_font_color_button.setEnabled(outline_enabled)
         self.main.outline_width_dropdown.setEnabled(outline_enabled)
 
-    def _open_child_worker(self, child_project_path: str) -> str:
-        return load_state_from_proj_file(self.main, child_project_path)
+    def _open_child_worker(
+        self,
+        report_progress,
+        item: dict,
+        work_dir: str,
+    ):
+        report_progress(
+            {
+                "stage": "materialize",
+                "message": self.main.tr("Preparing the series item..."),
+                "detail": str(item.get("display_name") or ""),
+            }
+        )
+        child_project_path = materialize_series_child_project(
+            self.series_file,
+            item,
+            temp_dir=work_dir,
+        )
+        snapshot = self.main.open_workspace_ctrl.prepare_project(
+            report_progress,
+            self.main,
+            child_project_path,
+        )
+        return child_project_path, snapshot
 
     def request_open_item(self, item_id: str) -> None:
         if self._queue_change_locked():
@@ -966,46 +981,22 @@ class SeriesController(QtCore.QObject):
         if push_history:
             self._push_history()
 
-        self.main.loading.setVisible(True)
-        busy_dialog = Messages.show_busy(
-            self.main,
-            self.main.tr("Opening series item..."),
-            title=self.main.tr("Series Project"),
-            minimum_visible_ms=300,
-        )
         work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
-        try:
-            child_project_path = materialize_series_child_project(
-                self.series_file,
-                item,
-                temp_dir=work_dir,
-            )
-        except Exception as exc:
-            Messages.close_busy(busy_dialog, force=True)
-            self.main.loading.setVisible(False)
-            shutil.rmtree(work_dir, ignore_errors=True)
-            self.main.default_error_handler((type(exc), exc, traceback.format_exc()))
-            return
         old_temp_dir = self.active_child_temp_dir
-        self.main.image_ctrl.clear_state()
+        coordinator = self.main.open_workspace_ctrl
 
-        def on_result(saved_ctx: str) -> None:
-            self.main.project_ctrl.load_state_to_ui(saved_ctx)
+        def prepare(report_progress):
+            try:
+                return self._open_child_worker(report_progress, item, work_dir)
+            except Exception:
+                shutil.rmtree(work_dir, ignore_errors=True)
+                raise
 
-        def on_error(error_tuple) -> None:
-            Messages.close_busy(busy_dialog, force=True)
-            self.main.loading.setVisible(False)
-            self.main.default_error_handler(error_tuple)
-            shutil.rmtree(work_dir, ignore_errors=True)
-            # 실패 경로에서도 직전 작업본을 정리한다. 정상 경로(`on_finished`)
-            # 에서만 지우면 열기 실패가 누적될수록 `series_child_*` 가 쌓인다.
-            if old_temp_dir and old_temp_dir != work_dir:
-                shutil.rmtree(old_temp_dir, ignore_errors=True)
-                self.active_child_temp_dir = None
-
-        def on_finished() -> None:
-            Messages.close_busy(busy_dialog)
-            self.main.loading.setVisible(False)
+        def commit(result) -> None:
+            child_project_path, snapshot = result
+            self.main.image_ctrl.clear_state()
+            snapshot.apply(self.main)
+            self.main.project_ctrl.load_state_to_ui(snapshot.saved_context)
             if old_temp_dir and old_temp_dir != work_dir:
                 shutil.rmtree(old_temp_dir, ignore_errors=True)
             self.active_child_item_id = str(item_id)
@@ -1019,12 +1010,10 @@ class SeriesController(QtCore.QObject):
             if after_loaded is not None:
                 after_loaded()
 
-        self.main.run_threaded(
-            self._open_child_worker,
-            on_result,
-            on_error,
-            on_finished,
-            child_project_path,
+        coordinator.run(
+            message=self.main.tr("Opening series item..."),
+            prepare=prepare,
+            commit=commit,
         )
 
     def request_show_board(self) -> None:

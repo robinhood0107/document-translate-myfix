@@ -79,6 +79,7 @@ from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
+from app.controllers.open_workspace import OpenWorkspaceCoordinator
 from app.controllers.series import SeriesController
 from modules.utils.exceptions import (
     LocalServiceError,
@@ -228,6 +229,7 @@ class ComicTranslate(ComicTranslateUI):
         self.search_ctrl = SearchReplaceController(self)
         self.shortcut_ctrl = ShortcutController(self)
         self.task_runner_ctrl = TaskRunnerController(self)
+        self.open_workspace_ctrl = OpenWorkspaceCoordinator(self)
         self.batch_report_ctrl = BatchReportController(self)
         self.manual_workflow_ctrl = ManualWorkflowController(self)
         try:
@@ -1125,6 +1127,8 @@ class ComicTranslate(ComicTranslateUI):
         if self._batch_active:
             self._show_project_switch_locked_warning()
             return False
+        if getattr(getattr(self, "open_workspace_ctrl", None), "active", False):
+            return False
 
         if not self.has_unsaved_changes():
             proceed()
@@ -1430,6 +1434,26 @@ class ComicTranslate(ComicTranslateUI):
                               *args, **kwargs):
         return self.task_runner_ctrl.run_threaded_immediate(
             callback, result_callback, error_callback, finished_callback, *args, **kwargs
+        )
+
+    def run_threaded_with_progress(
+        self,
+        callback: Callable,
+        progress_callback: Callable,
+        result_callback: Callable = None,
+        error_callback: Callable = None,
+        finished_callback: Callable = None,
+        *args,
+        **kwargs,
+    ):
+        return self.task_runner_ctrl.run_threaded_with_progress(
+            callback,
+            progress_callback,
+            result_callback,
+            error_callback,
+            finished_callback,
+            *args,
+            **kwargs,
         )
 
     def clear_operation_queue(self):
@@ -3002,6 +3026,7 @@ class ComicTranslate(ComicTranslateUI):
         try:
             self.pipeline_status_panel.hide()
             self.set_pipeline_overlay_active(False)
+            self.open_workspace_overlay.hide()
         except Exception:
             pass
         router_shutdown_error = None
