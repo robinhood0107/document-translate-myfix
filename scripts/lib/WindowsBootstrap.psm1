@@ -464,6 +464,12 @@ function Test-BootstrapManagedRuntimeState {
                 [string]$_.name -eq [string]$Managed.volume
             })
             if ($Recorded.Count -ne 1) { return $false }
+            if (
+                [string]$Recorded[0].ready_manifest -ne
+                [string]$Managed.ready_manifest
+            ) {
+                return $false
+            }
             $Inspect = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
                 'volume', 'inspect', '--format', '{{json .Labels}}', [string]$Managed.volume
             )
@@ -474,6 +480,38 @@ function Test-BootstrapManagedRuntimeState {
             if (
                 [string]$Labels.'comic-translate.runtime' -ne [string]$Managed.runtime_name -or
                 [int]$Labels.'comic-translate.preparation-version' -ne [int]$Managed.preparation_version
+            ) {
+                return $false
+            }
+            $ManifestProbe = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
+                'run', '--rm', '--pull', 'never',
+                '-e', "READY_MANIFEST=$([string]$Managed.ready_manifest)",
+                '--mount', (
+                    "type=volume,source=$([string]$Managed.volume)," +
+                    'target=/models,readonly'
+                ),
+                '--entrypoint', '/bin/sh', $ImageRef,
+                '-ec', 'cat "/models/$READY_MANIFEST"'
+            )
+            if (
+                $ManifestProbe.ExitCode -ne 0 -or
+                [string]::IsNullOrWhiteSpace([string]$ManifestProbe.Output)
+            ) {
+                return $false
+            }
+            try {
+                $ManifestText = ([string]$ManifestProbe.Output).TrimStart([char]0xFEFF)
+                $Manifest = $ManifestText | ConvertFrom-Json
+            }
+            catch { return $false }
+            if (
+                $Manifest.ready -ne $true -or
+                [string]$Manifest.runtime -ne [string]$Managed.runtime_name -or
+                [int]$Manifest.preparation_version -ne [int]$Managed.preparation_version -or
+                [string]$Manifest.source_image_ref -ne $ImageRef -or
+                [string]$Manifest.source_image_id -ne $ImageId -or
+                $Manifest.smoke_test.passed -ne $true -or
+                @($Manifest.files).Count -lt 1
             ) {
                 return $false
             }
@@ -503,6 +541,7 @@ function Write-BootstrapManagedRuntimeState {
             name = [string]$Managed.volume
             runtime_name = [string]$Managed.runtime_name
             preparation_version = [int]$Managed.preparation_version
+            ready_manifest = [string]$Managed.ready_manifest
         })
     }
     # A narrower run (setup) must not erase a wider seal (setup_full). Carry over
@@ -525,6 +564,7 @@ function Write-BootstrapManagedRuntimeState {
                         name = $Name
                         runtime_name = [string]$Entry.runtime_name
                         preparation_version = [int]$Entry.preparation_version
+                        ready_manifest = [string]$Entry.ready_manifest
                     })
                 }
             }
