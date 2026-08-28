@@ -197,6 +197,25 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             self.assertIn(f"{runtime} {tier}", text)
             self.assertNotIn("pip install", text)
 
+    def test_console_uses_standard_cmd_font_and_nonblocking_capture(self) -> None:
+        console = (ROOT / "scripts" / "configure_console.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("@('Consolas', 'Cascadia Mono')", console)
+        self.assertIn("Set($Face, 16)", console)
+        for helper in ("run_windows.cmd", "setup_windows.cmd"):
+            text = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
+            self.assertIn("color 07", text)
+
+        module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("ComicBootstrapProcess", module)
+        self.assertNotIn("ReadToEndAsync", module)
+        self.assertIn("COMIC_DOWNLOAD_PROGRESS_STYLE", (
+            ROOT / "scripts" / "bootstrap_windows.ps1"
+        ).read_text(encoding="utf-8"))
+
     def test_launchers_offer_no_install_release_contract(self) -> None:
         bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
             encoding="utf-8"

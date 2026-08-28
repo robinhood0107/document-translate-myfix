@@ -95,6 +95,17 @@ def verify_cuda_version(expected_cuda: str) -> list[str]:
     return []
 
 
+def verify_core_imports() -> list[str]:
+    try:
+        import PySide6  # noqa: F401
+        import cv2  # noqa: F401
+        import numpy  # noqa: F401
+        import onnxruntime  # noqa: F401
+    except Exception as exc:
+        return [f"runtime core import failed: {exc}"]
+    return []
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Verify every pinned direct Windows runtime requirement."
@@ -107,6 +118,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Requirements file to verify. Nested -r files are followed.",
     )
     parser.add_argument("--expected-cuda", required=True)
+    parser.add_argument(
+        "--core-imports",
+        action="store_true",
+        help="Import the core GUI/CV/ONNX modules in the same process as torch.",
+    )
     return parser
 
 
@@ -120,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
 
     errors = verify_installed_requirements(pinned)
     errors.extend(verify_cuda_version(args.expected_cuda))
+    if args.core_imports:
+        errors.extend(verify_core_imports())
     if errors:
         for error in errors:
             print(f"[runtime] {error}", file=sys.stderr)
