@@ -10,6 +10,7 @@ from pipeline.batch_processor import BatchProcessor
 from pipeline.stage_batched_processor import StageBatchedProcessor
 from pipeline.webtoon_batch import WebtoonBatchProcessor
 from modules.ocr.selection import STAGE_BATCHED_WORKFLOW_MODE
+from modules.utils.windows_installation import assert_selected_windows_models_installed
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,12 @@ class ComicTranslatePipeline:
     def batch_process(self, selected_paths=None):
         """Regular batch processing."""
         paths = list(selected_paths or self.main_page.image_files or [])
+        source_lang = self.main_page.s_combo.currentText()
+        source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
+        assert_selected_windows_models_installed(
+            self.main_page.settings_page,
+            source_lang_english,
+        )
         preflight = getattr(self.main_page.file_handler, "preflight_for_processing", None)
         if callable(preflight):
             preflight(
