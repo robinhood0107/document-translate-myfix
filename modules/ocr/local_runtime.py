@@ -445,7 +445,7 @@ class LocalOCRRuntimeManager:
             )
         if engine_key == "PaddleOCR VL":
             self._ensure_paddle_runtime_images()
-            contract = self._paddle_runtime_contract(force_refresh=True)
+            contract = self._paddle_runtime_contract(force_refresh=False)
             material = RouterModelMaterial(
                 alias=pair.ocr_alias,
                 model_file=PADDLE_LLAMA_MODEL_NAME,
@@ -464,7 +464,7 @@ class LocalOCRRuntimeManager:
             )
         elif engine_key == "PaddleOCR VL Spotting":
             self._ensure_paddle_spotting_runtime_image()
-            contract = self._paddle_spotting_runtime_contract(force_refresh=True)
+            contract = self._paddle_spotting_runtime_contract(force_refresh=False)
             material = RouterModelMaterial(
                 alias=pair.ocr_alias,
                 model_file=PADDLE_SPOTTING_MODEL_NAME,
@@ -485,7 +485,7 @@ class LocalOCRRuntimeManager:
             )
         elif engine_key == "HunyuanOCR":
             self._ensure_hunyuan_ocr_runtime_image()
-            contract = self._hunyuan_ocr_runtime_contract(force_refresh=True)
+            contract = self._hunyuan_ocr_runtime_contract(force_refresh=False)
             material = RouterModelMaterial(
                 alias=pair.ocr_alias,
                 model_file=HUNYUAN_OCR_MODEL_NAME,
@@ -504,7 +504,7 @@ class LocalOCRRuntimeManager:
             )
         elif engine_key == "MangaLMM":
             self._ensure_mangalmm_runtime_image()
-            contract = self._mangalmm_runtime_contract(force_refresh=True)
+            contract = self._mangalmm_runtime_contract(force_refresh=False)
             material = RouterModelMaterial(
                 alias=pair.ocr_alias,
                 model_file=MANGALMM_MODEL_NAME,
@@ -782,6 +782,11 @@ class LocalOCRRuntimeManager:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
             self._startup_progress_callback = progress_callback
+            if self._is_cancelled(cancel_checker):
+                self._readiness_cache.clear()
+                raise OperationCancelledError(
+                    f"Cancelled while preparing {engine_key} runtime."
+                )
             router_pair = self.router_pair_for_engine(engine_key, settings_page)
             if router_pair is not None:
                 self._ensure_router_engine(
@@ -2068,13 +2073,15 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
         from modules.utils.llama_cpp_runtime import remove_named_container
 
-        remove_named_container("comic-translate-paddleocr-vl-volume-probe")
-        completed = run_docker_command(
-            [
+        probe_container = "comic-translate-paddleocr-vl-volume-probe"
+        remove_named_container(probe_container)
+        try:
+            completed = run_docker_command(
+                [
                 "docker",
                 "run",
                 "--name",
-                "comic-translate-paddleocr-vl-volume-probe",
+                probe_container,
                 "--rm",
                 "--pull",
                 "never",
@@ -2090,11 +2097,13 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                 "/bin/sh",
                 image_ref,
                 "-ec",
-                shell_script,
-            ],
-            check=False,
-            cancel_checker=self._startup_cancel_checker,
-        )
+                    shell_script,
+                ],
+                check=False,
+                cancel_checker=self._startup_cancel_checker,
+            )
+        finally:
+            remove_named_container(probe_container)
         if completed.returncode != 0:
             detail = (
                 (completed.stderr or "") + "\n" + (completed.stdout or "")
@@ -2197,13 +2206,15 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
         from modules.utils.llama_cpp_runtime import remove_named_container
 
-        remove_named_container("comic-translate-mangalmm-volume-probe")
-        completed = run_docker_command(
-            [
+        probe_container = "comic-translate-mangalmm-volume-probe"
+        remove_named_container(probe_container)
+        try:
+            completed = run_docker_command(
+                [
                 "docker",
                 "run",
                 "--name",
-                "comic-translate-mangalmm-volume-probe",
+                probe_container,
                 "--rm",
                 "--pull",
                 "never",
@@ -2219,11 +2230,13 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                 "/bin/sh",
                 image_ref,
                 "-ec",
-                shell_script,
-            ],
-            check=False,
-            cancel_checker=self._startup_cancel_checker,
-        )
+                    shell_script,
+                ],
+                check=False,
+                cancel_checker=self._startup_cancel_checker,
+            )
+        finally:
+            remove_named_container(probe_container)
         if completed.returncode != 0:
             detail = (
                 (completed.stderr or "") + "\n" + (completed.stdout or "")
@@ -2413,33 +2426,40 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
         from modules.utils.llama_cpp_runtime import remove_named_container
 
-        remove_named_container("comic-translate-hunyuanocr-volume-probe")
-        completed = run_docker_command(
-            [
-                "docker",
-                "run",
-                "--name",
-                "comic-translate-hunyuanocr-volume-probe",
-                "--rm",
-                "--pull",
-                "never",
-                "-e",
-                f"READY_MANIFEST={DEFAULT_HUNYUAN_OCR_READY_MANIFEST}",
-                "-e",
-                f"MODEL_FILE={HUNYUAN_OCR_MODEL_NAME}",
-                "-e",
-                f"MMPROJ_FILE={HUNYUAN_OCR_MMPROJ_NAME}",
-                "--mount",
-                f"type=volume,source={volume_name},target=/models,readonly",
-                "--entrypoint",
-                "/bin/sh",
-                image_ref,
-                "-ec",
-                shell_script,
-            ],
-            check=False,
-            cancel_checker=self._startup_cancel_checker,
-        )
+        probe_container = "comic-translate-hunyuanocr-volume-probe"
+        remove_named_container(probe_container)
+        try:
+            completed = run_docker_command(
+                [
+                    "docker",
+                    "run",
+                    "--name",
+                    probe_container,
+                    "--rm",
+                    "--pull",
+                    "never",
+                    "-e",
+                    f"READY_MANIFEST={DEFAULT_HUNYUAN_OCR_READY_MANIFEST}",
+                    "-e",
+                    f"MODEL_FILE={HUNYUAN_OCR_MODEL_NAME}",
+                    "-e",
+                    f"MMPROJ_FILE={HUNYUAN_OCR_MMPROJ_NAME}",
+                    "--mount",
+                    f"type=volume,source={volume_name},target=/models,readonly",
+                    "--entrypoint",
+                    "/bin/sh",
+                    image_ref,
+                    "-ec",
+                    shell_script,
+                ],
+                check=False,
+                cancel_checker=self._startup_cancel_checker,
+            )
+        finally:
+            # Cancelling the Docker client does not guarantee that its named
+            # `docker run --rm` container was removed. Cleanup intentionally
+            # ignores the cancelled checker.
+            remove_named_container(probe_container)
         if completed.returncode != 0:
             detail = (
                 (completed.stderr or "") + "\n" + (completed.stdout or "")
@@ -2547,13 +2567,15 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
 '''.strip()
         from modules.utils.llama_cpp_runtime import remove_named_container
 
-        remove_named_container("comic-translate-paddleocr-vl-spotting-volume-probe")
-        completed = run_docker_command(
-            [
+        probe_container = "comic-translate-paddleocr-vl-spotting-volume-probe"
+        remove_named_container(probe_container)
+        try:
+            completed = run_docker_command(
+                [
                 "docker",
                 "run",
                 "--name",
-                "comic-translate-paddleocr-vl-spotting-volume-probe",
+                probe_container,
                 "--rm",
                 "--pull",
                 "never",
@@ -2575,11 +2597,13 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                 "/bin/sh",
                 image_ref,
                 "-ec",
-                shell_script,
-            ],
-            check=False,
-            cancel_checker=self._startup_cancel_checker,
-        )
+                    shell_script,
+                ],
+                check=False,
+                cancel_checker=self._startup_cancel_checker,
+            )
+        finally:
+            remove_named_container(probe_container)
         if completed.returncode != 0:
             detail = (
                 (completed.stderr or "")

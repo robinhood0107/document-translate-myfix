@@ -303,7 +303,7 @@ def test_handler_reloads_same_model_when_runtime_profile_changes() -> None:
     assert second.precision == "fp32"
 
 
-def test_handler_refuses_profile_reload_without_confirmed_vram_release() -> None:
+def test_handler_warns_and_reloads_profile_when_release_enforcement_is_off() -> None:
     runtime = {
         "key": "lama_large_512px",
         "backend": "torch",
@@ -343,6 +343,62 @@ def test_handler_refuses_profile_reload_without_confirmed_vram_release() -> None
                 "status": "timeout",
             }
         },
+    ), mock.patch(
+        "pipeline.inpainting.gpu_release_enforcement_enabled",
+        return_value=False,
+    ):
+        loaded = handler._ensure_inpainter()
+
+    assert loaded is handler.inpainter_cache
+    assert handler.cached_inpainter_runtime_signature == (
+        "lama_large_512px",
+        "torch",
+        "cuda",
+        2048,
+        "fp32",
+    )
+
+
+def test_handler_refuses_profile_reload_when_release_enforcement_is_on() -> None:
+    runtime = {
+        "key": "lama_large_512px",
+        "backend": "torch",
+        "device": "cuda",
+        "inpaint_size": 2048,
+        "precision": "fp32",
+    }
+    settings_page = SimpleNamespace(is_gpu_enabled=lambda: True)
+    handler = InpaintingHandler(SimpleNamespace(settings_page=settings_page))
+    handler.inpainter_cache = _FakeInpainter(
+        "cuda",
+        backend="torch",
+        runtime_device="cuda",
+        inpaint_size=1536,
+        precision="bf16",
+    )
+    handler.cached_inpainter_runtime_signature = (
+        "lama_large_512px",
+        "torch",
+        "cuda",
+        1536,
+        "bf16",
+    )
+    with mock.patch(
+        "pipeline.inpainting.get_inpainter_runtime",
+        return_value=runtime,
+    ), mock.patch.object(
+        handler,
+        "release_inpainter_resources",
+        return_value={
+            "vram_release_gate": {
+                "required": True,
+                "observed": False,
+                "status": "timeout",
+            }
+        },
+    ), mock.patch(
+        "pipeline.inpainting.gpu_release_enforcement_enabled",
+        return_value=True,
     ):
         with pytest.raises(
             InpaintingRuntimeContractError,
