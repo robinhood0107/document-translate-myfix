@@ -263,10 +263,10 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.action_layout.setHorizontalSpacing(8)
         self.action_layout.setVerticalSpacing(8)
 
-        self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
+        self.pause_button = QtWidgets.QPushButton(self.tr("Pause"), self.left_panel)
         self.pause_button.clicked.connect(self._on_pause_clicked)
 
-        self.series_board_button = QtWidgets.QPushButton(self.tr("Series Board"))
+        self.series_board_button = QtWidgets.QPushButton(self.tr("Series Board"), self.left_panel)
         self.series_board_button.clicked.connect(
             lambda: self._defer_button_action(
                 self.series_board_button,
@@ -275,7 +275,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             )
         )
 
-        self.current_item_button = QtWidgets.QPushButton(self.tr("Current Item"))
+        self.current_item_button = QtWidgets.QPushButton(self.tr("Current Item"), self.left_panel)
         self.current_item_button.clicked.connect(
             lambda: self._defer_button_action(
                 self.current_item_button,
@@ -284,11 +284,11 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             )
         )
 
-        self.cancel_button = QtWidgets.QPushButton(self.tr("Cancel"))
+        self.cancel_button = QtWidgets.QPushButton(self.tr("Cancel"), self.left_panel)
         self.cancel_button.setObjectName("dangerAction")
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
 
-        self.report_button = QtWidgets.QPushButton(self.tr("Report"))
+        self.report_button = QtWidgets.QPushButton(self.tr("Report"), self.left_panel)
         self.report_button.clicked.connect(
             lambda: self._defer_button_action(
                 self.report_button,
@@ -297,7 +297,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             )
         )
 
-        self.retry_button = QtWidgets.QPushButton(self.tr("Retry"))
+        self.retry_button = QtWidgets.QPushButton(self.tr("Retry"), self.left_panel)
         self.retry_button.setObjectName("primaryAction")
         self.retry_button.clicked.connect(
             lambda: self._defer_button_action(
@@ -307,7 +307,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             )
         )
 
-        self.settings_button = QtWidgets.QPushButton(self.tr("Settings"))
+        self.settings_button = QtWidgets.QPushButton(self.tr("Settings"), self.left_panel)
         self.settings_button.clicked.connect(
             lambda: self._defer_button_action(
                 self.settings_button,
@@ -316,7 +316,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             )
         )
 
-        self.open_output_button = QtWidgets.QPushButton(self.tr("Open Output"))
+        self.open_output_button = QtWidgets.QPushButton(self.tr("Open Output"), self.left_panel)
         self.open_output_button.setObjectName("accentAction")
         self.open_output_button.clicked.connect(
             lambda: self._defer_button_action(
@@ -326,7 +326,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             )
         )
 
-        self.close_button = QtWidgets.QPushButton(self.tr("Close"))
+        self.close_button = QtWidgets.QPushButton(self.tr("Close"), self.left_panel)
         self.close_button.clicked.connect(
             lambda: self._defer_button_action(
                 self.close_button,
@@ -1085,11 +1085,21 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         ):
             label.setToolTip("")
         self._append_log(text)
-        self.close_button.setVisible(bool(closable))
+        if not self._pipeline_active:
+            self.close_button.setVisible(bool(closable))
+            self._relayout_action_buttons()
         if not self._pipeline_active and duration:
             self.schedule_auto_close(int(duration) * 1000)
 
     def show_download_message(self, text: str) -> None:
+        if self._pipeline_active:
+            self.cancel_auto_close()
+            self.show()
+            self.raise_()
+            self.message_value.setText(text)
+            self.service_value.setText(self.tr("Download"))
+            self._append_log(text)
+            return
         self.show_passive_message("info", text, duration=None, closable=True, source="download")
 
     def clear_download_message(self) -> None:

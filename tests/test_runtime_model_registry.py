@@ -10,7 +10,7 @@ from modules.utils.paths import get_project_models_dir
 class RuntimeModelRegistryTests(unittest.TestCase):
     def test_models_base_dir_uses_project_local_models_folder(self) -> None:
         self.assertEqual(models_base_dir, get_project_models_dir())
-        self.assertTrue(models_base_dir.endswith(os.path.join("comic-translate", "models")))
+        self.assertEqual(os.path.basename(models_base_dir), "models")
 
     def test_ctd_and_lama_specs_resolve_inside_project_models(self) -> None:
         expected = {

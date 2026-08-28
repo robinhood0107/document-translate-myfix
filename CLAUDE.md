@@ -17,10 +17,13 @@ Windows environments named in `rules.md` for repository workflows.
 
 Setup and launch are separate Windows entrypoints. `setup*.bat` (core tier)
 and `setup_full*.bat` (adds MangaLMM and PaddleOCR VL Spotting) run the shared
-PowerShell bootstrap, which owns the isolated venvs and managed model volumes
+PowerShell bootstrap, which owns the isolated venvs, complete default
+application-model seal, and managed model volumes
 and never launches the application. `run_comic.bat` and `run_comic_cuda13.bat`
-remain dedicated CUDA12/CUDA13 launch entrypoints and must never pull images,
-create volumes, or invoke a `prepare_*` script. Treat Python 3.12 x64, WSL2,
+remain dedicated CUDA12/CUDA13 launch entrypoints and must never create a venv,
+install packages, download models, pull images, create volumes, or invoke a
+`prepare_*` script. The application never repairs installation state; missing
+core/full seals fail before page work with the matching setup command. Treat Python 3.12 x64, WSL2,
 Docker Desktop, and the NVIDIA driver as prerequisites. Keep CI fast and source-contract-only; do not add a clean
 Windows package/model bootstrap job, but enforce release dependency closure.
 

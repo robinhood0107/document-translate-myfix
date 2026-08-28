@@ -9,7 +9,7 @@ PaddleOCR-VL Spotting)는 모두 준비된 Docker 볼륨 안의 ready manifest�
 
 manifest는 준비 당시의 llama.cpp image identity를 함께 봉인합니다. 기본 image
 참조는 고정 digest가 아니라 움직이는 태그
-(`ghcr.io/ggml-org/llama.cpp:server-cuda13`)이므로, 업스트림이 그 태그를 갱신하고
+(`ghcr.io/ggml-org/llama.cpp:server-cuda`)이므로, 업스트림이 그 태그를 갱신하고
 로컬에서 새 image를 받으면 digest가 바뀝니다.
 
 그러면 모델 파일이 계약과 완전히 같은데도 manifest의 image identity만 어긋나
@@ -39,20 +39,16 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Auto
 ```
 
-## 앱의 자가복구
+## 앱의 읽기 전용 검증
 
-앱은 관리형 런타임을 시작할 때 계약을 세웁니다. 계약이 깨졌고 **어긋난 것이
-봉인된 image identity 하나뿐**이라고 판정되면, 해당 준비 스크립트를 `Auto`로
-한 번 실행한 뒤 계약을 다시 세웁니다. 진행 상황은 `runtime_repair` 단계로
-표시되며 취소할 수 있습니다.
+앱은 관리형 런타임을 시작할 때 계약을 읽기 전용으로 검사합니다. image identity,
+manifest, 파일, volume 중 하나라도 setup 봉인과 다르면 다운로드, pull, `Auto`,
+reseal을 실행하지 않고 페이지 처리 전에 실패합니다. core 런타임은 해당
+`setup*.bat`, MangaLMM/Spotting은 `setup_full*.bat`을 다시 실행해야 합니다.
 
-판정은 보수적입니다. manifest가 스스로 기록한 image identity로 되돌렸을 때
-전체 계약이 통과해야만 drift로 봅니다. 모델 SHA-256 불일치, 스키마 위반,
-파일 누락처럼 볼륨을 실제로 신뢰할 수 없는 상태는 자동으로 다시 봉인하지 않고
-그대로 실패시킵니다. 신뢰할 수 없는 볼륨에 유효 도장을 찍지 않기 위해서입니다.
-
-자가복구는 한 번만 시도합니다. 다시 봉인한 뒤에도 계약이 서지 않으면 원래
-오류를 그대로 올립니다.
+준비 스크립트의 `Auto`/`Reseal`은 setup과 명시적인 운영자 복구 명령에서만
+사용합니다. 이 경계 때문에 GUI 파이프라인이 장시간 실행 중 갑자기 모델을
+내려받거나 volume을 바꾸지 않습니다.
 
 ## 원본 파일 해결 순서
 

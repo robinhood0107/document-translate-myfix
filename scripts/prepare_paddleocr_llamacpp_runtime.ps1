@@ -44,8 +44,7 @@ $PreparationVersion = 1
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'
 $RuntimeName = 'PaddleOCR-VL-llama.cpp'
-# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy
 $ImageRef = Resolve-ManagedLlamaCppImageRef `
     -RequestedImage $ImageRef `
     -RuntimeOverride $env:PADDLEOCR_LLAMA_CPP_IMAGE
@@ -334,7 +333,7 @@ $SmokeResult = $null
 try {
     Write-Host "Running $SmokeDevice model-load smoke from the named volume."
     $DockerArgs = @(
-        'run', '-d', '--rm',
+        'run', '-d',
         '--name', $SmokeContainer,
         '--label', 'comic-translate.runtime=paddle-llama-prepare-smoke',
         '-p', "127.0.0.1:${SmokePort}:8080",
@@ -386,13 +385,16 @@ try {
         }
         catch {
         }
+        if (-not (Test-ManagedRuntimeContainerRunning -Name $SmokeContainer)) {
+            break
+        }
         Start-Sleep -Seconds 1
     } while ([DateTime]::UtcNow -lt $Deadline)
     if (-not $HealthReady) {
         $Logs = Invoke-DockerResult -Arguments @(
             'logs', '--tail', '120', $SmokeContainer
         )
-        throw "PaddleOCR llama.cpp smoke timed out.`n$($Logs.Output)"
+        throw "PaddleOCR llama.cpp smoke failed before health became ready.`n$($Logs.Output)"
     }
 
     $Models = Invoke-RestMethod `
@@ -476,15 +478,7 @@ try {
     }
 }
 finally {
-    if (
-        (Invoke-DockerResult -Arguments @(
-            'inspect', '--format', '{{.Name}}', $SmokeContainer
-        )).ExitCode -eq 0
-    ) {
-        Invoke-Docker -Arguments @(
-            'stop', '--timeout', '10', $SmokeContainer
-        ) | Out-Null
-    }
+    Remove-ManagedRuntimeContainer -Name $SmokeContainer
 }
 
 $Manifest = [ordered]@{

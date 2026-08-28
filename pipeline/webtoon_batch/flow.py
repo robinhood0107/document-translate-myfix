@@ -476,19 +476,6 @@ class FlowMixin:
                             "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
                         ).replace("{pages}", pages).replace("{sizes}", sizes),
                     )
-            try:
-                if self.main_page.file_handler.should_pre_materialize(image_list):
-                    count = self.main_page.file_handler.pre_materialize(image_list)
-                    logger.info(
-                        "Webtoon batch pre-materialized %d paths before processing.",
-                        count,
-                    )
-            except Exception:
-                logger.debug(
-                    "Webtoon batch pre-materialization failed; continuing lazily.",
-                    exc_info=True,
-                )
-
             self.final_patches_for_save.clear()
             global_index_by_path = {
                 path: idx for idx, path in enumerate(self.main_page.image_files)

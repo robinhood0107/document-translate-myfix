@@ -41,8 +41,7 @@ $PreparationVersion = 2
 $ManifestSchemaVersion = 1
 $ReadyManifestName = '.comic-translate-mangalmm-ready-v2.json'
 $RuntimeName = 'MangaLMM-llama.cpp'
-# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy
 $ImageRef = Resolve-ManagedLlamaCppImageRef `
     -RequestedImage $ImageRef `
     -RuntimeOverride $env:MANGALMM_LLAMA_CPP_IMAGE
@@ -338,7 +337,7 @@ $SmokeResult = $null
 try {
     Write-Host 'Running CUDA model-load smoke from the named volume.'
     Invoke-Docker -Arguments @(
-        'run', '-d', '--rm',
+        'run', '-d',
         '--name', $SmokeContainer,
         '--label', 'comic-translate.runtime=mangalmm-prepare-smoke',
         '--gpus', 'all',
@@ -380,13 +379,16 @@ try {
         }
         catch {
         }
+        if (-not (Test-ManagedRuntimeContainerRunning -Name $SmokeContainer)) {
+            break
+        }
         Start-Sleep -Seconds 1
     } while ([DateTime]::UtcNow -lt $Deadline)
     if (-not $HealthReady) {
         $Logs = Invoke-DockerResult -Arguments @(
             'logs', '--tail', '120', $SmokeContainer
         )
-        throw "MangaLMM smoke timed out.`n$($Logs.Output)"
+        throw "MangaLMM smoke failed before health became ready.`n$($Logs.Output)"
     }
 
     $Models = Invoke-RestMethod `
@@ -408,15 +410,7 @@ try {
     }
 }
 finally {
-    if (
-        (Invoke-DockerResult -Arguments @(
-            'inspect', '--format', '{{.Name}}', $SmokeContainer
-        )).ExitCode -eq 0
-    ) {
-        Invoke-Docker -Arguments @(
-            'stop', '--timeout', '10', $SmokeContainer
-        ) | Out-Null
-    }
+    Remove-ManagedRuntimeContainer -Name $SmokeContainer
 }
 
 $Manifest = [ordered]@{

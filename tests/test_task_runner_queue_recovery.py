@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -102,6 +103,41 @@ class TaskRunnerQueueRecoveryTests(unittest.TestCase):
             self._drain(lambda: "after" in done),
             "queue stayed blocked after an error callback raised",
         )
+
+    def test_progress_worker_delivers_events_and_result_on_ui_thread(self) -> None:
+        progress: list[dict] = []
+        results: list[str] = []
+
+        def worker(report_progress):
+            report_progress({"stage": "index", "current": 1, "total": 2})
+            report_progress({"stage": "decode", "current": 2, "total": 2})
+            return "ready"
+
+        self.runner.run_threaded_with_progress(
+            worker,
+            progress.append,
+            results.append,
+        )
+        self.assertTrue(self._drain(lambda: results == ["ready"]))
+        self.assertEqual([event["stage"] for event in progress], ["index", "decode"])
+
+    def test_progress_worker_does_not_block_the_qt_event_loop(self) -> None:
+        ticks: list[str] = []
+        results: list[str] = []
+
+        def worker(report_progress):
+            report_progress({"stage": "index"})
+            time.sleep(0.15)
+            return "ready"
+
+        timer = QtCore.QTimer(self.main)
+        timer.setInterval(10)
+        timer.timeout.connect(lambda: ticks.append("tick"))
+        timer.start()
+        self.runner.run_threaded_with_progress(worker, lambda _event: None, results.append)
+        self.assertTrue(self._drain(lambda: results == ["ready"]))
+        timer.stop()
+        self.assertGreater(len(ticks), 0)
 
 
 if __name__ == "__main__":

@@ -111,7 +111,7 @@ print(json.dumps(payload, ensure_ascii=False))
 
 
 def verify_bootstrap(cfg: dict) -> None:
-    command = f'set COMIC_BOOTSTRAP_ONLY=1 && call .\\{cfg["bat"]}'
+    command = f'set COMIC_BOOTSTRAP_ONLY=1 && call .\\{cfg["setup_bats"][0]}'
     env = os.environ.copy()
     env["COMIC_NO_PAUSE"] = "1"
     run_checked(
@@ -140,9 +140,15 @@ def verify_source_contract(cfg: dict) -> None:
 
 
 def verify_smoke(cfg: dict) -> None:
+    install_state = ROOT / ".comic-bootstrap" / f"install-state-{cfg['label']}.json"
+    if not install_state.is_file():
+        print(
+            f"\n=== {cfg['label']} startup smoke ===\n"
+            "[SKIP] No sealed install state; source-contract checks remain authoritative."
+        )
+        return
     command = (
         "set CT_DISABLE_UPDATE_CHECK=1 && "
-        "set COMIC_SKIP_STARTUP_MODELS=1 && "
         "set COMIC_SMOKE_EXIT_MS=1500 && "
         f"call .\\{cfg['bat']}"
     )

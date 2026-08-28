@@ -23,7 +23,7 @@ from modules.ocr.common.result_contract import (
 )
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
+from modules.utils.pipeline_config import get_config, get_inpainter_runtime
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
@@ -1213,13 +1213,6 @@ class BatchProcessor:
                         "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
                     ).replace("{pages}", pages).replace("{sizes}", sizes),
                 )
-        try:
-            if self.main_page.file_handler.should_pre_materialize(image_list):
-                count = self.main_page.file_handler.pre_materialize(image_list)
-                logger.info("Batch pre-materialized %d paths before full-run processing.", count)
-        except Exception:
-            logger.debug("Batch pre-materialization failed; continuing lazily.", exc_info=True)
-
         for index, image_path in enumerate(image_list):
             if self._is_cancelled():
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
@@ -1654,6 +1647,14 @@ class BatchProcessor:
                         self.emit_progress(index, total_images, 10, 10, False)
                         continue
                     
+                except OperationCancelledError:
+                    self._emit_benchmark_event(
+                        "batch_run_cancelled",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                    )
+                    return
                 except Exception as e:
                     # if it's a connection/network error, give a short message
                     if isinstance(e, requests.exceptions.ConnectionError):
@@ -1829,28 +1830,6 @@ class BatchProcessor:
                 inpaint_blocks, protected_inpaint_blocks = (
                     split_inpaint_protected_ocr_blocks(blk_list)
                 )
-                if inpaint_blocks and (
-                    self.inpainting.inpainter_cache is None
-                    or self.inpainting.cached_inpainter_key != inpainter_key
-                ):
-                    device = resolve_device(
-                        settings_page.is_gpu_enabled(),
-                        backend=inpainter_backend,
-                    )
-                    InpainterClass = inpaint_map[inpainter_key]
-                    logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
-                    t0 = time.time()
-                    self.inpainting.inpainter_cache = InpainterClass(
-                        device,
-                        backend=inpainter_backend,
-                        runtime_device=runtime.get("device", device),
-                        inpaint_size=runtime.get("inpaint_size"),
-                        precision=runtime.get("precision"),
-                    )
-                    self.inpainting.cached_inpainter_key = inpainter_key
-                    t1 = time.time()
-                    logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
-
                 if inpaint_blocks:
                     config = get_config(settings_page)
                     logger.info(
@@ -2210,6 +2189,14 @@ class BatchProcessor:
                     cache_status=translation_cache_status,
                     **page_translation_metrics,
                 )
+            except OperationCancelledError:
+                self._emit_benchmark_event(
+                    "batch_run_cancelled",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                )
+                return
             except Exception as e:
                 # if it's a connection/network error, give a short message
                 if isinstance(e, requests.exceptions.ConnectionError):

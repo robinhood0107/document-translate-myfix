@@ -1,11 +1,89 @@
 ﻿Set-StrictMode -Version Latest
 
+if (-not ('ComicBootstrapProcess' -as [type])) {
+    Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Text;
+
+public sealed class ComicBootstrapProcessResult {
+    public int ExitCode { get; set; }
+    public string Output { get; set; }
+}
+
+public static class ComicBootstrapProcess {
+    private static bool ShouldDisplay(string line) {
+        if (String.IsNullOrWhiteSpace(line)) return false;
+        return line.StartsWith("[model", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("[download]", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Application model", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Downloaded", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Resuming download", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Checking downloaded", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Checking completed partial", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("The server ignored", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("WARNING: Model download attempt", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Auto mode", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Running CUDA", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Running a real", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Waiting for", StringComparison.OrdinalIgnoreCase)
+            || (line.StartsWith("[") && line.Contains("%"));
+    }
+
+    public static ComicBootstrapProcessResult Run(
+        string fileName,
+        string arguments,
+        string workingDirectory,
+        bool liveOutput
+    ) {
+        var info = new ProcessStartInfo();
+        info.FileName = fileName;
+        info.Arguments = arguments ?? "";
+        info.WorkingDirectory = String.IsNullOrWhiteSpace(workingDirectory)
+            ? Environment.CurrentDirectory
+            : workingDirectory;
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+
+        var output = new StringBuilder();
+        var gate = new object();
+        using (var process = new Process()) {
+            process.StartInfo = info;
+            process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs) {
+                if (eventArgs.Data == null) return;
+                lock (gate) { output.AppendLine(eventArgs.Data); }
+                if (liveOutput && ShouldDisplay(eventArgs.Data)) Console.WriteLine(eventArgs.Data);
+            };
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs) {
+                if (eventArgs.Data == null) return;
+                lock (gate) { output.AppendLine(eventArgs.Data); }
+                if (liveOutput && ShouldDisplay(eventArgs.Data)) Console.WriteLine(eventArgs.Data);
+            };
+            if (!process.Start()) throw new InvalidOperationException("Unable to start " + fileName);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.WaitForExit();
+            process.WaitForExit();
+            return new ComicBootstrapProcessResult {
+                ExitCode = process.ExitCode,
+                Output = output.ToString().TrimEnd()
+            };
+        }
+    }
+}
+'@
+}
+
 function Write-BootstrapMessage {
     param(
         [Parameter(Mandatory = $true)][string]$Message,
         [ValidateSet('INFO', 'OK', 'SKIP', 'WARN', 'ERROR')][string]$Level = 'INFO'
     )
-    $Color = @{ INFO = 'Cyan'; OK = 'Green'; SKIP = 'DarkGray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
+    $Color = @{ INFO = 'Gray'; OK = 'Green'; SKIP = 'DarkGray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
     Write-Host ("[{0}] {1}" -f $Level, $Message) -ForegroundColor $Color
 }
 
@@ -42,16 +120,37 @@ function Invoke-BootstrapCommand {
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
         [string]$WorkingDirectory = '',
-        [switch]$Quiet
+        [switch]$Quiet,
+        [switch]$ShowOutput,
+        [switch]$LiveOutput
     )
+    if (-not $Quiet) {
+        $DisplayName = [System.IO.Path]::GetFileName($FilePath)
+        Write-BootstrapMessage "Running $DisplayName..."
+    }
     $Previous = Get-Location
     try {
         if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
-        if (-not $Quiet) { Write-BootstrapMessage ("Running: {0} {1}" -f $FilePath, ($Arguments -join ' ')) }
-        & $FilePath @Arguments
-        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
-        $Code = if ($null -eq $ObservedExitCode) { 0 } else { [int]$ObservedExitCode }
-        if ($Code -ne 0) { throw "Command failed with exit code ${Code}: $FilePath" }
+        $Result = Invoke-BootstrapCapturedCommand `
+            -FilePath $FilePath `
+            -Arguments $Arguments `
+            -LiveOutput:$LiveOutput
+        if (
+            $env:COMIC_BOOTSTRAP_DETAIL_LOG -and
+            -not [string]::IsNullOrWhiteSpace([string]$Result.Output)
+        ) {
+            Add-Content -LiteralPath $env:COMIC_BOOTSTRAP_DETAIL_LOG -Encoding UTF8 -Value @(
+                "[$(Get-Date -Format o)] $FilePath $($Arguments -join ' ')"
+                [string]$Result.Output
+                ''
+            )
+        }
+        if ($Result.ExitCode -ne 0) {
+            throw "Command failed with exit code $($Result.ExitCode): $([System.IO.Path]::GetFileName($FilePath))."
+        }
+        if ($ShowOutput -and -not [string]::IsNullOrWhiteSpace([string]$Result.Output)) {
+            Write-Host ([string]$Result.Output).Trim()
+        }
     }
     finally { Set-Location $Previous }
 }
@@ -61,14 +160,9 @@ function Invoke-BootstrapProbe {
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @()
     )
-    $PreviousPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        & $FilePath @Arguments *> $null
-        $ObservedExitCode = Get-Variable -Name LASTEXITCODE -ValueOnly -ErrorAction SilentlyContinue
-        return $(if ($null -eq $ObservedExitCode) { 0 } else { [int]$ObservedExitCode })
-    }
-    finally { $ErrorActionPreference = $PreviousPreference }
+    return [int](
+        Invoke-BootstrapCapturedCommand -FilePath $FilePath -Arguments $Arguments
+    ).ExitCode
 }
 
 function Resolve-BootstrapPython312 {
@@ -273,34 +367,19 @@ function ConvertTo-BootstrapNativeArgument {
 function Invoke-BootstrapCapturedCommand {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        [switch]$LiveOutput
     )
 
-    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $StartInfo.FileName = $FilePath
-    $StartInfo.Arguments = ($Arguments | ForEach-Object {
+    $ArgumentText = ($Arguments | ForEach-Object {
         ConvertTo-BootstrapNativeArgument -Argument $_
     }) -join ' '
-    $StartInfo.UseShellExecute = $false
-    $StartInfo.CreateNoWindow = $true
-    $StartInfo.RedirectStandardOutput = $true
-    $StartInfo.RedirectStandardError = $true
-    $Process = [System.Diagnostics.Process]::new()
-    $Process.StartInfo = $StartInfo
-    try {
-        if (-not $Process.Start()) { throw "Unable to start command: $FilePath" }
-        $OutputTask = $Process.StandardOutput.ReadToEndAsync()
-        $ErrorTask = $Process.StandardError.ReadToEndAsync()
-        $Process.WaitForExit()
-        return [pscustomobject]@{
-            ExitCode = [int]$Process.ExitCode
-            Output = (@(
-                $OutputTask.GetAwaiter().GetResult().TrimEnd(),
-                $ErrorTask.GetAwaiter().GetResult().TrimEnd()
-            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n"
-        }
-    }
-    finally { $Process.Dispose() }
+    return [ComicBootstrapProcess]::Run(
+        $FilePath,
+        $ArgumentText,
+        (Get-Location).Path,
+        [bool]$LiveOutput
+    )
 }
 
 function Get-NvidiaCudaCompatibilityVersion {
@@ -391,6 +470,12 @@ function Test-BootstrapManagedRuntimeState {
                 [string]$_.name -eq [string]$Managed.volume
             })
             if ($Recorded.Count -ne 1) { return $false }
+            if (
+                [string]$Recorded[0].ready_manifest -ne
+                [string]$Managed.ready_manifest
+            ) {
+                return $false
+            }
             $Inspect = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
                 'volume', 'inspect', '--format', '{{json .Labels}}', [string]$Managed.volume
             )
@@ -401,6 +486,38 @@ function Test-BootstrapManagedRuntimeState {
             if (
                 [string]$Labels.'comic-translate.runtime' -ne [string]$Managed.runtime_name -or
                 [int]$Labels.'comic-translate.preparation-version' -ne [int]$Managed.preparation_version
+            ) {
+                return $false
+            }
+            $ManifestProbe = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
+                'run', '--rm', '--pull', 'never',
+                '-e', "READY_MANIFEST=$([string]$Managed.ready_manifest)",
+                '--mount', (
+                    "type=volume,source=$([string]$Managed.volume)," +
+                    'target=/models,readonly'
+                ),
+                '--entrypoint', '/bin/sh', $ImageRef,
+                '-ec', 'cat "/models/$READY_MANIFEST"'
+            )
+            if (
+                $ManifestProbe.ExitCode -ne 0 -or
+                [string]::IsNullOrWhiteSpace([string]$ManifestProbe.Output)
+            ) {
+                return $false
+            }
+            try {
+                $ManifestText = ([string]$ManifestProbe.Output).TrimStart([char]0xFEFF)
+                $Manifest = $ManifestText | ConvertFrom-Json
+            }
+            catch { return $false }
+            if (
+                $Manifest.ready -ne $true -or
+                [string]$Manifest.runtime -ne [string]$Managed.runtime_name -or
+                [int]$Manifest.preparation_version -ne [int]$Managed.preparation_version -or
+                [string]$Manifest.source_image_ref -ne $ImageRef -or
+                [string]$Manifest.source_image_id -ne $ImageId -or
+                $Manifest.smoke_test.passed -ne $true -or
+                @($Manifest.files).Count -lt 1
             ) {
                 return $false
             }
@@ -430,6 +547,7 @@ function Write-BootstrapManagedRuntimeState {
             name = [string]$Managed.volume
             runtime_name = [string]$Managed.runtime_name
             preparation_version = [int]$Managed.preparation_version
+            ready_manifest = [string]$Managed.ready_manifest
         })
     }
     # A narrower run (setup) must not erase a wider seal (setup_full). Carry over
@@ -452,6 +570,7 @@ function Write-BootstrapManagedRuntimeState {
                         name = $Name
                         runtime_name = [string]$Entry.runtime_name
                         preparation_version = [int]$Entry.preparation_version
+                        ready_manifest = [string]$Entry.ready_manifest
                     })
                 }
             }

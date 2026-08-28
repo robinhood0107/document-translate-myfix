@@ -107,6 +107,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Requirements file to verify. Nested -r files are followed.",
     )
     parser.add_argument("--expected-cuda", required=True)
+    parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help="Verify exact installed pins without importing Torch/CUDA DLLs.",
+    )
     return parser
 
 
@@ -119,16 +124,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     errors = verify_installed_requirements(pinned)
-    errors.extend(verify_cuda_version(args.expected_cuda))
+    if not args.metadata_only:
+        errors.extend(verify_cuda_version(args.expected_cuda))
     if errors:
         for error in errors:
             print(f"[runtime] {error}", file=sys.stderr)
         return 1
 
-    print(
-        f"[runtime] Verified {len(pinned)} pinned packages "
-        f"with CUDA {args.expected_cuda}."
+    suffix = (
+        f" (metadata-only; pinned CUDA {args.expected_cuda})."
+        if args.metadata_only
+        else f" with CUDA {args.expected_cuda}."
     )
+    print(f"[runtime] Verified {len(pinned)} pinned packages{suffix}")
     return 0
 
 

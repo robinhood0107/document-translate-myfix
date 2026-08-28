@@ -29,8 +29,8 @@ For the CUDA12 path (Python cu128 plus llama.cpp `server-cuda`):
 setup.bat
 ```
 
-For the CUDA13 Python path (cu130; Docker prefers `server-cuda13` and falls
-back to `server-cuda` when the host driver cannot start the preferred image):
+For the CUDA13 Python path (cu130; Docker deliberately uses the same broadly
+compatible llama.cpp `server-cuda` image as the CUDA12 setup):
 
 ```bat
 setup_cuda13.bat
@@ -44,7 +44,8 @@ llama.cpp image only when it is missing.
 The non-interactive setup prepares:
 
 - the selected `.venv-win` or `.venv-win-cuda13` and pinned packages
-- required CTD/LaMa application models
+- RT-DETR v2 ONNX, font-detector ONNX, CTD Torch/ONNX and positive-claim ONNX
+- LaMa large and LaMa MPE application models
 - HunyuanOCR Q8 model/mmproj
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf` (about 13.58 GiB)
@@ -59,6 +60,20 @@ next run. Completion requires exact size/SHA-256 validation and real model
 load smokes. Use `setup.bat --doctor` or
 `setup_cuda13.bat --doctor` for a read-only report.
 
+The BAT keeps the classic Command Prompt host, uses UTF-8, and preserves the
+parent/default Command Prompt font, window size, and scrollback without changing
+the registry. The console shows
+package-metadata substeps (without loading CUDA DLLs), each model boundary,
+compact 10% download updates, runtime
+preparation boundaries, and the final result. Full child-command output remains
+in the timestamped `logs\bootstrap\*-detail.log` file. A setup opened by
+double-click stays on its final `DONE!` or `FAILED!` screen until a key is
+pressed; automated checks can set `COMIC_NO_PAUSE=1`.
+
+Opening images, archives, PDFs, and projects uses an embedded progress surface.
+The current workspace remains visible until the replacement has been prepared,
+and a failed open leaves the existing workspace unchanged.
+
 ## 3. Launch
 
 ```bat
@@ -69,12 +84,13 @@ run_comic.bat
 run_comic_cuda13.bat
 ```
 
-The run launchers only verify the venv and start the application, so a warm
-launch takes seconds. They never pull images or seal model volumes. If a
-runtime was never provisioned, the application prepares it on first use from
-inside the GUI, which works but is much slower than running setup first.
+The run launchers verify the venv and atomic install state, export the exact
+setup-selected llama.cpp image, and start the application. They never install,
+download, pull, create, or reseal anything. Missing core state requires the
+matching setup BAT; missing MangaLMM/Spotting state requires setup_full before
+page processing starts.
 
-Before creating a container, the CUDA13 launcher compares the image's
+Before creating a container, the CUDA13 launcher still compares the image's
 `NVIDIA_REQUIRE_CUDA` value with the driver compatibility version. After setup,
 it reuses volumes whose ready manifest, image ID, and model sizes still match,
 so later launches do not repeat full hashes or GPU smokes.
@@ -124,7 +140,7 @@ full hash verification, custom volumes, or optional runtime maintenance.
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
@@ -217,9 +233,9 @@ records the result in the ready manifest. Use `-Mode Verify` to re-check only.
 Every preparation script accepts `-Mode Auto`: it immediately reuses a valid
 seal and prepares an empty volume. When upstream refreshes the llama.cpp tag the
 image digest moves, so the models stay correct while the ready manifest no
-longer matches; only then does `Auto` choose `Reseal` and recover without
-the original source files. The app detects the same state and repairs it once on
-its own. See the Korean guide at
+longer matches; only then does setup's `Auto` choose `Reseal` and recover without
+the original source files. The running app reports the stale seal and requires
+the matching setup BAT; it never repairs the volume. See the Korean guide at
 [docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
 
 Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and

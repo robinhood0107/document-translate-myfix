@@ -41,6 +41,7 @@ $AllManagedRuntimes = @(
         preparation_version = 1
         container = 'hunyuanocr-local-server'
         ownership_label = 'com.comictranslate.hunyuanocr-model-volume'
+        ready_manifest = '.comic-translate-hunyuanocr-ready-v1.json'
         tier = 'core'
     },
     [pscustomobject]@{
@@ -51,6 +52,7 @@ $AllManagedRuntimes = @(
         preparation_version = 1
         container = 'paddleocr-llamacpp'
         ownership_label = 'com.comictranslate.paddleocr-model-volume'
+        ready_manifest = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'
         tier = 'core'
     },
     [pscustomobject]@{
@@ -61,6 +63,7 @@ $AllManagedRuntimes = @(
         preparation_version = 2
         container = 'gemma-local-server'
         ownership_label = 'comic-translate.runtime'
+        ready_manifest = '.comic-translate-gemma-ready-v2.json'
         tier = 'core'
     },
     [pscustomobject]@{
@@ -71,6 +74,7 @@ $AllManagedRuntimes = @(
         preparation_version = 2
         container = 'mangalmm-local-server'
         ownership_label = 'com.comictranslate.mangalmm-model-volume'
+        ready_manifest = '.comic-translate-mangalmm-ready-v2.json'
         tier = 'full'
     },
     [pscustomobject]@{
@@ -81,6 +85,7 @@ $AllManagedRuntimes = @(
         preparation_version = 2
         container = 'paddleocr-spotting-llamacpp'
         ownership_label = 'com.comictranslate.paddleocr-spotting-model-volume'
+        ready_manifest = '.comic-translate-paddleocr-vl-spotting-llamacpp-ready-v2.json'
         tier = 'full'
     }
 )
@@ -88,7 +93,7 @@ $ProvisioningTier = if ($Full) { 'full' } else { 'core' }
 $ManagedRuntimes = @(
     $AllManagedRuntimes | Where-Object { $Full -or $_.tier -eq 'core' }
 )
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime $Runtime
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy
 $ActiveLlamaImage = [string]$ImagePolicy.Preferred
 
 $RequiredFiles = @(
@@ -104,6 +109,9 @@ $RequiredFiles = @(
     'scripts\prepare_gemma_runtime.ps1',
     'scripts\prepare_hunyuanocr_llamacpp_runtime.ps1',
     'scripts\prepare_paddleocr_llamacpp_runtime.ps1',
+    'scripts\run_windows.cmd',
+    'scripts\setup_windows.cmd',
+    'scripts\windows_install_state.py',
     'scripts\verify_windows_runtime.py'
 )
 foreach ($Relative in $RequiredFiles) {
@@ -123,6 +131,7 @@ $ManagedRuntimeStatePath = Join-Path $BootstrapRoot ("managed-runtimes-{0}.json"
 $ModelCache = Join-Path $Root 'models\managed-runtime-sources'
 $LogDirectory = Join-Path $Root 'logs\bootstrap'
 $LogPath = Join-Path $LogDirectory ("setup-{0}-{1}-{2}.log" -f $Runtime, $ProvisioningTier, (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$DetailLogPath = Join-Path $LogDirectory ("setup-{0}-{1}-{2}-detail.log" -f $Runtime, $ProvisioningTier, (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $VenvRoot = Join-Path $Root ([string]$RuntimeConfig.venv)
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $Lock = $null
@@ -134,6 +143,7 @@ $SkipRuntimeSetup = [bool]$env:COMIC_SKIP_STARTUP_MODELS
 $ExistingVenvValid = $false
 $Python = $null
 $HostCudaCompatibility = $null
+$ActiveImageCompatibility = $null
 
 try {
     if (-not $Doctor) {
@@ -142,21 +152,27 @@ try {
         $TranscriptStarted = $true
         $Lock = Enter-BootstrapLock -Path (Join-Path $BootstrapRoot "bootstrap-$Runtime.lock")
     }
+    $ServiceSummary = @($ManagedRuntimes | ForEach-Object { [string]$_.label }) -join ' | '
+    $LogDisplay = "logs\bootstrap\$([IO.Path]::GetFileName($LogPath))"
+    $DetailLogDisplay = "logs\bootstrap\$([IO.Path]::GetFileName($DetailLogPath))"
     Write-Host ''
-    Write-Host 'Comic Translate Windows bootstrap' -ForegroundColor Cyan
-    Write-BootstrapMessage "Runtime: $Runtime / Python environment: $($RuntimeConfig.venv)"
-    Write-BootstrapMessage "llama.cpp preferred image: $ActiveLlamaImage"
-    if ($ImagePolicy.Fallback) {
-        Write-BootstrapMessage "llama.cpp compatibility fallback: $($ImagePolicy.Fallback)"
+    Write-Host '+----------------------------------------------------------------------------+' -ForegroundColor DarkGray
+    Write-Host '| Comic Translate Setup                                                      |' -ForegroundColor White
+    Write-Host '+----------------------------------------------------------------------------+' -ForegroundColor DarkGray
+    Write-Host ("  Runtime : {0,-8}  Python : {1}" -f $Runtime.ToUpperInvariant(), $RuntimeConfig.venv) -ForegroundColor Gray
+    Write-Host ("  Tier    : {0,-8}  Models : {1}" -f $ProvisioningTier.ToUpperInvariant(), $ServiceSummary) -ForegroundColor Gray
+    Write-Host ("  Image   : {0}" -f $ActiveLlamaImage) -ForegroundColor Gray
+    if (-not $Doctor) {
+        Write-Host ("  Log     : {0}" -f $LogDisplay) -ForegroundColor DarkGray
+        Write-Host ("  Details : {0}" -f $DetailLogDisplay) -ForegroundColor DarkGray
     }
-    Write-BootstrapMessage (
-        "Provisioning tier: $ProvisioningTier (" +
-        (@($ManagedRuntimes | ForEach-Object { [string]$_.label }) -join ', ') + ')'
-    )
+    Write-Host '+----------------------------------------------------------------------------+' -ForegroundColor DarkGray
     if (-not $Full) {
-        Write-BootstrapMessage 'MangaLMM and PaddleOCR VL Spotting are not provisioned here; use setup_full.bat for those.'
+        Write-BootstrapMessage 'Optional MangaLMM/Spotting: run setup_full.bat.' 'SKIP'
     }
-    if (-not $Doctor) { Write-BootstrapMessage "Log: $LogPath" }
+    if (-not $Doctor) {
+        $env:COMIC_BOOTSTRAP_DETAIL_LOG = $DetailLogPath
+    }
 
     Write-BootstrapStage 1 $TotalStages 'Checking Python 3.12 x64 and local paths'
     if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
@@ -233,20 +249,18 @@ try {
             $DoctorVerify = @(
                 '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
                 '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
-                '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
+                '--expected-cuda', ([string]$RuntimeConfig.expected_cuda),
+                '--metadata-only'
             )
             if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $DoctorVerify) -eq 0) {
                 Write-BootstrapMessage 'Pinned packages are valid.' 'OK'
             }
             else { Write-BootstrapMessage 'Pinned packages need repair.' 'WARN' }
         }
-        foreach ($Image in @($ImagePolicy.Preferred, $ImagePolicy.Fallback) |
-            Where-Object { $_ }) {
-            if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -eq 0) {
-                Write-BootstrapMessage "Docker image is installed: $Image" 'OK'
-            } else {
-                Write-BootstrapMessage "Docker image is not installed yet: $Image" 'WARN'
-            }
+        if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $ActiveLlamaImage)) -eq 0) {
+            Write-BootstrapMessage "Docker image is installed: $ActiveLlamaImage" 'OK'
+        } else {
+            Write-BootstrapMessage "Docker image is not installed yet: $ActiveLlamaImage" 'WARN'
         }
         foreach ($Volume in $ManagedRuntimes.volume) {
             if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('volume', 'inspect', $Volume)) -eq 0) {
@@ -263,19 +277,29 @@ try {
     $RuntimeVerificationArguments = @(
         '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
         '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
-        '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
+        '--expected-cuda', ([string]$RuntimeConfig.expected_cuda),
+        '--metadata-only'
     )
-    if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments) -ne 0) {
+    Write-BootstrapMessage '[packages] Comparing 36 exact package pins (no CUDA DLL load)...'
+    $RuntimeAlreadyValid = (
+        Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments
+    ) -eq 0
+    if (-not $RuntimeAlreadyValid) {
         Invoke-BootstrapRetry -Operation 'pip tool installation' -Attempts 4 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--retries', '5', '--timeout', '60', '--upgrade', "pip==$($PipTools.pip)", "wheel==$($PipTools.wheel)", "setuptools==$($PipTools.setuptools)") -WorkingDirectory $Root
         }
         Invoke-BootstrapRetry -Operation 'pinned runtime installation' -Attempts 4 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--retries', '5', '--timeout', '60', '-r', (Join-Path $Root ([string]$RuntimeConfig.requirements))) -WorkingDirectory $Root
         }
-    } else { Write-BootstrapMessage 'Pinned packages already match; installation skipped.' 'SKIP' }
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'), '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)), '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)) -WorkingDirectory $Root
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', '-c', "import PySide6, cv2, numpy, onnxruntime, torch; print('runtime core imports passed')") -WorkingDirectory $Root
+        Write-BootstrapMessage '[packages 1/2] Rechecking the repaired runtime...'
+        Invoke-BootstrapCommand -FilePath $VenvPython -Arguments $RuntimeVerificationArguments -WorkingDirectory $Root -ShowOutput
+        Write-BootstrapMessage '[packages 2/2] Checking repaired dependency consistency...'
+        Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root -Quiet
+    } else {
+        Write-BootstrapMessage 'Pinned package metadata already matches; installation skipped.' 'SKIP'
+        Write-BootstrapMessage 'Dependency consistency is unchanged; pip check skipped.' 'SKIP'
+    }
+    Write-BootstrapMessage 'Pinned package metadata passed.' 'OK'
     if ($VenvBackup -and (Test-Path -LiteralPath $VenvBackup)) {
         Remove-Item -LiteralPath $VenvBackup -Recurse -Force
         $VenvBackup = ''
@@ -288,7 +312,21 @@ try {
     Write-BootstrapStage 5 $TotalStages 'Preparing required application models'
     if (-not $SkipRuntimeSetup) {
         Invoke-BootstrapRetry -Operation 'required application model preparation' -Attempts 3 -Action {
-            Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', '-c', 'from modules.utils.download import ensure_startup_runtime_models; ensure_startup_runtime_models(prefer_cuda=True)') -WorkingDirectory $Root
+            $PreviousDownloadPolicy = $env:COMIC_MODEL_DOWNLOAD_POLICY
+            $PreviousProgressStyle = $env:COMIC_DOWNLOAD_PROGRESS_STYLE
+            try {
+                $env:COMIC_MODEL_DOWNLOAD_POLICY = ''
+                $env:COMIC_DOWNLOAD_PROGRESS_STYLE = 'compact'
+                Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @(
+                    '-u', '-B', '-s', (Join-Path $Root 'scripts\windows_install_state.py'),
+                    'provision', '--runtime', $Runtime, '--profile', $ProvisioningTier,
+                    '--requirements', ([string]$RuntimeConfig.requirements)
+                ) -WorkingDirectory $Root -LiveOutput
+            }
+            finally {
+                $env:COMIC_MODEL_DOWNLOAD_POLICY = $PreviousDownloadPolicy
+                $env:COMIC_DOWNLOAD_PROGRESS_STYLE = $PreviousProgressStyle
+            }
         }
     } else { Write-BootstrapMessage 'Application model preparation skipped by smoke/test environment.' 'SKIP' }
 
@@ -297,91 +335,81 @@ try {
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed model volume preparation skipped by smoke/test environment.' 'SKIP'
     } else {
-        $ImageCandidates = @($ActiveLlamaImage)
-        if ($ImagePolicy.Fallback) {
-            $ImageCandidates += [string]$ImagePolicy.Fallback
+        $Compatibility = Get-BootstrapDockerImageCudaCompatibility `
+            -Docker $Docker `
+            -Image $ActiveLlamaImage `
+            -HostCudaVersion $HostCudaCompatibility
+        if (-not $Compatibility.Compatible) {
+            throw (
+                "The required llama.cpp image $ActiveLlamaImage needs CUDA >= " +
+                "$($Compatibility.RequiredCudaVersion), but the installed driver supports " +
+                "CUDA $($Compatibility.HostCudaVersion)."
+            )
         }
-        $Provisioned = $false
-        for ($ImageIndex = 0; $ImageIndex -lt $ImageCandidates.Count; $ImageIndex++) {
-            $CandidateImage = $ImageCandidates[$ImageIndex]
-            $HasFallback = $ImageIndex -lt ($ImageCandidates.Count - 1)
-            try {
-                $Compatibility = Get-BootstrapDockerImageCudaCompatibility `
+        if (Test-BootstrapManagedRuntimeState `
+            -Docker $Docker `
+            -Path $ManagedRuntimeStatePath `
+            -ImageRef $ActiveLlamaImage `
+            -ImageId $Compatibility.ImageId `
+            -ManagedRuntimes $ManagedRuntimes) {
+            Write-BootstrapMessage (
+                'Managed runtime seals, volumes, and image identity are unchanged; ' +
+                'skipping model revalidation.'
+            ) 'SKIP'
+            $ActiveImageCompatibility = $Compatibility
+        } else {
+            Set-BootstrapRuntimeEnvironment -LlamaImage $ActiveLlamaImage -VenvRoot $VenvRoot
+            foreach ($Managed in $ManagedRuntimes) {
+                Stop-BootstrapManagedContainer `
                     -Docker $Docker `
-                    -Image $CandidateImage `
-                    -HostCudaVersion $HostCudaCompatibility
-                if (-not $Compatibility.Compatible) {
-                    Write-BootstrapMessage (
-                        "Skipping incompatible llama.cpp image ${CandidateImage}: " +
-                        "image requires CUDA >= $($Compatibility.RequiredCudaVersion), " +
-                        "installed driver supports CUDA $($Compatibility.HostCudaVersion)."
-                    ) 'WARN'
-                    continue
-                }
-                if (Test-BootstrapManagedRuntimeState `
-                    -Docker $Docker `
-                    -Path $ManagedRuntimeStatePath `
-                    -ImageRef $CandidateImage `
-                    -ImageId $Compatibility.ImageId `
-                    -ManagedRuntimes $ManagedRuntimes) {
-                    Write-BootstrapMessage (
-                        'Managed runtime seals, volumes, and image identity are unchanged; ' +
-                        'skipping model revalidation.'
-                    ) 'SKIP'
-                    $ActiveLlamaImage = $CandidateImage
-                    $Provisioned = $true
-                    break
-                }
-                Set-BootstrapRuntimeEnvironment -LlamaImage $CandidateImage -VenvRoot $VenvRoot
-                foreach ($Managed in $ManagedRuntimes) {
-                    Stop-BootstrapManagedContainer `
-                        -Docker $Docker `
-                        -Name ([string]$Managed.container) `
-                        -OwnershipLabel ([string]$Managed.ownership_label)
-                }
-                foreach ($Managed in $ManagedRuntimes) {
-                    $Script = Join-Path $Root ([string]$Managed.script)
-                    # The spotting projector is derived locally, so that script needs a
-                    # real interpreter. Hand it this runtime's venv rather than letting
-                    # it assume .venv-win, which does not exist for a cuda13-only setup.
-                    $PrepareExtraArguments = @()
-                    if ([string]$Managed.runtime_name -eq 'PaddleOCR-VL-Spotting-llama.cpp') {
-                        $PrepareExtraArguments = @('-PythonExecutable', $VenvPython)
-                    }
-                    Write-BootstrapMessage "Preparing $($Managed.label) with $CandidateImage..."
-                    Invoke-BootstrapRetry `
-                        -Operation "$($Managed.label) preparation" `
-                        -Attempts $(if ($HasFallback) { 1 } else { 3 }) `
-                        -Action {
-                            Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments (@(
-                                '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
-                                '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
-                                '-ImageRef', $CandidateImage
-                            ) + $PrepareExtraArguments) -WorkingDirectory $Root
-                        }
-                    Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
-                }
-                $ActiveLlamaImage = $CandidateImage
-                Write-BootstrapManagedRuntimeState `
-                    -Path $ManagedRuntimeStatePath `
-                    -ImageRef $CandidateImage `
-                    -ImageId $Compatibility.ImageId `
-                    -ManagedRuntimes $ManagedRuntimes
-                $Provisioned = $true
-                break
+                    -Name ([string]$Managed.container) `
+                    -OwnershipLabel ([string]$Managed.ownership_label)
             }
-            catch {
-                if (-not $HasFallback) { throw }
+            foreach ($Managed in $ManagedRuntimes) {
+                $Script = Join-Path $Root ([string]$Managed.script)
+                # The spotting projector is derived locally, so that script needs a
+                # real interpreter. Hand it this runtime's venv rather than letting
+                # it assume .venv-win, which does not exist for a cuda13-only setup.
+                $PrepareExtraArguments = @()
+                if ([string]$Managed.runtime_name -eq 'PaddleOCR-VL-Spotting-llama.cpp') {
+                    $PrepareExtraArguments = @('-PythonExecutable', $VenvPython)
+                }
                 Write-BootstrapMessage (
-                    "The preferred llama.cpp image could not complete managed runtime preparation. " +
-                    "Retrying with the compatibility image: " +
-                    $ImageCandidates[$ImageIndex + 1]
-                ) 'WARN'
+                    "Preparing $($Managed.label) with $ActiveLlamaImage " +
+                    '(download/resume and GPU smoke can take several minutes)...'
+                )
+                Invoke-BootstrapRetry `
+                    -Operation "$($Managed.label) preparation" `
+                    -Attempts 3 `
+                    -Action {
+                        Invoke-BootstrapCommand -FilePath 'powershell.exe' -Arguments (@(
+                            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
+                            '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
+                            '-ImageRef', $ActiveLlamaImage
+                        ) + $PrepareExtraArguments) -WorkingDirectory $Root -LiveOutput
+                    }
+                Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
             }
+            $ActiveImageCompatibility = $Compatibility
+            Write-BootstrapManagedRuntimeState `
+                -Path $ManagedRuntimeStatePath `
+                -ImageRef $ActiveLlamaImage `
+                -ImageId $Compatibility.ImageId `
+                -ManagedRuntimes $ManagedRuntimes
         }
-        if (-not $Provisioned) {
-            throw 'No supported llama.cpp CUDA image completed managed runtime provisioning.'
+
+        if ($null -eq $ActiveImageCompatibility) {
+            throw 'The selected llama.cpp image compatibility record is unavailable.'
         }
+        Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @(
+            '-B', '-s', (Join-Path $Root 'scripts\windows_install_state.py'),
+            'write', '--runtime', $Runtime, '--tier', $ProvisioningTier,
+            '--profile', $ProvisioningTier, '--requirements', ([string]$RuntimeConfig.requirements),
+            '--image-ref', $ActiveLlamaImage,
+            '--image-id', ([string]$ActiveImageCompatibility.ImageId),
+            '--required-cuda', ([string]$ActiveImageCompatibility.RequiredCudaVersion),
+            '--managed-state', $ManagedRuntimeStatePath
+        ) -WorkingDirectory $Root -ShowOutput
     }
 
     Write-BootstrapMessage (
@@ -396,6 +424,7 @@ catch {
     }
     Write-BootstrapMessage "BOOTSTRAP_FAILED [$Runtime]: $($_.Exception.Message)" 'ERROR'
     if ($TranscriptStarted) { Write-BootstrapMessage "Log: $LogPath" 'ERROR' }
+    if ($TranscriptStarted) { Write-BootstrapMessage "Command details: $DetailLogPath" 'ERROR' }
     Write-BootstrapMessage 'Fix the reported prerequisite if necessary, then run the same BAT again. Verified files and partial downloads will be reused.' 'ERROR'
     exit 1
 }

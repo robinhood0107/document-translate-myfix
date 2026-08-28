@@ -160,13 +160,22 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             "run_comic.bat": "cuda12",
             "run_comic_cuda13.bat": "cuda13",
         }
+        shared = (ROOT / "scripts" / "run_windows.cmd").read_text(encoding="utf-8")
+        self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', shared)
+        self.assertIn("requirements-cuda12.txt", shared)
+        self.assertIn("requirements-cuda13.txt", shared)
+        self.assertIn("windows_install_state.py", shared)
+        state_helper = (ROOT / "scripts" / "windows_install_state.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("COMIC_MODEL_DOWNLOAD_POLICY=forbid", state_helper)
+        self.assertNotIn("pip install", shared.lower())
+        self.assertNotIn("prepare_", shared.lower())
+        self.assertNotIn("docker pull", shared.lower())
         for launcher, runtime in expected_runtime.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
-            self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
-            self.assertIn(f"requirements-{runtime}.txt", text)
-            self.assertIn("comic.py %*", text)
-            # The verify-only file list legitimately *names* the provisioning
-            # scripts, so assert on invocation, not on mere mention.
+            self.assertIn("scripts\\run_windows.cmd", text)
+            self.assertIn(runtime, text)
             lowered = text.lower()
             self.assertNotIn("powershell", lowered)
             self.assertNotIn("docker ", lowered)
@@ -174,21 +183,40 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
 
     def test_setup_launchers_select_runtime_and_tier(self) -> None:
         expected = {
-            "setup.bat": ("cuda12", False),
-            "setup_cuda13.bat": ("cuda13", False),
-            "setup_full.bat": ("cuda12", True),
-            "setup_full_cuda13.bat": ("cuda13", True),
+            "setup.bat": ("cuda12", "core"),
+            "setup_cuda13.bat": ("cuda13", "core"),
+            "setup_full.bat": ("cuda12", "full"),
+            "setup_full_cuda13.bat": ("cuda13", "full"),
         }
-        for launcher, (runtime, full) in expected.items():
+        shared = (ROOT / "scripts" / "setup_windows.cmd").read_text(encoding="utf-8")
+        self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', shared)
+        self.assertIn("bootstrap_windows.ps1", shared)
+        self.assertIn("DONE! Comic Translate setup completed successfully.", shared)
+        self.assertIn("Press any key to close this window.", shared)
+        self.assertIn('if not defined COMIC_NO_PAUSE', shared)
+        self.assertIn('if /I not "%COMIC_VERIFY_ONLY%"=="1"', shared)
+        for launcher, (runtime, tier) in expected.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
-            self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
-            self.assertIn("scripts\\bootstrap_windows.ps1", text)
-            self.assertIn(f"-Runtime {runtime}", text)
+            self.assertIn("scripts\\setup_windows.cmd", text)
+            self.assertIn(f"{runtime} {tier}", text)
             self.assertNotIn("pip install", text)
-            if full:
-                self.assertIn("-Full", text)
-            else:
-                self.assertNotIn("-Full", text)
+
+    def test_console_preserves_standard_cmd_font_and_nonblocking_capture(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "configure_console.ps1").exists())
+        for helper in ("run_windows.cmd", "setup_windows.cmd"):
+            text = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
+            self.assertIn("color 07", text)
+            self.assertNotIn("configure_console", text)
+            self.assertNotIn("mode con", text.lower())
+
+        module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("ComicBootstrapProcess", module)
+        self.assertNotIn("ReadToEndAsync", module)
+        self.assertIn("COMIC_DOWNLOAD_PROGRESS_STYLE", (
+            ROOT / "scripts" / "bootstrap_windows.ps1"
+        ).read_text(encoding="utf-8"))
 
     def test_launchers_offer_no_install_release_contract(self) -> None:
         bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(
@@ -209,6 +237,8 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("$env:PYTHONNOUSERSITE = '1'", module)
         self.assertIn("$env:PYTHONHOME = ''", module)
         self.assertIn("$env:PYTHONPATH = ''", module)
+        self.assertIn("ready_manifest = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'", bootstrap)
+        self.assertIn("$Manifest.smoke_test.passed -ne $true", module)
         self.assertIn("include-system-site-packages", bootstrap)
         self.assertIn("Docker model volume is not installed yet", bootstrap)
         self.assertIn(
@@ -228,13 +258,18 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
         ).read_text(encoding="utf-8")
         self.assertIn("llama.cpp:server-cuda'", image_policy)
-        self.assertIn("llama.cpp:server-cuda13'", image_policy)
+        self.assertIn("Preferred = $ImageRef", image_policy)
+        self.assertIn("Supported = @($ImageRef)", image_policy)
         self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
         self.assertIn("Get-BootstrapDockerImageCudaCompatibility", bootstrap)
-        self.assertIn("Skipping incompatible llama.cpp image", bootstrap)
+        self.assertNotIn("ImageCandidates", bootstrap)
+        self.assertNotIn("HasFallback", bootstrap)
         windows_module = (
             ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1"
         ).read_text(encoding="utf-8")
+        self.assertIn('line.StartsWith("Downloaded"', windows_module)
+        self.assertIn('line.StartsWith("Resuming download"', windows_module)
+        self.assertIn('line.StartsWith("The server ignored"', windows_module)
         self.assertIn("Get-NvidiaCudaCompatibilityVersion", windows_module)
         self.assertIn("NVIDIA_REQUIRE_CUDA", windows_module)
         self.assertLess(

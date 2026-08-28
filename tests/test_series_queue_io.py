@@ -256,7 +256,7 @@ class QueueRuntimeSentinelTests(unittest.TestCase):
 
 
 class ChildTempDirLeakTests(unittest.TestCase):
-    def test_failed_open_cleans_up_the_previous_work_dir(self) -> None:
+    def test_open_stages_child_without_discarding_previous_work_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             controller = _controller(_series_file(temp_dir))
             controller.main.temp_dir = temp_dir
@@ -265,25 +265,15 @@ class ChildTempDirLeakTests(unittest.TestCase):
             controller.active_child_temp_dir = old_dir
             controller.active_child_item_id = "item-1"
 
-            captured: dict[str, object] = {}
+            controller.main.open_workspace_ctrl = mock.Mock()
 
-            def fake_run_threaded(worker, on_result, on_error, on_finished, *args):
-                captured["on_error"] = on_error
-
-            controller.main.run_threaded = fake_run_threaded
-            controller.main.default_error_handler = lambda _e: None
-
-            with mock.patch("app.controllers.series.Messages.show_busy", return_value=object()), \
-                mock.patch("app.controllers.series.Messages.close_busy"), \
-                mock.patch("app.controllers.series.materialize_series_child_project",
-                           return_value=os.path.join(temp_dir, "child.ctpr")), \
-                mock.patch.object(controller.main, "image_ctrl", create=True):
+            with mock.patch.object(controller.main, "image_ctrl", create=True):
                 controller._open_item("item-1", push_history=False)
-                captured["on_error"]((RuntimeError, RuntimeError("boom"), None))
 
-            # 예전에는 실패 경로가 새 작업본만 지우고 직전 것은 남겨, 열기
-            # 실패가 쌓일수록 series_child_* 가 누적됐다.
-            self.assertFalse(os.path.isdir(old_dir))
+            controller.main.open_workspace_ctrl.run.assert_called_once()
+            # The old materialized child is kept until the staged replacement
+            # commits successfully.
+            self.assertTrue(os.path.isdir(old_dir))
 
 
 if __name__ == "__main__":

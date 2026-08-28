@@ -88,6 +88,12 @@ class ImageStateControllerTests(unittest.TestCase):
         main.run_threaded = mock.Mock()
         main.setWindowTitle = mock.Mock()
         main.project_ctrl = mock.Mock()
+        main.file_handler = mock.Mock()
+        main.open_workspace_ctrl = mock.Mock()
+        main.image_data = {}
+        main.image_history = {}
+        main.in_memory_history = {}
+        main.current_history_index = {}
 
         controller = ImageStateController.__new__(ImageStateController)
         controller.main = main
@@ -95,15 +101,28 @@ class ImageStateControllerTests(unittest.TestCase):
             side_effect=lambda: setattr(main, "project_file", None)
         )
 
-        with mock.patch("app.controllers.image.Messages.show_busy", return_value=object()), \
-            mock.patch("app.controllers.image.Messages.close_busy"):
-            controller.thread_load_images(["folder/page.png"])
+        controller.thread_load_images(["folder/page.png"])
 
+        main.project_ctrl.clear_recovery_checkpoint.assert_not_called()
+        controller.clear_state.assert_not_called()
+        commit = main.open_workspace_ctrl.run.call_args.kwargs["commit"]
+        staged_handler = mock.Mock()
+        prepared = mock.Mock(
+            file_handler=staged_handler,
+            file_paths=[os.path.abspath("folder/page.png")],
+            first_image=mock.Mock(copy=lambda: object()),
+        )
+        controller.on_initial_image_loaded = mock.Mock()
+        with mock.patch("app.controllers.image.QtCore.QTimer.singleShot") as single_shot:
+            commit(prepared)
+
+        main.project_ctrl.clear_recovery_checkpoint.assert_not_called()
+        prepared.defer_success.assert_called_once()
+        prepared.defer_success.call_args.args[0]()
         main.project_ctrl.clear_recovery_checkpoint.assert_called_once()
         controller.clear_state.assert_called_once()
-        self.assertIsNone(main.project_file)
-        loaded_paths = main.run_threaded.call_args.args[-1]
-        self.assertEqual(loaded_paths, [os.path.abspath("folder/page.png")])
+        self.assertIs(main.file_handler, staged_handler)
+        single_shot.assert_called_once()
 
     def test_pdf_limit_warning_formats_page_number_and_dimensions(self) -> None:
         main = mock.Mock()

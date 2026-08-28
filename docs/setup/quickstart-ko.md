@@ -28,8 +28,8 @@ CUDA12 경로(Python cu128 + llama.cpp `server-cuda`):
 setup.bat
 ```
 
-CUDA13 Python 경로(cu130, Docker는 `server-cuda13` 우선 후 호환되지 않으면
-`server-cuda` 자동 fallback):
+CUDA13 Python 경로(cu130, Docker llama.cpp는 CUDA12 setup과 같은 호환 범위가
+넓은 `server-cuda` 사용):
 
 ```bat
 setup_cuda13.bat
@@ -43,7 +43,8 @@ setup_cuda13.bat
 설치는 질문 없이 아래 항목을 순서대로 준비합니다.
 
 - 선택한 `.venv-win` 또는 `.venv-win-cuda13`과 pinned Python package
-- CTD/LaMa 계열 필수 앱 모델
+- RT-DETR v2 ONNX, font-detector ONNX, CTD Torch/ONNX 및 positive-claim ONNX
+- LaMa large와 LaMa MPE 앱 모델
 - HunyuanOCR Q8 model/mmproj
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf`(약 13.58 GiB)
@@ -57,6 +58,17 @@ Docker 원본 모델은 설치 폴더의 `models\managed-runtime-sources`에서 
 실제 model-load smoke를 통과해야 준비 완료로 인정합니다. 읽기 전용 상태 검사는
 `setup.bat --doctor` 또는 `setup_cuda13.bat --doctor`를 사용합니다.
 
+BAT은 클래식 명령 프롬프트를 그대로 사용하고 UTF-8만 적용하며 부모/기본 CMD의
+글꼴·창 크기·스크롤 기록을 덮어쓰거나 레지스트리를 바꾸지 않습니다. 화면에는 CUDA DLL을 불러오지 않는 package metadata 하위 단계,
+모델별 시작·완료, 다운로드 10% 단위 진행률, runtime 준비 경계와 최종 결과만
+표시합니다. 자식 명령의 전체 출력은 시간별 `logs\bootstrap\*-detail.log`에
+남습니다. 더블클릭으로 연 setup은 최종 `DONE!` 또는 `FAILED!` 화면에서 키를
+누를 때까지 유지됩니다. 자동 검사는 `COMIC_NO_PAUSE=1`로 대기를 끌 수 있습니다.
+
+이미지·압축 파일·PDF·프로젝트를 열 때는 메인 화면 안의 진행 패널을 사용합니다.
+새 작업 공간의 준비가 끝날 때까지 현재 화면을 유지하며, 열기 실패 시 기존 작업
+공간을 그대로 보존합니다.
+
 ## 3. 실행
 
 ```bat
@@ -67,12 +79,12 @@ run_comic.bat
 run_comic_cuda13.bat
 ```
 
-실행 런처는 venv만 확인하고 앱을 띄우므로, 이미 준비된 상태에서는 수 초 안에
-뜹니다. 이미지를 pull하거나 모델 볼륨을 만들지 않습니다. 준비되지 않은 런타임을
-처음 쓰면 앱이 GUI 안에서 그때 준비합니다. 동작은 하지만 설치를 먼저 돌리는
-편이 훨씬 빠릅니다.
+실행 런처는 venv와 원자적 install-state를 확인하고 setup이 선택한 정확한
+llama.cpp image를 전달한 뒤 앱을 띄웁니다. package/model/image/volume을 설치,
+다운로드, pull, 생성, 재봉인하지 않습니다. core 상태가 없으면 해당 setup BAT,
+MangaLMM/Spotting 상태가 없으면 페이지 처리 전에 setup_full을 요구합니다.
 
-CUDA13 launcher는 컨테이너를 만들기 전에 이미지의 `NVIDIA_REQUIRE_CUDA`와
+CUDA13 launcher는 `server-cuda`를 사용하더라도 컨테이너를 만들기 전에 이미지의 `NVIDIA_REQUIRE_CUDA`와
 드라이버 호환 버전을 비교합니다. 준비 완료 뒤에는 ready manifest, image ID,
 모델 크기가 그대로인 볼륨을 재사용하므로 전체 해시와 GPU smoke를 반복하지 않습니다.
 
@@ -121,7 +133,7 @@ llama.cpp의 CUDA 사용자 공간은 선택한 Docker image 안에 있습니다
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
@@ -216,8 +228,8 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 모든 준비 스크립트는 `-Mode Auto`를 받습니다. 유효한 봉인은 즉시 재사용하고,
 볼륨이 비어 있으면 준비합니다. 업스트림이 llama.cpp 태그를 갱신해 image digest가
 움직이면 모델이 멀쩡한데도 manifest만 어긋나는데, 이때만 `Auto`가 `Reseal`을
-선택해 원본 파일 없이 복구합니다. 앱도 같은 상태를
-스스로 감지해 한 번 복구합니다. 자세한 내용은
+선택해 원본 파일 없이 복구합니다. 실행 중인 앱은 어긋난 봉인을 보고하고 해당
+setup BAT을 요구할 뿐 volume을 복구하지 않습니다. 자세한 내용은
 [관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
 참고하세요.
 
