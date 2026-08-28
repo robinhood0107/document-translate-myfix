@@ -41,6 +41,7 @@ $AllManagedRuntimes = @(
         preparation_version = 1
         container = 'hunyuanocr-local-server'
         ownership_label = 'com.comictranslate.hunyuanocr-model-volume'
+        ready_manifest = '.comic-translate-hunyuanocr-ready-v1.json'
         tier = 'core'
     },
     [pscustomobject]@{
@@ -51,6 +52,7 @@ $AllManagedRuntimes = @(
         preparation_version = 1
         container = 'paddleocr-llamacpp'
         ownership_label = 'com.comictranslate.paddleocr-model-volume'
+        ready_manifest = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'
         tier = 'core'
     },
     [pscustomobject]@{
@@ -61,6 +63,7 @@ $AllManagedRuntimes = @(
         preparation_version = 2
         container = 'gemma-local-server'
         ownership_label = 'comic-translate.runtime'
+        ready_manifest = '.comic-translate-gemma-ready-v2.json'
         tier = 'core'
     },
     [pscustomobject]@{
@@ -71,6 +74,7 @@ $AllManagedRuntimes = @(
         preparation_version = 2
         container = 'mangalmm-local-server'
         ownership_label = 'com.comictranslate.mangalmm-model-volume'
+        ready_manifest = '.comic-translate-mangalmm-ready-v2.json'
         tier = 'full'
     },
     [pscustomobject]@{
@@ -81,6 +85,7 @@ $AllManagedRuntimes = @(
         preparation_version = 2
         container = 'paddleocr-spotting-llamacpp'
         ownership_label = 'com.comictranslate.paddleocr-spotting-model-volume'
+        ready_manifest = '.comic-translate-paddleocr-vl-spotting-llamacpp-ready-v2.json'
         tier = 'full'
     }
 )

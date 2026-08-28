@@ -235,6 +235,8 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("$env:PYTHONNOUSERSITE = '1'", module)
         self.assertIn("$env:PYTHONHOME = ''", module)
         self.assertIn("$env:PYTHONPATH = ''", module)
+        self.assertIn("ready_manifest = '.comic-translate-paddleocr-vl-llamacpp-ready-v1.json'", bootstrap)
+        self.assertIn("$Manifest.smoke_test.passed -ne $true", module)
         self.assertIn("include-system-site-packages", bootstrap)
         self.assertIn("Docker model volume is not installed yet", bootstrap)
         self.assertIn(
