@@ -65,7 +65,9 @@ for the current window only, and does not change the registry. The console shows
 package-metadata substeps (without loading CUDA DLLs), each model boundary,
 compact 10% download updates, runtime
 preparation boundaries, and the final result. Full child-command output remains
-in the timestamped `logs\bootstrap\*-detail.log` file.
+in the timestamped `logs\bootstrap\*-detail.log` file. A setup opened by
+double-click stays on its final `DONE!` or `FAILED!` screen until a key is
+pressed; automated checks can set `COMIC_NO_PAUSE=1`.
 
 ## 3. Launch
 

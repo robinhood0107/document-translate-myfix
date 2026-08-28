@@ -191,6 +191,10 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         shared = (ROOT / "scripts" / "setup_windows.cmd").read_text(encoding="utf-8")
         self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', shared)
         self.assertIn("bootstrap_windows.ps1", shared)
+        self.assertIn("DONE! Comic Translate setup completed successfully.", shared)
+        self.assertIn("Press any key to close this window.", shared)
+        self.assertIn('if not defined COMIC_NO_PAUSE', shared)
+        self.assertIn('if /I not "%COMIC_VERIFY_ONLY%"=="1"', shared)
         for launcher, (runtime, tier) in expected.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
             self.assertIn("scripts\\setup_windows.cmd", text)
