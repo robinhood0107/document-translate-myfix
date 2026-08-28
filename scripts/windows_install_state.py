@@ -226,7 +226,10 @@ def command_provision(args: argparse.Namespace) -> int:
             allow_digest_fallback=False,
         )
     except InstallStateError:
-        provision_profile(effective_profile)
+        provision_profile(
+            effective_profile,
+            progress_callback=lambda message: print(message, flush=True),
+        )
         print("Application model profile prepared and verified.")
     else:
         print("Application model seal is unchanged; model hashing and downloads skipped.")
@@ -346,6 +349,9 @@ def main() -> int:
         return int(args.handler(args))
     except InstallStateError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"[ERROR] {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         return 1
 
 

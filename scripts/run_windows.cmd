@@ -24,6 +24,7 @@ if /I "%RUNTIME%"=="cuda12" (
 )
 
 chcp 65001 >nul
+color 07
 mode con cols=120 lines=40 >nul 2>&1
 title Comic Translate - %RUNTIME%
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SCRIPT_DIR%configure_console.ps1" >nul 2>&1

@@ -265,13 +265,53 @@ class ModelDownloader:
 # Core download implementations (shared)
 
 def _download_single_file(file_url: str, file_path: str, expected_checksum: Optional[str]):
-    msg = f'Downloading: "{file_url}" to {os.path.dirname(file_path)}\n'
+    compact_progress = str(
+        os.environ.get("COMIC_DOWNLOAD_PROGRESS_STYLE", "") or ""
+    ).strip().lower() == "compact"
+    display_name = os.path.basename(file_path)
+    msg = (
+        f"[download] {display_name}\n"
+        if compact_progress
+        else f'Downloading: "{file_url}" to {os.path.dirname(file_path)}\n'
+    )
     if sys.stderr:
         sys.stderr.write(msg)
     else:
         logger.info(msg.strip())
     notify_download_event('start', os.path.basename(file_path))
-    download_url_to_file(file_url, file_path, hash_prefix=None, progress=True)
+    last_percent = {-1}
+
+    def report_compact(downloaded: int, total: int | None) -> None:
+        if not compact_progress:
+            return
+        if total and total > 0:
+            percent = min(100, int(downloaded * 100 / total))
+            bucket = min(100, (percent // 10) * 10)
+            if bucket in last_percent:
+                return
+            last_percent.clear()
+            last_percent.add(bucket)
+            print(
+                f"[download] {display_name}: {bucket}% "
+                f"({_format_compact_bytes(downloaded)}/{_format_compact_bytes(total)})",
+                flush=True,
+            )
+        else:
+            mib = downloaded // (1024 * 1024)
+            bucket = int(mib // 64) * 64
+            if bucket in last_percent:
+                return
+            last_percent.clear()
+            last_percent.add(bucket)
+            print(f"[download] {display_name}: {mib} MiB", flush=True)
+
+    download_url_to_file(
+        file_url,
+        file_path,
+        hash_prefix=None,
+        progress=not compact_progress,
+        progress_callback=report_compact if compact_progress else None,
+    )
     notify_download_event('end', os.path.basename(file_path))
 
     if expected_checksum:
@@ -302,6 +342,14 @@ def _download_single_file(file_url: str, file_path: str, expected_checksum: Opti
                 f"Model {algo} mismatch for {file_path}: got {calculated_checksum}, expected {expected_checksum}. "
                 "Please delete the file and restart comic-translate or re-download the model."
             )
+
+
+def _format_compact_bytes(value: int) -> str:
+    if value >= 1024**3:
+        return f"{value / 1024**3:.1f} GiB"
+    if value >= 1024**2:
+        return f"{value / 1024**2:.1f} MiB"
+    return f"{value / 1024:.1f} KiB"
 
 
 def _download_spec(spec: ModelSpec):
@@ -758,11 +806,19 @@ def application_model_profile(profile: str = "core") -> tuple[ModelID, ...]:
     return CORE_APPLICATION_MODELS
 
 
-def provision_profile(profile: str = "core") -> None:
+def provision_profile(
+    profile: str = "core",
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
     """Download and verify every model owned by a setup profile."""
 
-    for model_id in application_model_profile(profile):
+    model_ids = application_model_profile(profile)
+    for index, model_id in enumerate(model_ids, start=1):
+        if progress_callback is not None:
+            progress_callback(f"[model {index}/{len(model_ids)}] Checking {model_id.value}...")
         ModelDownloader.get(model_id)
+        if progress_callback is not None:
+            progress_callback(f"[model {index}/{len(model_ids)}] Ready: {model_id.value}")
 
 
 def require_prepared_model(model: Union[ModelID, ModelSpec]) -> ModelSpec:
