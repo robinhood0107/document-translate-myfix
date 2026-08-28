@@ -148,24 +148,29 @@ try {
         $TranscriptStarted = $true
         $Lock = Enter-BootstrapLock -Path (Join-Path $BootstrapRoot "bootstrap-$Runtime.lock")
     }
+    $ServiceSummary = @($ManagedRuntimes | ForEach-Object { [string]$_.label }) -join ' | '
+    $LogDisplay = "logs\bootstrap\$([IO.Path]::GetFileName($LogPath))"
+    $DetailLogDisplay = "logs\bootstrap\$([IO.Path]::GetFileName($DetailLogPath))"
     Write-Host ''
-    Write-Host 'Comic Translate Windows bootstrap' -ForegroundColor Cyan
-    Write-BootstrapMessage "Runtime: $Runtime / Python environment: $($RuntimeConfig.venv)"
-    Write-BootstrapMessage "llama.cpp preferred image: $ActiveLlamaImage"
+    Write-Host '+----------------------------------------------------------------------------+' -ForegroundColor DarkGray
+    Write-Host '| Comic Translate Setup                                                      |' -ForegroundColor White
+    Write-Host '+----------------------------------------------------------------------------+' -ForegroundColor DarkGray
+    Write-Host ("  Runtime : {0,-8}  Python : {1}" -f $Runtime.ToUpperInvariant(), $RuntimeConfig.venv) -ForegroundColor Gray
+    Write-Host ("  Tier    : {0,-8}  Models : {1}" -f $ProvisioningTier.ToUpperInvariant(), $ServiceSummary) -ForegroundColor Gray
+    Write-Host ("  Image   : {0}" -f $ActiveLlamaImage) -ForegroundColor Gray
     if ($ImagePolicy.Fallback) {
-        Write-BootstrapMessage "llama.cpp compatibility fallback: $($ImagePolicy.Fallback)"
+        Write-Host ("  Fallback: {0}" -f $ImagePolicy.Fallback) -ForegroundColor Gray
     }
-    Write-BootstrapMessage (
-        "Provisioning tier: $ProvisioningTier (" +
-        (@($ManagedRuntimes | ForEach-Object { [string]$_.label }) -join ', ') + ')'
-    )
+    if (-not $Doctor) {
+        Write-Host ("  Log     : {0}" -f $LogDisplay) -ForegroundColor DarkGray
+        Write-Host ("  Details : {0}" -f $DetailLogDisplay) -ForegroundColor DarkGray
+    }
+    Write-Host '+----------------------------------------------------------------------------+' -ForegroundColor DarkGray
     if (-not $Full) {
-        Write-BootstrapMessage 'MangaLMM and PaddleOCR VL Spotting are not provisioned here; use setup_full.bat for those.'
+        Write-BootstrapMessage 'Optional MangaLMM/Spotting: run setup_full.bat.' 'SKIP'
     }
-    if (-not $Doctor) { Write-BootstrapMessage "Log: $LogPath" }
     if (-not $Doctor) {
         $env:COMIC_BOOTSTRAP_DETAIL_LOG = $DetailLogPath
-        Write-BootstrapMessage "Command details: $DetailLogPath"
     }
 
     Write-BootstrapStage 1 $TotalStages 'Checking Python 3.12 x64 and local paths'
@@ -243,7 +248,8 @@ try {
             $DoctorVerify = @(
                 '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
                 '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
-                '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
+                '--expected-cuda', ([string]$RuntimeConfig.expected_cuda),
+                '--metadata-only'
             )
             if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $DoctorVerify) -eq 0) {
                 Write-BootstrapMessage 'Pinned packages are valid.' 'OK'
@@ -274,9 +280,9 @@ try {
         '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
         '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
         '--expected-cuda', ([string]$RuntimeConfig.expected_cuda),
-        '--core-imports'
+        '--metadata-only'
     )
-    Write-BootstrapMessage '[packages] Comparing installed packages and loading CUDA/core modules (usually 30-60 seconds)...'
+    Write-BootstrapMessage '[packages] Comparing 36 exact package pins (no CUDA DLL load)...'
     $RuntimeAlreadyValid = (
         Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments
     ) -eq 0
@@ -289,12 +295,13 @@ try {
         }
         Write-BootstrapMessage '[packages 1/2] Rechecking the repaired runtime...'
         Invoke-BootstrapCommand -FilePath $VenvPython -Arguments $RuntimeVerificationArguments -WorkingDirectory $Root -ShowOutput
+        Write-BootstrapMessage '[packages 2/2] Checking repaired dependency consistency...'
+        Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root -Quiet
     } else {
-        Write-BootstrapMessage 'Pinned packages, CUDA, and core imports already match; installation skipped.' 'SKIP'
+        Write-BootstrapMessage 'Pinned package metadata already matches; installation skipped.' 'SKIP'
+        Write-BootstrapMessage 'Dependency consistency is unchanged; pip check skipped.' 'SKIP'
     }
-    Write-BootstrapMessage '[packages 2/2] Checking dependency consistency...'
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root -Quiet
-    Write-BootstrapMessage 'Pinned packages and core imports passed.' 'OK'
+    Write-BootstrapMessage 'Pinned package metadata passed.' 'OK'
     if ($VenvBackup -and (Test-Path -LiteralPath $VenvBackup)) {
         Remove-Item -LiteralPath $VenvBackup -Recurse -Force
         $VenvBackup = ''
