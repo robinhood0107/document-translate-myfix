@@ -7,6 +7,7 @@ import unittest
 from unittest import mock
 
 from scripts import windows_install_state
+from modules.utils import windows_installation
 
 
 class WindowsInstallStateTests(unittest.TestCase):
@@ -72,3 +73,19 @@ class WindowsInstallStateTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(windows_install_state.InstallStateError, "image drift"):
                 windows_install_state.command_preflight(args)
+
+    def test_core_tier_rejects_optional_selection_before_page_work(self) -> None:
+        settings = mock.Mock()
+        settings.get_tool_selection.side_effect = lambda key: {
+            "ocr": "mangalmm",
+            "inpainter": "lama_large_512px",
+        }[key]
+        with (
+            mock.patch.object(windows_installation, "active_windows_runtime", return_value="cuda13"),
+            mock.patch.object(windows_installation, "active_windows_install_tier", return_value="core"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "setup_full"):
+                windows_installation.assert_selected_windows_models_installed(
+                    settings,
+                    "Japanese",
+                )
