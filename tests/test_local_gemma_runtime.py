@@ -577,7 +577,77 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
 
         ensure_image.assert_not_called()
 
-    def test_runtime_image_is_pulled_only_when_missing(self) -> None:
+    def test_runtime_contract_volume_probe_is_cached_for_the_same_setup_seal(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        contract = _runtime_contract()
+        state = {
+            "llama_image": {
+                "ref": DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
+                "id": contract.image_id,
+            }
+        }
+
+        with mock.patch(
+            "modules.translation.local_runtime.active_windows_install_state",
+            return_value=state,
+        ), mock.patch.object(
+            manager,
+            "_probe_model_volume",
+            return_value=(b"{}", "a" * 64, 123),
+        ) as probe, mock.patch(
+            "modules.translation.local_runtime.build_gemma_runtime_contract",
+            return_value=contract,
+        ) as build, mock.patch.object(
+            manager,
+            "_ensure_runtime_image_id",
+            side_effect=AssertionError("sealed image ID should be reused"),
+        ):
+            first = manager._load_runtime_contract("gemma-test.gguf")
+            second = manager._load_runtime_contract("gemma-test.gguf")
+
+        self.assertIs(first, contract)
+        self.assertIs(second, contract)
+        probe.assert_called_once()
+        build.assert_called_once()
+
+    def test_runtime_contract_cache_invalidates_when_sealed_image_identity_changes(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        first_contract = _runtime_contract("fingerprint-a")
+        second_contract = _runtime_contract("fingerprint-b")
+        states = [
+            {
+                "llama_image": {
+                    "ref": DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
+                    "id": "sha256:first",
+                }
+            },
+            {
+                "llama_image": {
+                    "ref": DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
+                    "id": "sha256:second",
+                }
+            },
+        ]
+
+        with mock.patch(
+            "modules.translation.local_runtime.active_windows_install_state",
+            side_effect=states,
+        ), mock.patch.object(
+            manager,
+            "_probe_model_volume",
+            return_value=(b"{}", "a" * 64, 123),
+        ) as probe, mock.patch(
+            "modules.translation.local_runtime.build_gemma_runtime_contract",
+            side_effect=[first_contract, second_contract],
+        ):
+            first = manager._load_runtime_contract("gemma-test.gguf")
+            second = manager._load_runtime_contract("gemma-test.gguf")
+
+        self.assertIs(first, first_contract)
+        self.assertIs(second, second_contract)
+        self.assertEqual(probe.call_count, 2)
+
+    def test_runtime_image_probe_never_pulls_when_missing(self) -> None:
         manager = LocalGemmaRuntimeManager()
         present = subprocess.CompletedProcess(
             args=[],
@@ -604,16 +674,16 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
 
         with mock.patch(
             "modules.translation.local_runtime.run_docker_command",
-            side_effect=[missing, present, present],
-        ) as run:
-            self.assertEqual(
-                manager._ensure_runtime_image_id(DEFAULT_GEMMA_LLAMA_CPP_IMAGE),
-                "sha256:present",
-            )
-        self.assertEqual(run.call_count, 3)
-        self.assertEqual(run.call_args_list[1].args[0][1], "pull")
+            return_value=missing,
+        ) as run, self.assertRaisesRegex(
+            LocalServiceSetupError,
+            "setup-sealed Gemma runtime image is missing",
+        ):
+            manager._ensure_runtime_image_id(DEFAULT_GEMMA_LLAMA_CPP_IMAGE)
+        self.assertEqual(run.call_count, 1)
+        self.assertNotIn("pull", run.call_args.args[0])
 
-    def test_runtime_image_pull_failure_is_reported_as_setup_error(self) -> None:
+    def test_runtime_image_missing_is_reported_as_setup_error(self) -> None:
         manager = LocalGemmaRuntimeManager()
         missing = subprocess.CompletedProcess(
             args=[],
@@ -624,27 +694,15 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
 
         with mock.patch(
             "modules.translation.local_runtime.run_docker_command",
-            side_effect=[missing, RuntimeError("registry unavailable")],
+            return_value=missing,
         ), self.assertRaisesRegex(
             LocalServiceSetupError,
-            "Unable to load the pinned Gemma runtime image",
+            "setup-sealed Gemma runtime image is missing",
         ):
             manager._ensure_runtime_image_id(DEFAULT_GEMMA_LLAMA_CPP_IMAGE)
 
-    def test_runtime_image_empty_id_after_pull_is_rejected(self) -> None:
+    def test_runtime_image_empty_id_is_rejected_without_pull(self) -> None:
         manager = LocalGemmaRuntimeManager()
-        missing = subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr="missing",
-        )
-        pull = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="pulled",
-            stderr="",
-        )
         empty_inspect = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -654,10 +712,10 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
 
         with mock.patch(
             "modules.translation.local_runtime.run_docker_command",
-            side_effect=[missing, pull, empty_inspect],
+            return_value=empty_inspect,
         ), self.assertRaisesRegex(
             LocalServiceSetupError,
-            "Docker returned no image ID",
+            "setup-sealed Gemma runtime image is missing",
         ):
             manager._ensure_runtime_image_id(DEFAULT_GEMMA_LLAMA_CPP_IMAGE)
 

@@ -119,7 +119,7 @@ class GemmaRuntimeContractTests(unittest.TestCase):
         compose_environment = contract.compose_environment()
         self.assertEqual(compose_environment["LLAMA_BATCH_SIZE"], "2048")
         self.assertEqual(compose_environment["LLAMA_UBATCH_SIZE"], "512")
-        self.assertEqual(compose_environment["LLAMA_CPP_PULL_POLICY"], "missing")
+        self.assertEqual(compose_environment["LLAMA_CPP_PULL_POLICY"], "never")
         self.assertEqual(
             compose_environment["GEMMA_RUNTIME_FINGERPRINT"],
             contract.fingerprint,
