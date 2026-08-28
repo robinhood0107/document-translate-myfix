@@ -201,15 +201,12 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             self.assertIn(f"{runtime} {tier}", text)
             self.assertNotIn("pip install", text)
 
-    def test_console_uses_standard_cmd_font_and_nonblocking_capture(self) -> None:
-        console = (ROOT / "scripts" / "configure_console.ps1").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("@('Consolas', 'Cascadia Mono')", console)
-        self.assertIn("Set($Face, 16)", console)
+    def test_console_preserves_standard_cmd_font_and_nonblocking_capture(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "configure_console.ps1").exists())
         for helper in ("run_windows.cmd", "setup_windows.cmd"):
             text = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
             self.assertIn("color 07", text)
+            self.assertNotIn("configure_console", text)
 
         module = (ROOT / "scripts" / "lib" / "WindowsBootstrap.psm1").read_text(
             encoding="utf-8-sig"

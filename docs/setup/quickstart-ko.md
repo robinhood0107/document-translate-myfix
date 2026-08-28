@@ -58,8 +58,8 @@ Docker 원본 모델은 설치 폴더의 `models\managed-runtime-sources`에서 
 실제 model-load smoke를 통과해야 준비 완료로 인정합니다. 읽기 전용 상태 검사는
 `setup.bat --doctor` 또는 `setup_cuda13.bat --doctor`를 사용합니다.
 
-BAT은 클래식 명령 프롬프트를 그대로 사용하고 현재 창에만 UTF-8과 Consolas
-16px를 적용하며 레지스트리는 바꾸지 않습니다. 화면에는 CUDA DLL을 불러오지 않는 package metadata 하위 단계,
+BAT은 클래식 명령 프롬프트를 그대로 사용하고 UTF-8만 적용하며 현재/기본 CMD
+글꼴을 덮어쓰거나 레지스트리를 바꾸지 않습니다. 화면에는 CUDA DLL을 불러오지 않는 package metadata 하위 단계,
 모델별 시작·완료, 다운로드 10% 단위 진행률, runtime 준비 경계와 최종 결과만
 표시합니다. 자식 명령의 전체 출력은 시간별 `logs\bootstrap\*-detail.log`에
 남습니다. 더블클릭으로 연 setup은 최종 `DONE!` 또는 `FAILED!` 화면에서 키를
