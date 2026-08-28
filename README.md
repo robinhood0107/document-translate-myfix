@@ -321,8 +321,7 @@ Tracked compose/runtime images used by the repo:
 Every managed llama.cpp runtime (Gemma, PaddleOCR VL, PaddleOCR VL Spotting,
 HunyuanOCR, MangaLMM, and the Router) uses one CUDA server image:
 
-- Windows setup default: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- Legacy explicit seals also supported: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
+- Required Windows setup image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 
 ## Reference Setup Docs
 
