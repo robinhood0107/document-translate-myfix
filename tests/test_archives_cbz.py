@@ -114,8 +114,19 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
                 archive.write(src_b, arcname="002.png")
 
             handler = FileHandler()
-            paths = handler.prepare_files([str(archive_path)])
+            progress: list[dict] = []
+            paths = handler.prepare_files(
+                [str(archive_path)],
+                progress_callback=progress.append,
+            )
             self.assertEqual(len(paths), 2)
+            self.assertIn("index", [event["stage"] for event in progress])
+            page_events = [
+                event
+                for event in progress
+                if event["stage"] == "index" and event["total"] == 2
+            ]
+            self.assertEqual(page_events[-1]["current"], 2)
             self.assertTrue(os.path.isfile(paths[0]))
             self.assertFalse(os.path.exists(paths[1]))
             self.assertTrue(ensure_prepared_path_materialized(paths[1]))
