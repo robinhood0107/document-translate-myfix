@@ -335,6 +335,7 @@ HunyuanOCR, MangaLMM, and the Router) uses one CUDA server image:
 
 - [rules.md](rules.md)
 - [Codebase map and OCR strategy boundaries (Korean)](docs/architecture/codebase-map-ko.md)
+- [Stage-Batched pipeline operation (Korean)](docs/architecture/codebase-map-ko.md#stage-batched-파이프라인-작동-원리)
 - [Managed llama.cpp-only runtime policy (Korean)](docs/runtime/managed-llamacpp-only-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)

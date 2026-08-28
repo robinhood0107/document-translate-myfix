@@ -28,6 +28,10 @@
    동시에 활성화될 수 없다.
 7. 이번 교정은 Stage-Batched 내부의 자동 page reload 정책을 추가하지 않는다.
 
+세부 stage 순서, Router의 단일 모델 상주 계약, OCR 중 Gemma page-cache
+prefetch의 의미는 [Stage-Batched 파이프라인 작동 원리](../../architecture/codebase-map-ko.md#stage-batched-파이프라인-작동-원리)에
+정리한다.
+
 ## PR #300 이후 변경 감사
 
 | 변경 | 판정 | 근거 |
