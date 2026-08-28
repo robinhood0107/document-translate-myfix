@@ -5,8 +5,6 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
-from unittest import mock
-
 from modules.utils import image_safety
 
 
@@ -51,12 +49,26 @@ class ImageSafetyTests(unittest.TestCase):
             with self.assertRaises(image_safety.ImageResourceLimitError):
                 image_safety.inspect_image_dimensions(path)
 
-    def test_large_or_aggregate_workload_selects_streaming(self) -> None:
-        memory = mock.Mock(total=16 * 1024**3, available=8 * 1024**3)
-        with (
-            mock.patch.object(image_safety, "inspect_image_dimensions", return_value=(10_000, 10_000)),
-            mock.patch.object(image_safety.psutil, "virtual_memory", return_value=memory),
-        ):
-            plan = image_safety.build_image_memory_plan(["a", "b"])
-        self.assertTrue(plan["streaming"])
-        self.assertEqual(plan["largest_pixels"], 100_000_000)
+    def test_aggregate_size_does_not_create_a_workflow_signal(self) -> None:
+        resources = [
+            (f"page-{index}.png", 2_400, 1_700)
+            for index in range(93)
+        ]
+        plan = image_safety.build_image_resource_plan(
+            resources,
+            available_memory_bytes=8 * 1024**3,
+        )
+
+        self.assertIsInstance(plan, image_safety.ImageResourcePlan)
+        self.assertEqual(plan.page_count, 93)
+        self.assertEqual(plan.largest_pixels, 4_080_000)
+        self.assertEqual(plan.largest_page_peak_bytes, 61_200_000)
+        self.assertTrue(plan.hard_cap_passed)
+        self.assertFalse(hasattr(plan, "streaming"))
+
+    def test_single_page_above_available_ram_threshold_is_rejected(self) -> None:
+        with self.assertRaises(image_safety.ImageResourceLimitError):
+            image_safety.build_image_resource_plan(
+                [("page.png", 10_000, 10_000)],
+                available_memory_bytes=2_000_000_000,
+            )
