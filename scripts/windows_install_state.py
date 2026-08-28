@@ -22,6 +22,12 @@ from modules.utils.download import (  # noqa: E402
 
 SCHEMA_VERSION = 1
 STATE_DIR = ROOT / ".comic-bootstrap"
+CORE_MANAGED_RUNTIMES = frozenset(
+    {"HunyuanOCR-llama.cpp", "PaddleOCR-VL-llama.cpp", "Gemma"}
+)
+FULL_MANAGED_RUNTIMES = CORE_MANAGED_RUNTIMES | frozenset(
+    {"MangaLMM-llama.cpp", "PaddleOCR-VL-Spotting-llama.cpp"}
+)
 
 
 class InstallStateError(RuntimeError):
@@ -170,7 +176,28 @@ def _run_docker(arguments: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _validate_docker_state(payload: dict[str, Any]) -> None:
+def _validate_managed_runtime_records(
+    payload: dict[str, Any],
+    *,
+    tier: str,
+) -> list[dict[str, Any]]:
+    runtimes = payload.get("managed_runtimes")
+    if not isinstance(runtimes, list) or not runtimes:
+        raise InstallStateError("Managed runtime seal is missing.")
+    records = [runtime for runtime in runtimes if isinstance(runtime, dict)]
+    if len(records) != len(runtimes):
+        raise InstallStateError("Invalid managed runtime seal.")
+    expected = FULL_MANAGED_RUNTIMES if tier == "full" else CORE_MANAGED_RUNTIMES
+    sealed = {str(runtime.get("runtime_name") or "") for runtime in records}
+    missing = sorted(expected.difference(sealed))
+    if missing:
+        raise InstallStateError(
+            "Managed runtime seal is incomplete: " + ", ".join(missing)
+        )
+    return records
+
+
+def _validate_docker_state(payload: dict[str, Any], *, tier: str) -> None:
     image = payload.get("llama_image")
     if not isinstance(image, dict):
         raise InstallStateError("llama.cpp image seal is missing.")
@@ -187,12 +214,7 @@ def _validate_docker_state(payload: dict[str, Any]) -> None:
             "The local llama.cpp image changed after setup. Run the matching setup BAT."
         )
 
-    runtimes = payload.get("managed_runtimes")
-    if not isinstance(runtimes, list) or not runtimes:
-        raise InstallStateError("Managed runtime seal is missing.")
-    for runtime in runtimes:
-        if not isinstance(runtime, dict):
-            raise InstallStateError("Invalid managed runtime seal.")
+    for runtime in _validate_managed_runtime_records(payload, tier=tier):
         name = str(runtime.get("name") or "")
         expected_runtime = str(runtime.get("runtime_name") or "")
         expected_version = int(runtime.get("preparation_version", 0))
@@ -269,6 +291,7 @@ def command_write(args: argparse.Namespace) -> int:
         },
         "managed_runtimes": managed_runtimes,
     }
+    _validate_managed_runtime_records(payload, tier=effective_tier)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     destination = _state_path(args.runtime)
     handle, temporary_name = tempfile.mkstemp(
@@ -300,12 +323,13 @@ def command_preflight(args: argparse.Namespace) -> int:
     expected_requirements = _requirements_record((ROOT / args.requirements).resolve())
     if payload.get("requirements") != expected_requirements:
         raise InstallStateError("Pinned requirements changed. Run the matching setup BAT.")
-    _validate_application_models(payload, profile="core", allow_digest_fallback=True)
-    _validate_docker_state(payload)
+    _validate_application_models(payload, profile=tier, allow_digest_fallback=True)
+    _validate_docker_state(payload, tier=tier)
     image_ref = str(payload["llama_image"]["ref"])
     if args.emit_cmd:
         print(f"LLAMA_CPP_IMAGE={image_ref}")
         print(f"COMIC_WINDOWS_RUNTIME={args.runtime}")
+        print(f"COMIC_WINDOWS_INSTALL_TIER={tier}")
         print("COMIC_MODEL_DOWNLOAD_POLICY=forbid")
         print("HF_HUB_OFFLINE=1")
         print("TRANSFORMERS_OFFLINE=1")
