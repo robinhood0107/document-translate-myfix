@@ -3,6 +3,8 @@ import shutil
 import tempfile
 import threading
 
+from PySide6.QtCore import QCoreApplication
+
 from .archives import (
     close_comic_cache,
     close_pdf_cache,
@@ -93,27 +95,63 @@ class FileHandler:
         self._pdf_warning_cursor = 0
         self._image_memory_plan: dict[str, int | bool] = {}
 
-    def prepare_files(self, file_paths: list[str], extend: bool = False):
+    def cleanup(self) -> None:
+        for archive in list(self.archive_info):
+            temp_dir = str(archive.get("temp_dir") or "")
+            archive_path = archive.get("archive_path")
+            close_comic_cache(archive_path)
+            close_pdf_cache(archive_path)
+            if temp_dir:
+                _clear_lazy_sources_under_dir(temp_dir)
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        self.archive_info = []
+        self.file_paths = []
+        self._pdf_import_warnings = []
+        self._pdf_warning_cursor = 0
+        self._image_memory_plan = {}
+
+    def prepare_files(
+        self,
+        file_paths: list[str],
+        extend: bool = False,
+        progress_callback=None,
+    ):
+        def report(stage: str, message: str, *, current: int = 0, total: int = 0, detail: str = ""):
+            if callable(progress_callback):
+                progress_callback(
+                    {
+                        "stage": stage,
+                        "message": message,
+                        "current": current,
+                        "total": total,
+                        "detail": detail,
+                    }
+                )
+
         all_image_paths = []
         if not extend:
-            for archive in self.archive_info:
-                temp_dir = archive['temp_dir']
-                close_comic_cache(archive.get('archive_path'))
-                close_pdf_cache(archive.get('archive_path'))
-                _clear_lazy_sources_under_dir(temp_dir)
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
-            self.archive_info = []
-            self._pdf_import_warnings = []
-            self._pdf_warning_cursor = 0
+            self.cleanup()
 
-        for path in file_paths:
+        selected_total = len(file_paths)
+        for selected_index, path in enumerate(file_paths, start=1):
+            report(
+                "validate",
+                QCoreApplication.translate("OpenWorkspace", "Checking selected files..."),
+                current=selected_index,
+                total=selected_total,
+                detail=os.path.basename(path),
+            )
             if path.lower().endswith((
                 '.cbr', '.cbz', '.cbt', '.cb7',
                 '.zip', '.rar', '.7z', '.tar',
                 '.pdf', '.epub',
             )):
                 print('Indexing archive:', path)
+                report(
+                    "index",
+                    QCoreApplication.translate("OpenWorkspace", "Indexing archive..."),
+                    detail=os.path.basename(path),
+                )
                 archive_dir = os.path.dirname(path)
                 archive_stem = os.path.splitext(os.path.basename(path))[0]
                 temp_prefix = f"tmp_{sanitize_export_path_component(archive_stem)[:80]}_"
@@ -126,6 +164,15 @@ class FileHandler:
                     image_paths: list[str] = []
 
                     for index, entry in enumerate(entries, start=1):
+                        report(
+                            "index",
+                            QCoreApplication.translate(
+                                "OpenWorkspace", "Indexing archive pages..."
+                            ),
+                            current=index,
+                            total=total,
+                            detail=os.path.basename(path),
+                        )
                         ext = str(entry.get("ext", ".png"))
                         if not ext.startswith("."):
                             ext = f".{ext}"
@@ -143,6 +190,15 @@ class FileHandler:
 
                     # Improve first paint latency by ensuring page 1 is ready.
                     if image_paths:
+                        report(
+                            "materialize",
+                            QCoreApplication.translate(
+                                "OpenWorkspace", "Preparing the first page..."
+                            ),
+                            current=1,
+                            total=total,
+                            detail=os.path.basename(path),
+                        )
                         ensure_prepared_path_materialized(image_paths[0])
                 except Exception:
                     del self._pdf_import_warnings[warning_start:]
