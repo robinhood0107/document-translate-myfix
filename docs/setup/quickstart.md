@@ -29,8 +29,8 @@ For the CUDA12 path (Python cu128 plus llama.cpp `server-cuda`):
 setup.bat
 ```
 
-For the CUDA13 Python path (cu130; Docker prefers `server-cuda13` and falls
-back to `server-cuda` when the host driver cannot start the preferred image):
+For the CUDA13 Python path (cu130; Docker deliberately uses the same broadly
+compatible llama.cpp `server-cuda` image as the CUDA12 setup):
 
 ```bat
 setup_cuda13.bat
@@ -83,7 +83,7 @@ download, pull, create, or reseal anything. Missing core state requires the
 matching setup BAT; missing MangaLMM/Spotting state requires setup_full before
 page processing starts.
 
-Before creating a container, the CUDA13 launcher compares the image's
+Before creating a container, the CUDA13 launcher still compares the image's
 `NVIDIA_REQUIRE_CUDA` value with the driver compatibility version. After setup,
 it reuses volumes whose ready manifest, image ID, and model sizes still match,
 so later launches do not repeat full hashes or GPU smokes.
@@ -133,7 +133,7 @@ full hash verification, custom volumes, or optional runtime maintenance.
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda` is also supported)
+- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda` (`:server-cuda13` legacy explicit seals are also supported)
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 

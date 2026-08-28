@@ -142,7 +142,7 @@ batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같�
 
 ## runtime image
 
-- Image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
+- 기본 image: `ghcr.io/ggml-org/llama.cpp:server-cuda` (기존 `:server-cuda13` 봉인도 지원)
 - 관측 image label version: `b10133`
 - Pull policy: `missing`
 - 태그는 moving tag이므로, 이미지가 바뀌면 ready manifest에 기록된 image ID와
