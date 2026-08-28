@@ -313,8 +313,7 @@ miss 모두 정확히 한 번 적용하고, 사전 변경 시 소비 결과와 d
 관리형 llama.cpp 런타임(Gemma, PaddleOCR VL, PaddleOCR VL Spotting, HunyuanOCR,
 MangaLMM, Router)은 모두 하나의 CUDA 서버 이미지를 씁니다.
 
-- Windows setup 기본값: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- 기존 명시적 봉인 호환: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
+- Windows setup 필수 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 
 ## 참고 설치 문서
 
