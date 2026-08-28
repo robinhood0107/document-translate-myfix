@@ -12,6 +12,7 @@ from modules.utils.gpu_handoff import (
     DEFAULT_VRAM_RELEASE_TIMEOUT_SEC,
     cleanup_python_cuda_memory,
     estimate_torch_cuda_storage_mb,
+    gpu_release_enforcement_enabled,
     wait_for_vram_release,
 )
 from modules.utils.gpu_metrics import query_cuda_handoff_metrics
@@ -96,8 +97,14 @@ class InpaintingHandler:
                     release_gate.get("required")
                     and not release_gate.get("observed")
                 ):
-                    raise InpaintingRuntimeContractError(
-                        inpaint_release_unconfirmed_message()
+                    if gpu_release_enforcement_enabled():
+                        raise InpaintingRuntimeContractError(
+                            inpaint_release_unconfirmed_message()
+                        )
+                    logger.warning(
+                        "Inpainter VRAM release was not confirmed during a profile "
+                        "change (status=%s); continuing because enforcement is disabled.",
+                        release_gate.get("status"),
                     )
             self.inpainter_driver_baseline = query_cuda_handoff_metrics()
             backend = runtime['backend']
