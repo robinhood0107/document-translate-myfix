@@ -116,6 +116,9 @@ class ImageStateControllerTests(unittest.TestCase):
         with mock.patch("app.controllers.image.QtCore.QTimer.singleShot") as single_shot:
             commit(prepared)
 
+        main.project_ctrl.clear_recovery_checkpoint.assert_not_called()
+        prepared.defer_success.assert_called_once()
+        prepared.defer_success.call_args.args[0]()
         main.project_ctrl.clear_recovery_checkpoint.assert_called_once()
         controller.clear_state.assert_called_once()
         self.assertIs(main.file_handler, staged_handler)
