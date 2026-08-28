@@ -27,7 +27,6 @@ chcp 65001 >nul
 color 07
 mode con cols=120 lines=40 >nul 2>&1
 title Comic Translate - %RUNTIME%
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SCRIPT_DIR%configure_console.ps1" >nul 2>&1
 
 if /I "%COMIC_VERIFY_ONLY%"=="1" (
     for %%F in (
@@ -36,7 +35,6 @@ if /I "%COMIC_VERIFY_ONLY%"=="1" (
         "app\version.py"
         "%REQUIREMENTS%"
         "scripts\run_windows.cmd"
-        "scripts\configure_console.ps1"
         "scripts\windows_install_state.py"
         "scripts\verify_windows_runtime.py"
         "resources\translations\compiled\ct_ko.qm"
