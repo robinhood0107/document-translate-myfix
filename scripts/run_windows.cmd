@@ -25,7 +25,6 @@ if /I "%RUNTIME%"=="cuda12" (
 
 chcp 65001 >nul
 color 07
-mode con cols=120 lines=40 >nul 2>&1
 title Comic Translate - %RUNTIME%
 
 if /I "%COMIC_VERIFY_ONLY%"=="1" (
