@@ -2396,10 +2396,9 @@ class ProjectController:
         def commit(snapshot) -> None:
             prev_project_file = self.main.project_file
             if prev_project_file and prev_project_file != normalized_path:
-                close_state_store(prev_project_file)
+                snapshot.defer_success(lambda: close_state_store(prev_project_file))
             if clear_recovery:
-                self.clear_recovery_checkpoint()
-            self.main.file_handler.cleanup()
+                snapshot.defer_success(self.clear_recovery_checkpoint)
             self.main.file_handler = FileHandler()
             self.main.image_ctrl.clear_state()
             snapshot.apply(self.main)
@@ -2407,10 +2406,10 @@ class ProjectController:
             self.main.project_kind = PROJECT_KIND_SINGLE
             self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
             self.load_state_to_ui(snapshot.saved_context)
-            self.add_recent_project(normalized_path)
-            self._refresh_home_screen()
             self.update_ui_from_project()
             self.main.set_project_clean()
+            snapshot.defer_success(lambda: self.add_recent_project(normalized_path))
+            snapshot.defer_success(self._refresh_home_screen)
 
         coordinator.run(
             message=self.main.tr("Loading project file..."),
