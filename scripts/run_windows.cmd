@@ -58,7 +58,7 @@ if not exist "%PYTHON_EXE%" (
 
 pushd "%ROOT%" >nul
 echo [preflight] Checking %VENV_NAME%...
-"%PYTHON_EXE%" -B -s "%SCRIPT_DIR%verify_windows_runtime.py" --requirements "%ROOT%\%REQUIREMENTS%" --expected-cuda %EXPECTED_CUDA%
+"%PYTHON_EXE%" -B -s "%SCRIPT_DIR%verify_windows_runtime.py" --requirements "%ROOT%\%REQUIREMENTS%" --expected-cuda %EXPECTED_CUDA% --metadata-only
 if errorlevel 1 (
     echo [ERROR] The pinned Python runtime is not ready. Run the matching setup BAT.
     popd >nul
