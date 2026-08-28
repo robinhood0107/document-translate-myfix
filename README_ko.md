@@ -82,14 +82,13 @@ OCR:
 - [Gemma](https://ai.google.dev/gemma) 로컬 GGUF 런타임
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) Docker 런타임 이미지
 
-### 자동 다운로드 자산과 사용자 준비 자산 구분
+### setup 관리 자산과 사용자 준비 자산 구분
 
-앱이 누락 시 자동 다운로드하는 자산:
-- CTD 모델 파일 (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
-- `AOT`, `lama_large_512px`, `lama_mpe` 같은 인페인팅 체크포인트
-- `MangaOCR`, `Pororo OCR`, `PPOCRv5` 같은 OCR 체크포인트
+Windows core setup은 기본 RT-DETR/font/CTD/LaMa 모델을 내려받아 봉인합니다.
+`setup_full*.bat`은 선택형 AOT, MangaOCR, Pororo, PPOCRv5 모델도 봉인하며,
+실행 중인 앱은 이 모델들을 다운로드하지 않습니다.
 
-Windows 런처가 첫 실행에 자동 다운로드하고 검증된 external volume에 준비하는 자산:
+Windows setup이 검증된 external volume에 준비하는 자산:
 - `gemma-4-26B-IQ4_NL.gguf` Gemma 번역 모델
 - HunyuanOCR Q8 GGUF 및 mmproj
 - PaddleOCR VL 1.6 GGUF 및 mmproj
@@ -145,7 +144,7 @@ PaddleOCR VL Spotting과 MangaLMM은 기본 bootstrap에 포함하지 않으며,
 - one-page auto와 batch OCR의 parity/diagnostics를 개선했습니다.
 - 로컬 PaddleOCR VL 지원과 기본값 튜닝을 추가했습니다.
 - 로컬 HunyuanOCR 지원을 추가했습니다.
-- `Optimal (HunyuanOCR / PaddleOCR VL)` OCR 라우팅, 실행 전 언어 확인, on-demand 로컬 런타임 관리까지 추가했습니다.
+- `Optimal (HunyuanOCR / PaddleOCR VL)` OCR 라우팅, 실행 전 언어 확인, 준비된 로컬 런타임 시작·관리까지 추가했습니다.
 
 ### 로컬 번역 런타임
 
@@ -224,7 +223,8 @@ setup.bat
 setup_cuda13.bat
 ```
 
-전용 venv, 앱 필수 모델, 그리고 핵심 런타임 3종(HunyuanOCR, PaddleOCR VL,
+전용 venv, 기본 파이프라인 앱 모델 전체(RT-DETR v2, 글꼴 감지, CTD 보호 및
+positive-claim, LaMa), 그리고 핵심 런타임 3종(HunyuanOCR, PaddleOCR VL,
 Gemma IQ4_NL)을 준비합니다. MangaLMM과 PaddleOCR VL Spotting까지 미리 받아
 두려면 `setup_full.bat` 또는 `setup_full_cuda13.bat`을 사용하세요. 설치는 질문
 없이 진행되고 중단되어도 이어집니다. 다운로드는 설치 폴더의
@@ -242,8 +242,10 @@ run_comic.bat
 run_comic_cuda13.bat
 ```
 
-설치를 건너뛰어도 동작하지만 느립니다. 이 경우 앱이 처음 쓰는 런타임을 GUI
-안에서 진행률 표시 없이 그때그때 준비합니다. 설치 상태만 읽기 전용으로
+setup은 필수입니다. 실행 BAT와 앱은 package/model/image/volume을 설치하거나
+다운로드·재봉인하지 않습니다. core 봉인이 없으면 앱 시작 전에 중단하고,
+MangaLMM/Spotting을 full 없이 선택하면 페이지 1 전에 `setup_full*.bat`을 안내합니다.
+설치 상태만 읽기 전용으로
 확인하려면 `setup.bat --doctor` 또는 `setup_cuda13.bat --doctor`를 실행합니다.
 
 ### 2. 로컬 번역 서버 사용

@@ -55,11 +55,8 @@ from modules.utils.llama_cpp_runtime import (
     run_docker_command,
 )
 from modules.utils.managed_runtime_repair import (
-    ManagedRuntimeRepairError,
-    ManagedRuntimeRepairPlan,
     describe_image_identity_drift,
     is_image_identity_only_drift,
-    run_managed_runtime_preparation,
 )
 
 logger = logging.getLogger(__name__)
@@ -1074,13 +1071,6 @@ class LocalGemmaRuntimeManager:
                 )
             ) from exc
 
-    def _gemma_repair_plan(self, volume_name: str) -> ManagedRuntimeRepairPlan:
-        return ManagedRuntimeRepairPlan(
-            runtime_label="Gemma",
-            prepare_script=ROOT_DIR / "scripts" / "prepare_gemma_runtime.ps1",
-            volume_name=volume_name,
-        )
-
     def _repair_runtime_volume(
         self,
         *,
@@ -1090,56 +1080,14 @@ class LocalGemmaRuntimeManager:
             "Gemma 런타임 볼륨을 현재 llama.cpp 이미지에 맞춰 다시 봉인하는 중..."
         ),
     ) -> None:
-        """준비 스크립트를 ``Auto`` 로 돌려 볼륨을 계약에 맞춘다.
+        """Fail before page work; setup is the only provisioning authority."""
 
-        볼륨이 이미 계약된 모델을 담고 있으면 manifest 만 다시 봉인하고, 비어
-        있으면 원본을 찾아 채운다. 컨테이너가 실행 중이면 준비 스크립트가
-        거부한다. 이 시점의 컨테이너는 이미 계약을 만족하지 못하는 것이므로 먼저
-        정지한다.
-        """
-
-        logger.info("%s Running the preparation script.", detail)
-        self._emit_progress(
-            self._startup_progress_callback,
-            status="running",
-            step_key="runtime_repair",
-            message=message,
-            detail=detail,
-        )
-        if self._inspect_managed_container_running():
-            self._stop_managed_container()
-            self._managed_active = False
-            self._managed_start_attempted = False
-        self._readiness_cache.clear()
-        try:
-            run_managed_runtime_preparation(
-                self._gemma_repair_plan(volume_name),
-                mode="Auto",
-                allow_download=True,
-                cancel_checker=self._startup_cancel_checker,
-                progress=lambda text: self._emit_progress(
-                    self._startup_progress_callback,
-                    status="running",
-                    step_key="runtime_repair",
-                    message=text,
-                    detail=detail,
-                ),
+        raise self._build_setup_error(
+            (
+                f"{detail}\n"
+                "The application does not repair or download the Gemma runtime. "
+                "Run the matching setup BAT and start Comic Translate again."
             )
-        except OperationCancelledError:
-            raise
-        except ManagedRuntimeRepairError as exc:
-            raise self._build_setup_error(
-                (
-                    f"{detail}\nAutomatic repair failed: {exc}\n"
-                    "Run scripts/prepare_gemma_runtime.ps1 -Mode Auto by hand."
-                )
-            ) from exc
-        self._emit_progress(
-            self._startup_progress_callback,
-            status="completed",
-            step_key="runtime_repair",
-            message="Gemma 런타임 볼륨 준비를 마쳤습니다.",
-            detail=detail,
         )
 
     def _ensure_runtime_image_id(self, image_ref: str) -> str:
@@ -1159,26 +1107,9 @@ class LocalGemmaRuntimeManager:
         image_id = (completed.stdout or "").strip()
         if completed.returncode == 0 and image_id:
             return image_id
-
-        try:
-            run_docker_command(
-                ["docker", "pull", image_ref],
-                cancel_checker=self._startup_cancel_checker,
-            )
-            completed = run_docker_command(
-                inspect_command,
-                cancel_checker=self._startup_cancel_checker,
-            )
-        except RuntimeError as exc:
-            raise self._build_setup_error(
-                f"Unable to load the pinned Gemma runtime image: {image_ref}\n{exc}"
-            ) from exc
-        image_id = (completed.stdout or "").strip()
-        if not image_id:
-            raise self._build_setup_error(
-                f"Docker returned no image ID for the pinned Gemma runtime image: {image_ref}"
-            )
-        return image_id
+        raise self._build_setup_error(
+            f"The setup-sealed Gemma runtime image is missing: {image_ref}"
+        )
 
     def _probe_model_volume(
         self,

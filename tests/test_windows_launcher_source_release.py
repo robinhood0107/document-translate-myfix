@@ -160,13 +160,22 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             "run_comic.bat": "cuda12",
             "run_comic_cuda13.bat": "cuda13",
         }
+        shared = (ROOT / "scripts" / "run_windows.cmd").read_text(encoding="utf-8")
+        self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', shared)
+        self.assertIn("requirements-cuda12.txt", shared)
+        self.assertIn("requirements-cuda13.txt", shared)
+        self.assertIn("windows_install_state.py", shared)
+        state_helper = (ROOT / "scripts" / "windows_install_state.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("COMIC_MODEL_DOWNLOAD_POLICY=forbid", state_helper)
+        self.assertNotIn("pip install", shared.lower())
+        self.assertNotIn("prepare_", shared.lower())
+        self.assertNotIn("docker pull", shared.lower())
         for launcher, runtime in expected_runtime.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
-            self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
-            self.assertIn(f"requirements-{runtime}.txt", text)
-            self.assertIn("comic.py %*", text)
-            # The verify-only file list legitimately *names* the provisioning
-            # scripts, so assert on invocation, not on mere mention.
+            self.assertIn("scripts\\run_windows.cmd", text)
+            self.assertIn(runtime, text)
             lowered = text.lower()
             self.assertNotIn("powershell", lowered)
             self.assertNotIn("docker ", lowered)
@@ -174,21 +183,19 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
 
     def test_setup_launchers_select_runtime_and_tier(self) -> None:
         expected = {
-            "setup.bat": ("cuda12", False),
-            "setup_cuda13.bat": ("cuda13", False),
-            "setup_full.bat": ("cuda12", True),
-            "setup_full_cuda13.bat": ("cuda13", True),
+            "setup.bat": ("cuda12", "core"),
+            "setup_cuda13.bat": ("cuda13", "core"),
+            "setup_full.bat": ("cuda12", "full"),
+            "setup_full_cuda13.bat": ("cuda13", "full"),
         }
-        for launcher, (runtime, full) in expected.items():
+        shared = (ROOT / "scripts" / "setup_windows.cmd").read_text(encoding="utf-8")
+        self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', shared)
+        self.assertIn("bootstrap_windows.ps1", shared)
+        for launcher, (runtime, tier) in expected.items():
             text = (ROOT / launcher).read_text(encoding="utf-8")
-            self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
-            self.assertIn("scripts\\bootstrap_windows.ps1", text)
-            self.assertIn(f"-Runtime {runtime}", text)
+            self.assertIn("scripts\\setup_windows.cmd", text)
+            self.assertIn(f"{runtime} {tier}", text)
             self.assertNotIn("pip install", text)
-            if full:
-                self.assertIn("-Full", text)
-            else:
-                self.assertNotIn("-Full", text)
 
     def test_launchers_offer_no_install_release_contract(self) -> None:
         bootstrap = (ROOT / "scripts" / "bootstrap_windows.ps1").read_text(

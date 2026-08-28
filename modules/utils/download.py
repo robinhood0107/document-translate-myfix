@@ -119,6 +119,18 @@ class ModelSpec:
         }
 
 
+class ModelNotPreparedError(RuntimeError):
+    """A runtime attempted to use a model that setup did not seal."""
+
+
+def _model_downloads_forbidden() -> bool:
+    return str(os.environ.get("COMIC_MODEL_DOWNLOAD_POLICY", "") or "").strip().lower() in {
+        "forbid",
+        "forbidden",
+        "offline",
+    }
+
+
 class ModelDownloader:
     """Central registry & download helper for model assets."""
 
@@ -131,6 +143,13 @@ class ModelDownloader:
     @classmethod
     def get(cls, model: Union[ModelID, ModelSpec]):
         spec = cls.registry[model] if isinstance(model, ModelID) else model
+        if _model_downloads_forbidden():
+            if not cls.files_present(spec):
+                raise ModelNotPreparedError(
+                    f"Required model '{spec.id.value}' is not prepared. "
+                    "Run the matching setup BAT before starting Comic Translate."
+                )
+            return
         _download_spec(spec)
 
     @classmethod
@@ -222,6 +241,24 @@ class ModelDownloader:
                     return False
                 if calc != expected_checksum:
                     return False
+        return True
+
+    @classmethod
+    def files_present(cls, model: Union[ModelID, ModelSpec]) -> bool:
+        """Fast existence-only check used after the launcher seal is validated."""
+
+        spec = cls.registry[model] if isinstance(model, ModelID) else model
+        for remote_name in spec.files:
+            local_name = (
+                spec.save_as.get(remote_name, remote_name)
+                if spec.save_as
+                else remote_name
+            )
+            try:
+                if os.path.getsize(os.path.join(spec.save_dir, local_name)) <= 0:
+                    return False
+            except OSError:
+                return False
         return True
 
 
@@ -683,12 +720,66 @@ def _register_defaults():
 
 _register_defaults()
 
-STARTUP_RUNTIME_MODELS: tuple[ModelID, ...] = (
+CORE_APPLICATION_MODELS: tuple[ModelID, ...] = (
+    ModelID.RTDETR_V2_ONNX,
+    ModelID.FONT_DETECTOR_ONNX,
     ModelID.CTD_TORCH,
     ModelID.CTD_ONNX,
+    ModelID.CTD_POSITIVE_CLAIM_ONNX,
     ModelID.LAMA_LARGE_512PX,
     ModelID.LAMA_MPE,
 )
+
+OPTIONAL_APPLICATION_MODELS: tuple[ModelID, ...] = (
+    ModelID.AOT_TORCH,
+    ModelID.AOT_ONNX,
+    ModelID.MANGA_OCR_BASE_ONNX,
+    ModelID.PORORO_ONNX,
+    ModelID.PPOCR_V5_DET_MOBILE,
+    ModelID.PPOCR_V5_DET_SERVER,
+    ModelID.PPOCR_V5_REC_MOBILE,
+    ModelID.PPOCR_V5_REC_EN_MOBILE,
+    ModelID.PPOCR_V5_REC_KOREAN_MOBILE,
+    ModelID.PPOCR_V5_REC_LATIN_MOBILE,
+    ModelID.PPOCR_V5_REC_ESLAV_MOBILE,
+)
+
+# Compatibility alias.  The setup-owned startup profile is deliberately the
+# complete product-default pipeline, rather than the historical partial list.
+STARTUP_RUNTIME_MODELS: tuple[ModelID, ...] = CORE_APPLICATION_MODELS
+
+
+def application_model_profile(profile: str = "core") -> tuple[ModelID, ...]:
+    normalized = str(profile or "core").strip().lower()
+    if normalized not in {"core", "full"}:
+        raise ValueError(f"Unknown application model profile: {profile}")
+    if normalized == "full":
+        return CORE_APPLICATION_MODELS + OPTIONAL_APPLICATION_MODELS
+    return CORE_APPLICATION_MODELS
+
+
+def provision_profile(profile: str = "core") -> None:
+    """Download and verify every model owned by a setup profile."""
+
+    for model_id in application_model_profile(profile):
+        ModelDownloader.get(model_id)
+
+
+def require_prepared_model(model: Union[ModelID, ModelSpec]) -> ModelSpec:
+    """Return a model spec only when every declared file is already valid."""
+
+    spec = ModelDownloader.registry[model] if isinstance(model, ModelID) else model
+    validator = (
+        ModelDownloader.files_present
+        if _model_downloads_forbidden()
+        else ModelDownloader.is_downloaded
+    )
+    if not validator(spec):
+        raise ModelNotPreparedError(
+            f"Required model '{spec.id.value}' is not prepared. "
+            "Run the matching setup BAT before starting Comic Translate."
+        )
+    return spec
 
 
 def ensure_startup_runtime_models(prefer_cuda: bool = True) -> None:

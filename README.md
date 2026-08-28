@@ -82,20 +82,19 @@ Local translation/runtime:
 - [Gemma](https://ai.google.dev/gemma) local GGUF runtime
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) Docker runtime image
 
-### Auto-downloaded vs user-supplied assets
+### Setup-managed vs user-supplied assets
 
-Automatically downloaded by the app when missing:
-- CTD model files (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
-- Inpainting checkpoints such as `AOT`, `lama_large_512px`, and `lama_mpe`
-- OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
+Windows setup downloads and seals the default RT-DETR/font/CTD/LaMa models.
+`setup_full*.bat` also seals optional AOT, MangaOCR, Pororo, and PPOCRv5 models;
+the running application never downloads them.
 
-Downloaded by the Windows launcher on first use and prepared in verified external volumes:
+Prepared by Windows setup in verified external volumes:
 - the `gemma-4-26B-IQ4_NL.gguf` translation model
 - HunyuanOCR Q8 GGUF and mmproj
 - PaddleOCR VL 1.6 GGUF and mmproj
 
-PaddleOCR VL Spotting and MangaLMM remain optional on-demand runtimes and are
-not part of the default bootstrap.
+PaddleOCR VL Spotting and MangaLMM remain optional full-tier runtimes and are
+not part of core setup.
 
 ## Release Policy
 
@@ -227,7 +226,8 @@ setup.bat
 setup_cuda13.bat
 ```
 
-That prepares the selected venv, required app models, and the three core
+That prepares the selected venv, every default-pipeline app model (RT-DETR v2,
+font detection, CTD protect/positive-claim, and LaMa), and the three core
 runtimes: HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. To also provision
 MangaLMM and PaddleOCR VL Spotting up front, use `setup_full.bat` or
 `setup_full_cuda13.bat` instead. Setup is non-interactive and resumable:
@@ -246,8 +246,10 @@ run_comic.bat
 run_comic_cuda13.bat
 ```
 
-Skipping setup is supported but slower: the application provisions any missing
-runtime on first use, inside the GUI and without a progress bar. Use
+Setup is required. The run launchers and the application never install packages,
+download models, pull images, or reseal volumes. Missing core state fails before
+the app starts; selecting MangaLMM or Spotting without the full tier fails before
+page 1 and points to `setup_full*.bat`. Use
 `setup.bat --doctor` or `setup_cuda13.bat --doctor` for a read-only status
 report.
 

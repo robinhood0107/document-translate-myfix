@@ -16,6 +16,10 @@ from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
 from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
 from modules.utils.exceptions import LocalServiceConnectionError, LocalServiceSetupError
+from modules.utils.windows_installation import (
+    active_windows_install_tier,
+    active_windows_runtime,
+)
 from modules.utils.inpainting_runtime import (
     inpainter_backend_for,
     inpainter_default_settings,
@@ -146,6 +150,22 @@ def validate_ocr(
         normalized_tool = policy.primary_ocr_engine if policy.stage_batched_supported else ""
     else:
         normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
+    if (
+        active_windows_runtime()
+        and normalized_tool in {"Default", "PaddleOCR VL Spotting", "MangaLMM"}
+        and active_windows_install_tier() != "full"
+    ):
+        reason = QCoreApplication.translate(
+            "Messages",
+            "The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.",
+        )
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "Optional OCR runtime is not installed"),
+                reason,
+            )
+        Messages.show_error(main, reason, duration=None, closable=True, source="batch")
+        return False
     if normalized_tool in {
         "PaddleOCR VL",
         "PaddleOCR VL Spotting",
@@ -216,6 +236,25 @@ def validate_ocr(
         return False
 
     return True
+
+
+def validate_windows_inpainter_profile(main: ComicTranslate) -> bool:
+    if not active_windows_runtime() or active_windows_install_tier() == "full":
+        return True
+    runtime = get_inpainter_runtime(main.settings_page)
+    if str(runtime.get("key") or "") != "AOT":
+        return True
+    reason = QCoreApplication.translate(
+        "Messages",
+        "The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.",
+    )
+    if hasattr(main, "batch_report_ctrl"):
+        main.batch_report_ctrl.register_preflight_error(
+            QCoreApplication.translate("Messages", "Optional inpainter is not installed"),
+            reason,
+        )
+    Messages.show_error(main, reason, duration=None, closable=True, source="batch")
+    return False
 
 
 def validate_workflow_mode(
@@ -338,6 +377,8 @@ def validate_settings(
     if not validate_workflow_mode(main, source_lang=source_lang):
         return False
     if not validate_ocr(main, source_lang=source_lang):
+        return False
+    if not validate_windows_inpainter_profile(main):
         return False
     if not validate_translator(main, target_lang):
         return False
