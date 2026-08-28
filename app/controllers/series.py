@@ -5,7 +5,8 @@ import os
 import shutil
 import tempfile
 import traceback
-from typing import TYPE_CHECKING, Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6 import QtCore, QtWidgets
 
@@ -49,6 +50,7 @@ from app.projects.series_state_v1 import (
 from app.ui.series_import_dialog import SeriesImportDialog
 from app.ui.series_workspace import SeriesSettingsDialog
 from app.ui.messages import Messages
+from modules.utils.file_handler import FileHandler
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -60,6 +62,111 @@ logger = logging.getLogger(__name__)
 # 만들면 생략한 인자가 저쪽에서 "빈 값이 주어졌다"로 해석돼 큐 런타임 필드가
 # 통째로 지워진다.
 _UNSET = SERIES_FIELD_UNSET
+
+_SERIES_TRANSACTION_ATTRIBUTES = (
+    "series_file",
+    "series_manifest",
+    "series_items",
+    "active_child_item_id",
+    "active_child_project_path",
+    "active_child_temp_dir",
+    "history_back",
+    "history_forward",
+    "_queue_active",
+    "_pause_requested",
+    "_queue_pending_ids",
+    "_queue_completed_ids",
+    "_queue_failed_ids",
+    "_queue_skipped_ids",
+    "_queue_retry_remaining",
+    "_child_unsynced_dirty",
+    "_recovery_loaded",
+    "_main_globals_snapshot",
+)
+
+
+def _snapshot_series_controller(controller: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for name in _SERIES_TRANSACTION_ATTRIBUTES:
+        value = getattr(controller, name)
+        if isinstance(value, dict):
+            value = dict(value)
+        elif isinstance(value, list):
+            value = list(value)
+        values[name] = value
+    return values
+
+
+def _restore_series_controller(controller: Any, values: dict[str, Any]) -> None:
+    for name, value in values.items():
+        setattr(controller, name, value)
+
+
+@dataclass
+class _PreparedSeriesManifest:
+    controller: Any
+    state: dict[str, object]
+    _committed: bool = False
+    _old_child_temp_dir: str = ""
+    _success_callbacks: list[Callable[[], None]] = field(default_factory=list)
+
+    def capture_for_commit(self, _main: Any):
+        previous = _snapshot_series_controller(self.controller)
+        self._old_child_temp_dir = str(previous.get("active_child_temp_dir") or "")
+        return lambda: _restore_series_controller(self.controller, previous)
+
+    def cleanup(self) -> None:
+        return
+
+    def transfer_ownership(self, main: Any) -> None:
+        self._committed = True
+        main._workspace_owned_temp_roots = []
+
+    def defer_success(self, callback: Callable[[], None]) -> None:
+        self._success_callbacks.append(callback)
+
+    def commit_success(self) -> None:
+        if self._old_child_temp_dir:
+            shutil.rmtree(self._old_child_temp_dir, ignore_errors=True)
+        for callback in self._success_callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.warning("Series success cleanup failed.", exc_info=True)
+        self._success_callbacks.clear()
+
+
+@dataclass
+class _PreparedSeriesChild:
+    controller: Any
+    child_project_path: str
+    snapshot: Any
+    work_dir: str
+    _committed: bool = False
+    _old_child_temp_dir: str = ""
+
+    def capture_for_commit(self, _main: Any):
+        previous = _snapshot_series_controller(self.controller)
+        self._old_child_temp_dir = str(previous.get("active_child_temp_dir") or "")
+        return lambda: _restore_series_controller(self.controller, previous)
+
+    def cleanup(self) -> None:
+        if self._committed:
+            return
+        self.snapshot.cleanup()
+        shutil.rmtree(self.work_dir, ignore_errors=True)
+
+    def transfer_ownership(self, main: Any) -> None:
+        self._committed = True
+        self.snapshot.transfer_ownership(main)
+        main._workspace_owned_temp_roots = [
+            os.path.abspath(self.work_dir),
+            os.path.abspath(str(self.snapshot.state.temp_dir)),
+        ]
+
+    def commit_success(self) -> None:
+        if self._old_child_temp_dir and os.path.abspath(self._old_child_temp_dir) != os.path.abspath(self.work_dir):
+            shutil.rmtree(self._old_child_temp_dir, ignore_errors=True)
 
 
 class SeriesController(QtCore.QObject):
@@ -504,13 +611,21 @@ class SeriesController(QtCore.QObject):
                     "detail": os.path.basename(normalized_path),
                 }
             )
-            return self._load_series_worker(normalized_path, recovery_loaded)
+            return _PreparedSeriesManifest(
+                self,
+                self._load_series_worker(normalized_path, recovery_loaded),
+            )
 
-        def commit(state: dict[str, object]) -> None:
+        def commit(prepared: _PreparedSeriesManifest) -> None:
+            state = prepared.state
             if isinstance(previous_project, str) and previous_project and previous_project != normalized_path:
-                close_state_store(previous_project)
+                prepared.defer_success(lambda: close_state_store(previous_project))
+            self.main.file_handler = FileHandler()
             self.main.image_ctrl.clear_state()
-            self._clear_active_child_materialization()
+            self.active_child_item_id = None
+            self.active_child_project_path = None
+            self.active_child_temp_dir = None
+            self._child_unsynced_dirty = False
             self.series_file = normalized_path
             self.series_manifest = dict(state.get("manifest") or {})
             self.series_items = list(state.get("items") or [])
@@ -956,7 +1071,12 @@ class SeriesController(QtCore.QObject):
             self.main,
             child_project_path,
         )
-        return child_project_path, snapshot
+        return _PreparedSeriesChild(
+            self,
+            child_project_path,
+            snapshot,
+            work_dir,
+        )
 
     def request_open_item(self, item_id: str) -> None:
         if self._queue_change_locked():
@@ -978,11 +1098,7 @@ class SeriesController(QtCore.QObject):
         item = self._find_item(item_id)
         if item is None:
             return
-        if push_history:
-            self._push_history()
-
         work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
-        old_temp_dir = self.active_child_temp_dir
         coordinator = self.main.open_workspace_ctrl
 
         def prepare(report_progress):
@@ -992,13 +1108,15 @@ class SeriesController(QtCore.QObject):
                 shutil.rmtree(work_dir, ignore_errors=True)
                 raise
 
-        def commit(result) -> None:
-            child_project_path, snapshot = result
+        def commit(prepared: _PreparedSeriesChild) -> None:
+            if push_history:
+                self._push_history()
+            child_project_path = prepared.child_project_path
+            snapshot = prepared.snapshot
+            self.main.file_handler = FileHandler()
             self.main.image_ctrl.clear_state()
             snapshot.apply(self.main)
             self.main.project_ctrl.load_state_to_ui(snapshot.saved_context)
-            if old_temp_dir and old_temp_dir != work_dir:
-                shutil.rmtree(old_temp_dir, ignore_errors=True)
             self.active_child_item_id = str(item_id)
             self.active_child_project_path = child_project_path
             self.active_child_temp_dir = work_dir

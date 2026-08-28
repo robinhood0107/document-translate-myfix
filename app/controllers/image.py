@@ -676,14 +676,12 @@ class ImageStateController:
             )
 
         def commit(prepared: PreparedWorkspace) -> bool:
-            old_handler = self.main.file_handler
-            self.main.project_ctrl.clear_recovery_checkpoint()
+            prepared.defer_success(self.main.project_ctrl.clear_recovery_checkpoint)
             self.clear_state()
             self.main.file_handler = prepared.file_handler
             self.main.image_files = list(prepared.file_paths)
             self._apply_prepared_workspace_incrementally(
                 prepared,
-                old_handler=old_handler,
                 coordinator=coordinator,
             )
             return False
@@ -698,7 +696,6 @@ class ImageStateController:
         self,
         prepared: PreparedWorkspace,
         *,
-        old_handler,
         coordinator: OpenWorkspaceCoordinator,
     ) -> None:
         files = list(prepared.file_paths)
@@ -748,12 +745,10 @@ class ImageStateController:
                 self.main.image_viewer.fitInView()
                 self.main.batch_report_ctrl.refresh_action_buttons()
                 self._show_pdf_import_warnings()
-                old_handler.cleanup()
                 coordinator.complete()
             except Exception as exc:
                 import traceback
 
-                prepared.cleanup()
                 coordinator.fail((type(exc), exc, traceback.format_exc()))
 
         QtCore.QTimer.singleShot(0, self.main, apply_chunk)
