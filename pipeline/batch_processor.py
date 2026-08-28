@@ -1213,13 +1213,6 @@ class BatchProcessor:
                         "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
                     ).replace("{pages}", pages).replace("{sizes}", sizes),
                 )
-        try:
-            if self.main_page.file_handler.should_pre_materialize(image_list):
-                count = self.main_page.file_handler.pre_materialize(image_list)
-                logger.info("Batch pre-materialized %d paths before full-run processing.", count)
-        except Exception:
-            logger.debug("Batch pre-materialization failed; continuing lazily.", exc_info=True)
-
         for index, image_path in enumerate(image_list):
             if self._is_cancelled():
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)

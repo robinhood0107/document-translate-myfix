@@ -8,16 +8,20 @@ from PySide6.QtCore import QCoreApplication
 from .archives import (
     close_comic_cache,
     close_pdf_cache,
+    inspect_archive_entry_dimensions,
     list_archive_image_entries,
     materialize_archive_entry,
     materialize_archive_entries,
 )
 from .export_paths import sanitize_export_path_component
-from .image_safety import build_image_memory_plan, inspect_image_dimensions
+from .image_safety import (
+    ImageResourcePlan,
+    build_image_resource_plan,
+    inspect_image_dimensions,
+)
 from .pdf_pages import (
     PdfImportError,
     PdfPagePlan,
-    materialize_transaction,
     scan_pdf,
     validate_materialized_page,
 )
@@ -93,7 +97,7 @@ class FileHandler:
         self.archive_info = []
         self._pdf_import_warnings: list[dict[str, object]] = []
         self._pdf_warning_cursor = 0
-        self._image_memory_plan: dict[str, int | bool] = {}
+        self._image_resource_plan = ImageResourcePlan()
 
     def cleanup(self) -> None:
         for archive in list(self.archive_info):
@@ -108,7 +112,7 @@ class FileHandler:
         self.file_paths = []
         self._pdf_import_warnings = []
         self._pdf_warning_cursor = 0
-        self._image_memory_plan = {}
+        self._image_resource_plan = ImageResourcePlan()
 
     def prepare_files(
         self,
@@ -255,117 +259,62 @@ class FileHandler:
         paths: list[str],
         should_cancel=None,
     ) -> int:
-        grouped: dict[str, list[tuple[PdfPagePlan, str]]] = {}
         canonical_plans: dict[str, list[PdfPagePlan]] = {}
         selected_pdf_paths = 0
+        resources: list[tuple[str, int, int]] = []
 
-        for path in list(paths or []):
-            abs_path = os.path.abspath(path)
-            with _LAZY_SOURCE_LOCK:
-                source = _LAZY_SOURCE_BY_PATH.get(abs_path)
-            if not isinstance(source, dict):
-                continue
-            archive_path = str(source.get("archive_path", ""))
-            entry = source.get("entry")
-            if not archive_path.lower().endswith(".pdf") or not isinstance(entry, dict):
-                continue
-            plan_value = entry.get("pdf_plan")
-            if not isinstance(plan_value, dict):
-                raise PdfImportError(
-                    "PDF_SOURCE_CHANGED",
-                    page_index=int(entry.get("page_index", -1)),
-                    retryable=True,
-                    detail_code="plan_schema_mismatch",
-                )
-            plan = PdfPagePlan.from_dict(plan_value)
-            selected_pdf_paths += 1
-            plans = canonical_plans.get(archive_path)
-            if plans is None:
-                _identity, plans = scan_pdf(archive_path)
-                canonical_plans[archive_path] = plans
-            if (
-                plan.page_index < 0
-                or plan.page_index >= len(plans)
-                or plans[plan.page_index] != plan
-            ):
-                raise PdfImportError(
-                    "PDF_SOURCE_CHANGED",
-                    page_index=plan.page_index,
-                    retryable=True,
-                    detail_code="plan_source_mismatch",
-                )
-            if validate_materialized_page(plan, abs_path):
-                continue
-            try:
-                if os.path.isfile(abs_path):
-                    os.remove(abs_path)
-            except OSError as exc:
-                raise PdfImportError(
-                    "PDF_PAGE_MATERIALIZATION_FAILED",
-                    page_index=plan.page_index,
-                    retryable=True,
-                    detail_code="output_validation_failed",
-                ) from exc
-            grouped.setdefault(archive_path, []).append((plan, abs_path))
-
-        created_in_call: list[str] = []
-        try:
-            for archive_path, items in grouped.items():
-                missing_before = {
-                    output_path
-                    for _plan, output_path in items
-                    if not os.path.exists(output_path)
-                }
-                materialize_transaction(
-                    archive_path,
-                    items,
-                    should_cancel=should_cancel,
-                )
-                created_in_call.extend(
-                    output_path
-                    for output_path in missing_before
-                    if os.path.isfile(output_path)
-                )
-        except Exception:
-            for output_path in created_in_call:
-                try:
-                    os.remove(output_path)
-                except OSError:
-                    pass
-            raise
-
-        try:
-            for archive_path, items in grouped.items():
-                for plan, output_path in items:
-                    if not validate_materialized_page(plan, output_path):
-                        raise PdfImportError(
-                            "PDF_PAGE_MATERIALIZATION_FAILED",
-                            page_index=plan.page_index,
-                            detail_code="output_validation_failed",
-                        )
-        except Exception:
-            for output_path in created_in_call:
-                try:
-                    os.remove(output_path)
-                except OSError:
-                    pass
-            raise
-        validated_paths: list[str] = []
         for path in list(paths or []):
             if should_cancel is not None and should_cancel():
                 from .exceptions import OperationCancelledError
 
                 raise OperationCancelledError("Cancelled during image resource preflight.")
             abs_path = os.path.abspath(path)
-            if not ensure_prepared_path_materialized(abs_path):
+            with _LAZY_SOURCE_LOCK:
+                source = _LAZY_SOURCE_BY_PATH.get(abs_path)
+            if not isinstance(source, dict):
+                width, height = inspect_image_dimensions(abs_path)
+                resources.append((abs_path, width, height))
+                continue
+            archive_path = str(source.get("archive_path", ""))
+            entry = source.get("entry")
+            if not archive_path or not isinstance(entry, dict):
                 raise FileNotFoundError(abs_path)
-            inspect_image_dimensions(abs_path)
-            validated_paths.append(abs_path)
-        self._image_memory_plan = build_image_memory_plan(validated_paths)
+            if archive_path.lower().endswith(".pdf"):
+                plan_value = entry.get("pdf_plan")
+                if not isinstance(plan_value, dict):
+                    raise PdfImportError(
+                        "PDF_SOURCE_CHANGED",
+                        page_index=int(entry.get("page_index", -1)),
+                        retryable=True,
+                        detail_code="plan_schema_mismatch",
+                    )
+                plan = PdfPagePlan.from_dict(plan_value)
+                selected_pdf_paths += 1
+                plans = canonical_plans.get(archive_path)
+                if plans is None:
+                    _identity, plans = scan_pdf(archive_path)
+                    canonical_plans[archive_path] = plans
+                if (
+                    plan.page_index < 0
+                    or plan.page_index >= len(plans)
+                    or plans[plan.page_index] != plan
+                ):
+                    raise PdfImportError(
+                        "PDF_SOURCE_CHANGED",
+                        page_index=plan.page_index,
+                        retryable=True,
+                        detail_code="plan_source_mismatch",
+                    )
+                width, height = int(plan.width), int(plan.height)
+            else:
+                width, height = inspect_archive_entry_dimensions(archive_path, entry)
+            resources.append((abs_path, width, height))
+
+        self._image_resource_plan = build_image_resource_plan(resources)
         return selected_pdf_paths
 
-    def image_memory_plan(self) -> dict[str, int | bool]:
-        return dict(self._image_memory_plan)
+    def image_resource_plan(self) -> ImageResourcePlan:
+        return self._image_resource_plan
 
     def should_pre_materialize(self, target_paths: list[str] | None = None) -> bool:
         paths = list(target_paths or [])

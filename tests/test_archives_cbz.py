@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from PIL import Image
 
 from modules.utils.archives import (
     close_comic_cache,
+    inspect_archive_entry_dimensions,
     list_archive_image_entries,
     materialize_archive_entries,
     materialize_archive_entry,
@@ -129,6 +131,9 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
             self.assertEqual(page_events[-1]["current"], 2)
             self.assertTrue(os.path.isfile(paths[0]))
             self.assertFalse(os.path.exists(paths[1]))
+            self.assertEqual(handler.preflight_for_processing(paths), 0)
+            self.assertFalse(os.path.exists(paths[1]))
+            self.assertEqual(handler.image_resource_plan().page_count, 2)
             self.assertTrue(ensure_prepared_path_materialized(paths[1]))
             self.assertTrue(os.path.isfile(paths[1]))
 
@@ -156,6 +161,49 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
                 )
             )
             self.assertEqual(output_path.read_bytes(), source_bytes)
+
+    def test_cb7_preflight_reads_headers_without_materializing_lazy_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first = root / "001.png"
+            second = root / "002.png"
+            self._make_png(first, (12, 34, 56))
+            self._make_png(second, (65, 43, 21))
+            archive_path = root / "sample.cb7"
+            with py7zr.SevenZipFile(archive_path, "w") as archive:
+                archive.write(first, arcname="001.png")
+                archive.write(second, arcname="002.png")
+
+            handler = FileHandler()
+            paths = handler.prepare_files([str(archive_path)])
+            self.assertTrue(os.path.isfile(paths[0]))
+            self.assertFalse(os.path.exists(paths[1]))
+
+            handler.preflight_for_processing(paths)
+
+            self.assertFalse(os.path.exists(paths[1]))
+            self.assertEqual(handler.image_resource_plan().page_count, 2)
+
+    def test_rar_header_probe_uses_member_stream_without_output_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "page.png"
+            payload = self._make_png(source, (10, 20, 30))
+            archive_path = root / "sample.rar"
+            archive_path.write_bytes(b"fixture")
+            fake_archive = mock.MagicMock()
+            fake_archive.__enter__.return_value = fake_archive
+            fake_archive.__exit__.return_value = False
+            fake_archive.open.return_value = io.BytesIO(payload)
+
+            with mock.patch("rarfile.RarFile", return_value=fake_archive):
+                dimensions = inspect_archive_entry_dimensions(
+                    str(archive_path),
+                    {"kind": "archive_entry", "entry_name": "page.png"},
+                )
+
+            self.assertEqual(dimensions, (12, 12))
+            fake_archive.open.assert_called_once_with("page.png")
 
     def test_archive_member_traversal_is_rejected_before_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

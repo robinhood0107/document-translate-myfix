@@ -179,6 +179,39 @@ class InpainterReleaseTests(unittest.TestCase):
         self.assertEqual(snapshot.active_model, "inpainter")
         self.assertEqual(snapshot.states["inpainter"], "release_failed")
 
+    def test_unobserved_release_drops_logical_lease_when_enforcement_is_off(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(settings_page=object())
+        processor.inpainting = SimpleNamespace(
+            _ensure_inpainter=mock.Mock(),
+            release_inpainter_resources=mock.Mock(
+                return_value={
+                    "gpu_release_expected": True,
+                    "vram_release_gate": {
+                        "required": True,
+                        "observed": None,
+                        "status": "unavailable",
+                    },
+                }
+            ),
+        )
+        processor._emit_benchmark_event = mock.Mock()
+        with mock.patch(
+            "pipeline.stage_batched_processor.get_inpainter_runtime",
+            return_value={"device": "cuda", "backend": "torch"},
+        ):
+            processor._ensure_inpainter()
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.gpu_release_enforcement_enabled",
+            return_value=False,
+        ):
+            processor._release_inpainter_before_render([])
+
+        snapshot = processor._runtime_resource_arbiter().snapshot()
+        self.assertIsNone(snapshot.active_model)
+        self.assertEqual(snapshot.states["inpainter"], "stopped")
+
     def test_targeted_release_preserves_materialized_edit_mask(self) -> None:
         handler = InpaintingHandler(SimpleNamespace())
         cached_model = SimpleNamespace()
