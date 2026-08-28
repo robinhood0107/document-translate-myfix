@@ -414,12 +414,25 @@ class PrepareScriptContractTests(unittest.TestCase):
         self.assertIn("$NormalizedArguments", module)
         self.assertIn('-replace "`r`n", "`n"', module)
 
-    def test_every_prepare_script_accepts_both_launcher_cuda_images(self) -> None:
+    def test_smoke_failures_preserve_logs_until_explicit_cleanup(self) -> None:
+        module = (
+            ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function Test-ManagedRuntimeContainerRunning", module)
+        self.assertIn("function Remove-ManagedRuntimeContainer", module)
+        for name in PREPARE_SCRIPTS:
+            with self.subTest(script=name):
+                script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+                self.assertNotIn("'run', '-d', '--rm'", script)
+                self.assertIn("Test-ManagedRuntimeContainerRunning", script)
+                self.assertIn("Remove-ManagedRuntimeContainer", script)
+
+    def test_every_prepare_script_accepts_only_the_managed_cuda_image(self) -> None:
         module = (
             ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
         ).read_text(encoding="utf-8")
         self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", module)
-        self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", module)
+        self.assertIn("Supported = @($ImageRef)", module)
         for name in PREPARE_SCRIPTS:
             with self.subTest(script=name):
                 script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
@@ -440,6 +453,11 @@ class PrepareScriptContractTests(unittest.TestCase):
         self.assertIn("function Invoke-ManagedRuntimeDownloadAttempt", source)
         self.assertIn("[int]$MaximumAttempts = 5", source)
         self.assertIn("Resuming in", source)
+        self.assertIn("$Handler.AllowAutoRedirect = $false", source)
+        self.assertIn("for ($Redirect = 0; $Redirect -le 10; $Redirect++)", source)
+        self.assertIn("$Request.Headers.Range", source)
+        self.assertIn("[System.Security.Cryptography.SHA256]::Create()", source)
+        self.assertNotIn("Get-FileHash", source)
         self.assertIn("$RequiredBytes = $Bytes + 536870912L", source)
 
     def test_every_contracted_model_has_a_registered_download_source(self) -> None:
