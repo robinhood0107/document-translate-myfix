@@ -4,7 +4,12 @@ from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
-import pytest
+try:
+    import pytest
+except ModuleNotFoundError as exc:  # unittest discovery in product venvs
+    import unittest
+
+    raise unittest.SkipTest("pytest-only test module") from exc
 import torch
 
 from modules.inpainting.runtime_contract import (
