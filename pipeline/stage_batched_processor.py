@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import imkit as imk
 import numpy as np
+import psutil
 from PySide6.QtCore import QCoreApplication
 
 from app.path_materialization import ensure_path_materialized
@@ -3567,14 +3568,15 @@ class StageBatchedProcessor(BatchProcessor):
             inpainter_vram_release_status=str(gate.get("status") or ""),
             inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
         )
-        release_succeeded = not bool(
+        release_observed = not bool(
             gate.get("required") and not gate.get("observed")
         )
+        enforce_release = gpu_release_enforcement_enabled()
         self._release_inpainter_runtime_lease(
-            release_succeeded=release_succeeded,
+            release_succeeded=release_observed or not enforce_release,
         )
-        if not release_succeeded:
-            if gpu_release_enforcement_enabled():
+        if not release_observed:
+            if enforce_release:
                 raise RuntimeError(
                     QCoreApplication.translate(
                         "StageBatchedProcessor",
@@ -4560,6 +4562,52 @@ class StageBatchedProcessor(BatchProcessor):
             self._released_page_buffer_bytes / (1024 * 1024),
         )
 
+    def _record_stage_memory_telemetry(
+        self,
+        stage: str,
+        pages: list[StagePageContext],
+    ) -> None:
+        buffer_bytes = 0
+        buffered_pages = 0
+        for ctx in pages:
+            page_bytes = _approximate_buffer_bytes(
+                {
+                    "image": getattr(ctx, "image", None),
+                    "inpaint_input_img": getattr(ctx, "inpaint_input_img", None),
+                    "raw_mask": getattr(ctx, "raw_mask", None),
+                    "mask": getattr(ctx, "mask", None),
+                    "patches": getattr(ctx, "patches", None),
+                    "mask_details": getattr(ctx, "mask_details", None),
+                }
+            )
+            if page_bytes > 0:
+                buffered_pages += 1
+                buffer_bytes += page_bytes
+        try:
+            process_rss = int(psutil.Process().memory_info().rss)
+            available_ram = int(psutil.virtual_memory().available)
+        except Exception:
+            process_rss = 0
+            available_ram = 0
+        self._record_performance_workload(
+            stage,
+            process_rss_bytes=process_rss,
+            available_ram_bytes=available_ram,
+            full_resolution_page_buffer_count=buffered_pages,
+            estimated_page_buffer_bytes=buffer_bytes,
+            released_page_buffer_bytes=int(self._released_page_buffer_bytes),
+        )
+        logger.info(
+            "Stage memory: stage=%s rss=%d available=%d page_buffers=%d "
+            "estimated_buffer_bytes=%d released_bytes=%d",
+            stage,
+            process_rss,
+            available_ram,
+            buffered_pages,
+            buffer_bytes,
+            int(self._released_page_buffer_bytes),
+        )
+
     def _resolve_render_future(self, pending: _PendingRenderJob) -> None:
         try:
             result = pending.future.result()
@@ -4942,6 +4990,11 @@ class StageBatchedProcessor(BatchProcessor):
             page_count=total_images,
             workflow_mode="stage_batched",
         )
+        resource_plan_getter = getattr(
+            self.main_page.file_handler,
+            "image_resource_plan",
+            None,
+        )
         self._reset_prewarm_lifecycle()
         pdf_preflight = getattr(
             self.main_page.file_handler, "preflight_for_processing", None
@@ -4977,17 +5030,16 @@ class StageBatchedProcessor(BatchProcessor):
                         "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
                     ).replace("{pages}", pages).replace("{sizes}", sizes),
                 )
-        try:
-            with self._measure_performance(
-                stage="pipeline",
-                operation="pre_materialize",
-                workload={"page_count": total_images},
-            ):
-                if self.main_page.file_handler.should_pre_materialize(image_list):
-                    self.main_page.file_handler.pre_materialize(image_list)
-        except Exception:
-            logger.debug("Stage-batched pre-materialization failed; continuing lazily.", exc_info=True)
-
+        if callable(resource_plan_getter):
+            resource_plan = resource_plan_getter()
+            self._record_performance_workload(
+                "pipeline",
+                page_count=int(getattr(resource_plan, "page_count", total_images)),
+                largest_page_pixels=int(getattr(resource_plan, "largest_pixels", 0)),
+                largest_page_peak_bytes=int(
+                    getattr(resource_plan, "largest_page_peak_bytes", 0)
+                ),
+            )
         with self._measure_performance(
             stage="pipeline",
             operation="prepare_work_context",
@@ -5059,6 +5111,7 @@ class StageBatchedProcessor(BatchProcessor):
                 detected_block_count=detected_blocks,
             )
             self._sample_performance_resources("detect_stage_end")
+            self._record_stage_memory_telemetry("detect", pages)
             self._raise_if_cancelled()
             # GPU detection can keep an ONNX session resident.  Delay model
             # prewarm until it completes so the model-start baseline and the
@@ -5098,6 +5151,7 @@ class StageBatchedProcessor(BatchProcessor):
                 runtime_required=bool(ocr_blocks),
             )
             self._sample_performance_resources("ocr_stage_end")
+            self._record_stage_memory_telemetry("ocr", pages)
             self._raise_if_cancelled()
             if benchmark_stage_ceiling == "ocr":
                 self._complete_ocr_stage_ceiling(pages)
@@ -5153,6 +5207,7 @@ class StageBatchedProcessor(BatchProcessor):
                 source_character_count=source_character_count,
             )
             self._sample_performance_resources("translate_stage_end")
+            self._record_stage_memory_telemetry("translate", pages)
             self._raise_if_cancelled()
             # 번역이 끝나면 Router 컨테이너를 완전히 정지한다. 예전에는 OCR sweep
             # 뒤에도 컨테이너를 살려둔 채 인페인팅 sweep 전체(실측 467초)를 지나서,
@@ -5200,6 +5255,7 @@ class StageBatchedProcessor(BatchProcessor):
                 roi_count=inpaint_roi_count,
             )
             self._sample_performance_resources("inpaint_stage_end")
+            self._record_stage_memory_telemetry("inpaint", pages)
             self._raise_if_cancelled()
             with self._measure_performance(
                 stage="render",
@@ -5221,6 +5277,7 @@ class StageBatchedProcessor(BatchProcessor):
                 source_megapixels=source_pixels / 1_000_000.0,
             )
             self._sample_performance_resources("render_stage_end")
+            self._record_stage_memory_telemetry("render", pages)
             # 한 스테이지의 실패로 페이지가 출력에서 사라지지 않게, 아직 파일을
             # 남기지 못한 페이지를 여기서 마지막으로 채운다.
             output_summary = self._reconcile_page_outputs(

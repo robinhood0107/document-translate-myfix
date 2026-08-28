@@ -1,5 +1,3 @@
-import logging
-
 from pipeline.cache_manager import CacheManager
 from pipeline.block_detection import BlockDetectionHandler
 from pipeline.inpainting import InpaintingHandler
@@ -11,9 +9,6 @@ from pipeline.stage_batched_processor import StageBatchedProcessor
 from pipeline.webtoon_batch import WebtoonBatchProcessor
 from modules.ocr.selection import STAGE_BATCHED_WORKFLOW_MODE
 from modules.utils.windows_installation import assert_selected_windows_models_installed
-
-logger = logging.getLogger(__name__)
-
 
 class ComicTranslatePipeline:
     """Main pipeline orchestrator for comic translation."""
@@ -155,6 +150,7 @@ class ComicTranslatePipeline:
     # Batch processing methods
     def batch_process(self, selected_paths=None):
         """Regular batch processing."""
+        workflow_mode = self.main_page.settings_page.get_workflow_mode()
         paths = list(selected_paths or self.main_page.image_files or [])
         source_lang = self.main_page.s_combo.currentText()
         source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
@@ -162,24 +158,6 @@ class ComicTranslatePipeline:
             self.main_page.settings_page,
             source_lang_english,
         )
-        preflight = getattr(self.main_page.file_handler, "preflight_for_processing", None)
-        if callable(preflight):
-            preflight(
-                paths,
-                should_cancel=lambda: bool(
-                    getattr(self.main_page, "is_current_task_cancelled", lambda: False)()
-                ),
-            )
-        workflow_mode = self.main_page.settings_page.get_workflow_mode()
-        memory_plan = self.main_page.file_handler.image_memory_plan()
-        if bool(memory_plan.get("streaming", False)):
-            logger.info(
-                "Using the bounded-memory page pipeline: estimated_peak=%s budget=%s largest_pixels=%s",
-                memory_plan.get("estimated_peak_bytes", 0),
-                memory_plan.get("retention_budget_bytes", 0),
-                memory_plan.get("largest_pixels", 0),
-            )
-            return self.batch_processor.batch_process(paths)
         if workflow_mode == STAGE_BATCHED_WORKFLOW_MODE:
             return self.stage_batched_processor.batch_process(paths)
         return self.batch_processor.batch_process(paths)
