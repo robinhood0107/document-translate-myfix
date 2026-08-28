@@ -9,7 +9,7 @@ PaddleOCR-VL Spotting)는 모두 준비된 Docker 볼륨 안의 ready manifest�
 
 manifest는 준비 당시의 llama.cpp image identity를 함께 봉인합니다. 기본 image
 참조는 고정 digest가 아니라 움직이는 태그
-(`ghcr.io/ggml-org/llama.cpp:server-cuda13`)이므로, 업스트림이 그 태그를 갱신하고
+(`ghcr.io/ggml-org/llama.cpp:server-cuda`)이므로, 업스트림이 그 태그를 갱신하고
 로컬에서 새 image를 받으면 digest가 바뀝니다.
 
 그러면 모델 파일이 계약과 완전히 같은데도 manifest의 image identity만 어긋나

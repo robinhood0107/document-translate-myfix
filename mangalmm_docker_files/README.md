@@ -29,7 +29,7 @@ mount됩니다.
 
 ## 런타임 계약
 
-- `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
+- 기본값 `ghcr.io/ggml-org/llama.cpp:server-cuda` (기존 `:server-cuda13` 봉인도 지원)
 - `pull_policy: missing`
 - image ID, compose command, volume, ready manifest, model/mmproj SHA를 포함한
   runtime fingerprint

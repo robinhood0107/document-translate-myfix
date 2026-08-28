@@ -12,18 +12,18 @@ from typing import Any, Callable
 from modules.utils.exceptions import OperationCancelledError
 
 
-# CUDA 13 태그가 기본이지만, 드라이버가 CUDA 13 런타임을 받지 못하는 호스트가
-# 남아 있어 CUDA 12 태그도 그대로 인정한다.  두 태그 중 무엇으로 준비했든 같은
-# 런타임 계약을 통과해야 한다.
+# Windows setup은 CUDA12/CUDA13 Python 경로 모두 호환 범위가 넓은 CUDA 태그를
+# 기본으로 사용한다. 기존 CUDA13 태그로 봉인된 런타임도 계속 검증할 수 있도록
+# 두 태그 모두 같은 런타임 계약에서 인정한다.
 SUPPORTED_LLAMA_CPP_IMAGES: tuple[str, ...] = (
-    "ghcr.io/ggml-org/llama.cpp:server-cuda13",
     "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "ghcr.io/ggml-org/llama.cpp:server-cuda13",
 )
 _requested_default_image = os.environ.get("LLAMA_CPP_IMAGE", "").strip()
 DEFAULT_LLAMA_CPP_IMAGE = (
     _requested_default_image
     if _requested_default_image in SUPPORTED_LLAMA_CPP_IMAGES
-    else "ghcr.io/ggml-org/llama.cpp:server-cuda13"
+    else "ghcr.io/ggml-org/llama.cpp:server-cuda"
 )
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
 DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC = 10
