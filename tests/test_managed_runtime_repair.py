@@ -267,8 +267,8 @@ class PreparationRunnerTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
-class GemmaSelfRepairTests(unittest.TestCase):
-    """계약을 읽는 경로가 자가복구를 정확히 한 번만 부르는지 본다."""
+class GemmaReadOnlyRuntimeTests(unittest.TestCase):
+    """The application rejects drift; setup remains the only repair owner."""
 
     def _manager(self, manifest_bytes: bytes, *, image_id: str):
         import hashlib
@@ -287,80 +287,35 @@ class GemmaSelfRepairTests(unittest.TestCase):
         )
         return manager, _GemmaVolumeNotProvisioned
 
-    def test_image_drift_repairs_once_and_then_succeeds(self) -> None:
-        drifted = _encode(_gemma_manifest())
-        healed = _encode(
-            _gemma_manifest(
-                source_image_digest=CURRENT_IMAGE_ID,
-                source_image_id=CURRENT_IMAGE_ID,
-            )
-        )
-        manager, _marker = self._manager(drifted, image_id=CURRENT_IMAGE_ID)
-        repairs: list[str] = []
-
-        def repair(*, volume_name: str, detail: str, message: str = "") -> None:
-            import hashlib
-
-            repairs.append(volume_name)
-            manager._probe_model_volume = lambda **_kwargs: (  # type: ignore[method-assign]
-                healed,
-                hashlib.sha256(healed).hexdigest(),
-                MODEL_SPEC["bytes"],
-            )
-
-        manager._repair_runtime_volume = repair  # type: ignore[method-assign]
-
-        contract = manager._load_runtime_contract(MODEL_NAME)
-
-        self.assertEqual(repairs, [DEFAULT_GEMMA_MODEL_VOLUME])
-        self.assertEqual(contract.image_id, CURRENT_IMAGE_ID)
-
-    def test_a_repair_that_does_not_help_raises_instead_of_looping(self) -> None:
+    def test_image_drift_is_rejected_without_a_repair_hook(self) -> None:
         from modules.utils.exceptions import LocalServiceSetupError
 
         drifted = _encode(_gemma_manifest())
         manager, _marker = self._manager(drifted, image_id=CURRENT_IMAGE_ID)
-        repairs: list[str] = []
-        manager._repair_runtime_volume = (  # type: ignore[method-assign]
-            lambda **kwargs: repairs.append(kwargs["volume_name"])
-        )
 
         with self.assertRaises(LocalServiceSetupError):
             manager._load_runtime_contract(MODEL_NAME)
 
-        self.assertEqual(len(repairs), 1)
+        self.assertFalse(hasattr(manager, "_repair_runtime_volume"))
 
-    def test_a_missing_volume_provisions_once(self) -> None:
-        healed = _encode(
+    def test_missing_volume_is_rejected_without_provisioning(self) -> None:
+        from modules.utils.exceptions import LocalServiceSetupError
+
+        manifest = _encode(
             _gemma_manifest(
                 source_image_digest=CURRENT_IMAGE_ID,
                 source_image_id=CURRENT_IMAGE_ID,
             )
         )
-        manager, marker = self._manager(healed, image_id=CURRENT_IMAGE_ID)
-        repairs: list[str] = []
+        manager, marker = self._manager(manifest, image_id=CURRENT_IMAGE_ID)
 
         def missing(**_kwargs):
             raise marker("Prepared Gemma model volume does not exist: x")
 
         manager._probe_model_volume = missing  # type: ignore[method-assign]
 
-        def repair(*, volume_name: str, detail: str, message: str = "") -> None:
-            import hashlib
-
-            repairs.append(volume_name)
-            manager._probe_model_volume = lambda **_kwargs: (  # type: ignore[method-assign]
-                healed,
-                hashlib.sha256(healed).hexdigest(),
-                MODEL_SPEC["bytes"],
-            )
-
-        manager._repair_runtime_volume = repair  # type: ignore[method-assign]
-
-        contract = manager._load_runtime_contract(MODEL_NAME)
-
-        self.assertEqual(repairs, [DEFAULT_GEMMA_MODEL_VOLUME])
-        self.assertEqual(contract.image_id, CURRENT_IMAGE_ID)
+        with self.assertRaisesRegex(LocalServiceSetupError, "matching setup BAT"):
+            manager._load_runtime_contract(MODEL_NAME)
 
 
 class PrepareScriptContractTests(unittest.TestCase):
