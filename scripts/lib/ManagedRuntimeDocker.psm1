@@ -17,9 +17,13 @@ function Get-ManagedLlamaCppImagePolicy {
     $Cuda12 = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
     $Cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
     return [pscustomobject]@{
-        Preferred = if ($Runtime -eq 'cuda12') { $Cuda12 } else { $Cuda13 }
-        Fallback = if ($Runtime -eq 'cuda13') { $Cuda12 } else { '' }
-        Supported = @($Cuda13, $Cuda12)
+        # The Python runtime still follows the selected CUDA12/CUDA13 launcher,
+        # but both Windows setup paths deliberately share llama.cpp's broadly
+        # compatible CUDA image. Keep the CUDA13 tag supported only so an
+        # explicitly selected legacy seal can still be inspected or verified.
+        Preferred = $Cuda12
+        Fallback = ''
+        Supported = @($Cuda12, $Cuda13)
     }
 }
 

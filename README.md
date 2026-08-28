@@ -214,9 +214,8 @@ only to create the isolated venv; global packages are never imported.
 Setup and launch are separate. Run setup once, then launch as often as you
 like; the launcher never downloads model volumes, so it starts in seconds.
 
-**Step 1 - provision once** (CUDA12 uses Python cu128 plus llama.cpp
-`server-cuda`; CUDA13 uses cu130 and inspects each image's CUDA requirement
-before selecting `server-cuda13` or the compatible `server-cuda` fallback):
+**Step 1 - provision once** (CUDA12 uses Python cu128 and CUDA13 uses cu130;
+both setup paths use the broadly compatible llama.cpp `server-cuda` image):
 
 ```bat
 setup.bat
@@ -322,8 +321,8 @@ Tracked compose/runtime images used by the repo:
 Every managed llama.cpp runtime (Gemma, PaddleOCR VL, PaddleOCR VL Spotting,
 HunyuanOCR, MangaLMM, and the Router) uses one CUDA server image:
 
-- Default: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
-- Also supported: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Windows setup default: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Legacy explicit seals also supported: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
 
 ## Reference Setup Docs
 

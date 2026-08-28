@@ -28,8 +28,8 @@ CUDA12 경로(Python cu128 + llama.cpp `server-cuda`):
 setup.bat
 ```
 
-CUDA13 Python 경로(cu130, Docker는 `server-cuda13` 우선 후 호환되지 않으면
-`server-cuda` 자동 fallback):
+CUDA13 Python 경로(cu130, Docker llama.cpp는 CUDA12 setup과 같은 호환 범위가
+넓은 `server-cuda` 사용):
 
 ```bat
 setup_cuda13.bat
@@ -79,7 +79,7 @@ llama.cpp image를 전달한 뒤 앱을 띄웁니다. package/model/image/volume
 다운로드, pull, 생성, 재봉인하지 않습니다. core 상태가 없으면 해당 setup BAT,
 MangaLMM/Spotting 상태가 없으면 페이지 처리 전에 setup_full을 요구합니다.
 
-CUDA13 launcher는 컨테이너를 만들기 전에 이미지의 `NVIDIA_REQUIRE_CUDA`와
+CUDA13 launcher는 `server-cuda`를 사용하더라도 컨테이너를 만들기 전에 이미지의 `NVIDIA_REQUIRE_CUDA`와
 드라이버 호환 버전을 비교합니다. 준비 완료 뒤에는 ready manifest, image ID,
 모델 크기가 그대로인 볼륨을 재사용하므로 전체 해시와 GPU smoke를 반복하지 않습니다.
 
@@ -128,7 +128,7 @@ llama.cpp의 CUDA 사용자 공간은 선택한 Docker image 안에 있습니다
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda` (기존 `:server-cuda13` 명시적 봉인도 지원)
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)

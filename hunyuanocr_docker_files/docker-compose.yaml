@@ -1,6 +1,6 @@
 services:
   hunyuanocr-local-server:
-    image: ${HUNYUAN_OCR_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13}
+    image: ${HUNYUAN_OCR_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
     pull_policy: never
     container_name: hunyuanocr-local-server
     restart: unless-stopped
