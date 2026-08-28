@@ -60,6 +60,12 @@ next run. Completion requires exact size/SHA-256 validation and real model
 load smokes. Use `setup.bat --doctor` or
 `setup_cuda13.bat --doctor` for a read-only report.
 
+The BAT keeps the classic Command Prompt host, uses UTF-8 with Consolas 16px
+for the current window only, and does not change the registry. The console shows
+package substeps, each model boundary, compact 10% download updates, runtime
+preparation boundaries, and the final result. Full child-command output remains
+in the timestamped `logs\bootstrap\*-detail.log` file.
+
 ## 3. Launch
 
 ```bat

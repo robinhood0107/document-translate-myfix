@@ -51,6 +51,6 @@ public static class ComicConsoleFont {
 if (-not ('ComicConsoleFont' -as [type])) {
     Add-Type -TypeDefinition $Source -Language CSharp | Out-Null
 }
-foreach ($Face in @('Cascadia Mono', 'Consolas')) {
-    if ([ComicConsoleFont]::Set($Face, 18)) { break }
+foreach ($Face in @('Consolas', 'Cascadia Mono')) {
+    if ([ComicConsoleFont]::Set($Face, 16)) { break }
 }
