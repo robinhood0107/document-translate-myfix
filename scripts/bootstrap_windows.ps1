@@ -273,19 +273,28 @@ try {
     $RuntimeVerificationArguments = @(
         '-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'),
         '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)),
-        '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)
+        '--expected-cuda', ([string]$RuntimeConfig.expected_cuda),
+        '--core-imports'
     )
-    if ((Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments) -ne 0) {
+    Write-BootstrapMessage '[packages] Comparing installed packages and loading CUDA/core modules (usually 30-60 seconds)...'
+    $RuntimeAlreadyValid = (
+        Invoke-BootstrapProbe -FilePath $VenvPython -Arguments $RuntimeVerificationArguments
+    ) -eq 0
+    if (-not $RuntimeAlreadyValid) {
         Invoke-BootstrapRetry -Operation 'pip tool installation' -Attempts 4 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--retries', '5', '--timeout', '60', '--upgrade', "pip==$($PipTools.pip)", "wheel==$($PipTools.wheel)", "setuptools==$($PipTools.setuptools)") -WorkingDirectory $Root
         }
         Invoke-BootstrapRetry -Operation 'pinned runtime installation' -Attempts 4 -Action {
             Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--disable-pip-version-check', '--retries', '5', '--timeout', '60', '-r', (Join-Path $Root ([string]$RuntimeConfig.requirements))) -WorkingDirectory $Root
         }
-    } else { Write-BootstrapMessage 'Pinned packages already match; installation skipped.' 'SKIP' }
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', (Join-Path $Root 'scripts\verify_windows_runtime.py'), '--requirements', (Join-Path $Root ([string]$RuntimeConfig.requirements)), '--expected-cuda', ([string]$RuntimeConfig.expected_cuda)) -WorkingDirectory $Root
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root
-    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-B', '-s', '-c', "import PySide6, cv2, numpy, onnxruntime, torch; print('runtime core imports passed')") -WorkingDirectory $Root
+        Write-BootstrapMessage '[packages 1/2] Rechecking the repaired runtime...'
+        Invoke-BootstrapCommand -FilePath $VenvPython -Arguments $RuntimeVerificationArguments -WorkingDirectory $Root -ShowOutput
+    } else {
+        Write-BootstrapMessage 'Pinned packages, CUDA, and core imports already match; installation skipped.' 'SKIP'
+    }
+    Write-BootstrapMessage '[packages 2/2] Checking dependency consistency...'
+    Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'check') -WorkingDirectory $Root -Quiet
+    Write-BootstrapMessage 'Pinned packages and core imports passed.' 'OK'
     if ($VenvBackup -and (Test-Path -LiteralPath $VenvBackup)) {
         Remove-Item -LiteralPath $VenvBackup -Recurse -Force
         $VenvBackup = ''
@@ -299,15 +308,20 @@ try {
     if (-not $SkipRuntimeSetup) {
         Invoke-BootstrapRetry -Operation 'required application model preparation' -Attempts 3 -Action {
             $PreviousDownloadPolicy = $env:COMIC_MODEL_DOWNLOAD_POLICY
+            $PreviousProgressStyle = $env:COMIC_DOWNLOAD_PROGRESS_STYLE
             try {
                 $env:COMIC_MODEL_DOWNLOAD_POLICY = ''
+                $env:COMIC_DOWNLOAD_PROGRESS_STYLE = 'compact'
                 Invoke-BootstrapCommand -FilePath $VenvPython -Arguments @(
-                    '-B', '-s', (Join-Path $Root 'scripts\windows_install_state.py'),
+                    '-u', '-B', '-s', (Join-Path $Root 'scripts\windows_install_state.py'),
                     'provision', '--runtime', $Runtime, '--profile', $ProvisioningTier,
                     '--requirements', ([string]$RuntimeConfig.requirements)
-                ) -WorkingDirectory $Root -ShowOutput
+                ) -WorkingDirectory $Root -LiveOutput
             }
-            finally { $env:COMIC_MODEL_DOWNLOAD_POLICY = $PreviousDownloadPolicy }
+            finally {
+                $env:COMIC_MODEL_DOWNLOAD_POLICY = $PreviousDownloadPolicy
+                $env:COMIC_DOWNLOAD_PROGRESS_STYLE = $PreviousProgressStyle
+            }
         }
     } else { Write-BootstrapMessage 'Application model preparation skipped by smoke/test environment.' 'SKIP' }
 
@@ -368,7 +382,10 @@ try {
                     if ([string]$Managed.runtime_name -eq 'PaddleOCR-VL-Spotting-llama.cpp') {
                         $PrepareExtraArguments = @('-PythonExecutable', $VenvPython)
                     }
-                    Write-BootstrapMessage "Preparing $($Managed.label) with $CandidateImage..."
+                    Write-BootstrapMessage (
+                        "Preparing $($Managed.label) with $CandidateImage " +
+                        '(download/resume and GPU smoke can take several minutes)...'
+                    )
                     Invoke-BootstrapRetry `
                         -Operation "$($Managed.label) preparation" `
                         -Attempts $(if ($HasFallback) { 1 } else { 3 }) `
@@ -377,7 +394,7 @@ try {
                                 '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Script,
                                 '-Mode', 'Auto', '-AllowDownload', '-DownloadDirectory', $ModelCache,
                                 '-ImageRef', $CandidateImage
-                            ) + $PrepareExtraArguments) -WorkingDirectory $Root
+                            ) + $PrepareExtraArguments) -WorkingDirectory $Root -LiveOutput
                         }
                     Write-BootstrapMessage "$($Managed.label) is ready." 'OK'
                 }

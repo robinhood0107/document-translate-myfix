@@ -1,11 +1,83 @@
 ﻿Set-StrictMode -Version Latest
 
+if (-not ('ComicBootstrapProcess' -as [type])) {
+    Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Text;
+
+public sealed class ComicBootstrapProcessResult {
+    public int ExitCode { get; set; }
+    public string Output { get; set; }
+}
+
+public static class ComicBootstrapProcess {
+    private static bool ShouldDisplay(string line) {
+        if (String.IsNullOrWhiteSpace(line)) return false;
+        return line.StartsWith("[model", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("[download]", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Application model", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Downloading", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Auto mode", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Running CUDA", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Running a real", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Waiting for", StringComparison.OrdinalIgnoreCase)
+            || (line.StartsWith("[") && line.Contains("%"));
+    }
+
+    public static ComicBootstrapProcessResult Run(
+        string fileName,
+        string arguments,
+        string workingDirectory,
+        bool liveOutput
+    ) {
+        var info = new ProcessStartInfo();
+        info.FileName = fileName;
+        info.Arguments = arguments ?? "";
+        info.WorkingDirectory = String.IsNullOrWhiteSpace(workingDirectory)
+            ? Environment.CurrentDirectory
+            : workingDirectory;
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+
+        var output = new StringBuilder();
+        var gate = new object();
+        using (var process = new Process()) {
+            process.StartInfo = info;
+            process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs) {
+                if (eventArgs.Data == null) return;
+                lock (gate) { output.AppendLine(eventArgs.Data); }
+                if (liveOutput && ShouldDisplay(eventArgs.Data)) Console.WriteLine(eventArgs.Data);
+            };
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs) {
+                if (eventArgs.Data == null) return;
+                lock (gate) { output.AppendLine(eventArgs.Data); }
+                if (liveOutput && ShouldDisplay(eventArgs.Data)) Console.WriteLine(eventArgs.Data);
+            };
+            if (!process.Start()) throw new InvalidOperationException("Unable to start " + fileName);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.WaitForExit();
+            process.WaitForExit();
+            return new ComicBootstrapProcessResult {
+                ExitCode = process.ExitCode,
+                Output = output.ToString().TrimEnd()
+            };
+        }
+    }
+}
+'@
+}
+
 function Write-BootstrapMessage {
     param(
         [Parameter(Mandatory = $true)][string]$Message,
         [ValidateSet('INFO', 'OK', 'SKIP', 'WARN', 'ERROR')][string]$Level = 'INFO'
     )
-    $Color = @{ INFO = 'Cyan'; OK = 'Green'; SKIP = 'DarkGray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
+    $Color = @{ INFO = 'Gray'; OK = 'Green'; SKIP = 'DarkGray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
     Write-Host ("[{0}] {1}" -f $Level, $Message) -ForegroundColor $Color
 }
 
@@ -43,7 +115,8 @@ function Invoke-BootstrapCommand {
         [string[]]$Arguments = @(),
         [string]$WorkingDirectory = '',
         [switch]$Quiet,
-        [switch]$ShowOutput
+        [switch]$ShowOutput,
+        [switch]$LiveOutput
     )
     if (-not $Quiet) {
         $DisplayName = [System.IO.Path]::GetFileName($FilePath)
@@ -52,7 +125,10 @@ function Invoke-BootstrapCommand {
     $Previous = Get-Location
     try {
         if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
-        $Result = Invoke-BootstrapCapturedCommand -FilePath $FilePath -Arguments $Arguments
+        $Result = Invoke-BootstrapCapturedCommand `
+            -FilePath $FilePath `
+            -Arguments $Arguments `
+            -LiveOutput:$LiveOutput
         if (
             $env:COMIC_BOOTSTRAP_DETAIL_LOG -and
             -not [string]::IsNullOrWhiteSpace([string]$Result.Output)
@@ -285,34 +361,19 @@ function ConvertTo-BootstrapNativeArgument {
 function Invoke-BootstrapCapturedCommand {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        [switch]$LiveOutput
     )
 
-    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $StartInfo.FileName = $FilePath
-    $StartInfo.Arguments = ($Arguments | ForEach-Object {
+    $ArgumentText = ($Arguments | ForEach-Object {
         ConvertTo-BootstrapNativeArgument -Argument $_
     }) -join ' '
-    $StartInfo.UseShellExecute = $false
-    $StartInfo.CreateNoWindow = $true
-    $StartInfo.RedirectStandardOutput = $true
-    $StartInfo.RedirectStandardError = $true
-    $Process = [System.Diagnostics.Process]::new()
-    $Process.StartInfo = $StartInfo
-    try {
-        if (-not $Process.Start()) { throw "Unable to start command: $FilePath" }
-        $OutputTask = $Process.StandardOutput.ReadToEndAsync()
-        $ErrorTask = $Process.StandardError.ReadToEndAsync()
-        $Process.WaitForExit()
-        return [pscustomobject]@{
-            ExitCode = [int]$Process.ExitCode
-            Output = (@(
-                $OutputTask.GetAwaiter().GetResult().TrimEnd(),
-                $ErrorTask.GetAwaiter().GetResult().TrimEnd()
-            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n"
-        }
-    }
-    finally { $Process.Dispose() }
+    return [ComicBootstrapProcess]::Run(
+        $FilePath,
+        $ArgumentText,
+        (Get-Location).Path,
+        [bool]$LiveOutput
+    )
 }
 
 function Get-NvidiaCudaCompatibilityVersion {

@@ -43,3 +43,11 @@ class SetupModelProfileTests(unittest.TestCase):
                 Path(temp_dir, "model.bin").write_bytes(b"prepared")
                 download.ModelDownloader.get(spec.id)
                 downloader.assert_not_called()
+
+    def test_profile_reports_each_model_boundary(self) -> None:
+        messages: list[str] = []
+        with mock.patch.object(download.ModelDownloader, "get") as getter:
+            download.provision_profile("core", progress_callback=messages.append)
+        self.assertEqual(getter.call_count, len(download.CORE_APPLICATION_MODELS))
+        self.assertTrue(messages[0].startswith("[model 1/"))
+        self.assertIn("Ready:", messages[-1])
