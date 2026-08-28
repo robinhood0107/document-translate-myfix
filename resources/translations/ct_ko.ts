@@ -218,6 +218,10 @@ Choose either a project file or image/document/archive files.</source>
         <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>이미지를 안전하게 처리할 수 없습니다. 지원 한도는 {pixels}픽셀이며 파이프라인 시작 전에 메모리를 확인합니다.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation>이 PDF는 비밀번호로 보호되어 있습니다. 아직 비밀번호 입력은 지원하지 않습니다.</translation>
     </message>
@@ -1494,8 +1498,24 @@ Please check your internet connection.</source>
         <translation>텍스트 인식 모델</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>선택한 OCR 런타임이 설치되지 않았습니다. 작업을 시작하기 전에 해당 setup_full BAT을 실행하세요.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>선택형 OCR 런타임이 설치되지 않음</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation>{service} 설정 누락</translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>선택한 인페인터가 설치되지 않았습니다. 작업을 시작하기 전에 해당 setup_full BAT을 실행하세요.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>선택형 인페인터가 설치되지 않음</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

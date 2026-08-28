@@ -218,6 +218,10 @@ Wählen Sie entweder nur eine Projektdatei oder nur Bild-/Dokument-/Archivdateie
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>Das Bild kann nicht sicher verarbeitet werden. Das unterstützte Limit beträgt {pixels} Pixel; der Speicher wird vor dem Start der Pipeline geprüft.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Bitte überprüfen Sie Ihre Internetverbindung.</translation>
         <translation>Texterkennungsmodell</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Die ausgewählte OCR-Laufzeit ist nicht installiert. Führen Sie vor diesem Auftrag die passende setup_full-BAT aus.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>Optionale OCR-Laufzeit ist nicht installiert</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Der ausgewählte optionale Inpainter ist nicht installiert. Führen Sie vor diesem Auftrag die passende setup_full-BAT aus.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>Optionaler Inpainter ist nicht installiert</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

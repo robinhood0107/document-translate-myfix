@@ -218,6 +218,10 @@ Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</t
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>Görüntü güvenli biçimde işlenemiyor. Desteklenen sınır {pixels} pikseldir ve işlem hattı başlamadan önce bellek denetlenir.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
         <translation>Metin Tanıma Modeli</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Seçilen OCR çalışma zamanı kurulu değil. Bu işi başlatmadan önce eşleşen setup_full BAT dosyasını çalıştırın.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>İsteğe bağlı OCR çalışma zamanı kurulu değil</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>Seçilen isteğe bağlı inpainting aracı kurulu değil. Bu işi başlatmadan önce eşleşen setup_full BAT dosyasını çalıştırın.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>İsteğe bağlı inpainting aracı kurulu değil</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>

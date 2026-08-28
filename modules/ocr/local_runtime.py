@@ -101,11 +101,8 @@ from modules.utils.llama_cpp_runtime import (
     resolve_docker_compose_command,
 )
 from modules.utils.managed_runtime_repair import (
-    ManagedRuntimeRepairError,
-    ManagedRuntimeRepairPlan,
     describe_image_identity_drift,
     is_image_identity_only_drift,
-    run_managed_runtime_preparation,
 )
 
 logger = logging.getLogger(__name__)
@@ -1680,14 +1677,6 @@ class LocalOCRRuntimeManager:
         names = config.get("container_names") or [config.get("container_name")]
         return [str(name).strip() for name in names if str(name or "").strip()]
 
-    # 관리형 OCR 런타임별 준비 스크립트. 자가복구가 Reseal 로 호출한다.
-    _PREPARE_SCRIPTS: dict[str, str] = {
-        "PaddleOCR VL": "prepare_paddleocr_llamacpp_runtime.ps1",
-        "PaddleOCR VL Spotting": "prepare_paddleocr_spotting_llamacpp_runtime.ps1",
-        "MangaLMM": "prepare_mangalmm_llamacpp_runtime.ps1",
-        "HunyuanOCR": "prepare_hunyuanocr_llamacpp_runtime.ps1",
-    }
-
     def _contract_or_reseal(
         self,
         *,
@@ -1734,67 +1723,15 @@ class LocalOCRRuntimeManager:
         detail: str,
         message: str = "",
     ) -> None:
-        """준비 스크립트를 ``Auto`` 로 돌려 볼륨을 계약에 맞춘다.
+        """Fail before page work; setup is the only provisioning authority."""
 
-        볼륨이 이미 계약된 파일을 담고 있으면 manifest 만 다시 봉인하고, 비어
-        있으면 원본을 찾아 채운다. 준비 스크립트는 관리 컨테이너가 실행 중이면
-        거부한다. 이 시점의 컨테이너는 이미 계약을 만족하지 못하는 것이므로 먼저
-        정지한다.
-        """
-
-        logger.info("%s Running the preparation script.", detail)
-        self._emit_progress(
-            self._startup_progress_callback,
+        raise self._build_setup_error(
             engine_key,
-            status="running",
-            step_key="runtime_repair",
-            message=message
-            or (
-                f"{engine_key} 런타임 볼륨을 현재 llama.cpp 이미지에 맞춰 "
-                "다시 봉인하는 중..."
+            (
+                f"{detail}\n"
+                "The application does not repair or download managed runtimes. "
+                "Run the matching setup BAT and start Comic Translate again."
             ),
-            detail=detail,
-        )
-        if self._running_managed_container_names(engine_key):
-            self._stop_engine(engine_key)
-        self._readiness_cache.clear()
-        plan = ManagedRuntimeRepairPlan(
-            runtime_label=engine_key,
-            prepare_script=ROOT_DIR / "scripts" / self._PREPARE_SCRIPTS[engine_key],
-            volume_name=volume_name,
-        )
-        try:
-            run_managed_runtime_preparation(
-                plan,
-                mode="Auto",
-                allow_download=True,
-                cancel_checker=self._startup_cancel_checker,
-                progress=lambda text: self._emit_progress(
-                    self._startup_progress_callback,
-                    engine_key,
-                    status="running",
-                    step_key="runtime_repair",
-                    message=text,
-                    detail=detail,
-                ),
-            )
-        except OperationCancelledError:
-            raise
-        except ManagedRuntimeRepairError as exc:
-            raise self._build_setup_error(
-                engine_key,
-                (
-                    f"{detail}\nAutomatic repair failed: {exc}\n"
-                    f"Run scripts/{self._PREPARE_SCRIPTS[engine_key]} -Mode Auto by hand."
-                ),
-            ) from exc
-        self._emit_progress(
-            self._startup_progress_callback,
-            engine_key,
-            status="completed",
-            step_key="runtime_repair",
-            message=f"{engine_key} 런타임 볼륨 준비를 마쳤습니다.",
-            detail=detail,
         )
 
     def _paddle_runtime_contract(
@@ -1877,23 +1814,10 @@ class LocalOCRRuntimeManager:
         for image_ref in (PADDLEOCR_LLAMA_CPP_IMAGE_REF,):
             if self._inspect_docker_image_id(image_ref):
                 continue
-            from modules.utils.llama_cpp_runtime import run_docker_command
-
-            try:
-                run_docker_command(
-                    ["docker", "pull", image_ref],
-                    cancel_checker=self._startup_cancel_checker,
-                )
-            except RuntimeError as exc:
-                raise self._build_setup_error(
-                    "PaddleOCR VL",
-                    f"Unable to load the pinned PaddleOCR image: {image_ref}\n{exc}"
-                ) from exc
-            if not self._inspect_docker_image_id(image_ref):
-                raise self._build_setup_error(
-                    "PaddleOCR VL",
-                    f"Docker returned no image ID for the pinned PaddleOCR image: {image_ref}"
-                )
+            raise self._build_setup_error(
+                "PaddleOCR VL",
+                f"The setup-sealed PaddleOCR image is missing: {image_ref}",
+            )
 
     def _paddle_spotting_runtime_contract(
         self,
@@ -1981,29 +1905,10 @@ class LocalOCRRuntimeManager:
         image_ref = PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF
         if self._inspect_docker_image_id(image_ref):
             return
-        from modules.utils.llama_cpp_runtime import run_docker_command
-
-        try:
-            run_docker_command(
-                ["docker", "pull", image_ref],
-                cancel_checker=self._startup_cancel_checker,
-            )
-        except RuntimeError as exc:
-            raise self._build_setup_error(
-                "PaddleOCR VL Spotting",
-                (
-                    "Unable to load the pinned PaddleOCR-VL Spotting "
-                    f"image: {image_ref}\n{exc}"
-                ),
-            ) from exc
-        if not self._inspect_docker_image_id(image_ref):
-            raise self._build_setup_error(
-                "PaddleOCR VL Spotting",
-                (
-                    "Docker returned no image ID for the pinned "
-                    f"PaddleOCR-VL Spotting image: {image_ref}"
-                ),
-            )
+        raise self._build_setup_error(
+            "PaddleOCR VL Spotting",
+            f"The setup-sealed PaddleOCR-VL Spotting image is missing: {image_ref}",
+        )
 
     def _mangalmm_runtime_contract(
         self,
@@ -2088,24 +1993,10 @@ class LocalOCRRuntimeManager:
         image_ref = MANGALMM_LLAMA_CPP_IMAGE_REF
         if self._inspect_docker_image_id(image_ref):
             return
-        from modules.utils.llama_cpp_runtime import run_docker_command
-
-        try:
-            run_docker_command(
-                ["docker", "pull", image_ref],
-                cancel_checker=self._startup_cancel_checker,
-            )
-        except RuntimeError as exc:
-            raise self._build_setup_error(
-                "MangaLMM",
-                f"Unable to load the pinned MangaLMM image: {image_ref}\n{exc}",
-            ) from exc
-        if not self._inspect_docker_image_id(image_ref):
-            raise self._build_setup_error(
-                "MangaLMM",
-                "Docker returned no image ID for the pinned MangaLMM image: "
-                f"{image_ref}",
-            )
+        raise self._build_setup_error(
+            "MangaLMM",
+            f"The setup-sealed MangaLMM image is missing: {image_ref}",
+        )
 
     def _probe_paddle_model_volume(
         self,
@@ -2448,24 +2339,10 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
         image_ref = HUNYUAN_OCR_LLAMA_CPP_IMAGE_REF
         if self._inspect_docker_image_id(image_ref):
             return
-        from modules.utils.llama_cpp_runtime import run_docker_command
-
-        try:
-            run_docker_command(
-                ["docker", "pull", image_ref],
-                cancel_checker=self._startup_cancel_checker,
-            )
-        except RuntimeError as exc:
-            raise self._build_setup_error(
-                "HunyuanOCR",
-                f"고정된 HunyuanOCR 이미지를 불러올 수 없습니다: {image_ref}\n{exc}",
-            ) from exc
-        if not self._inspect_docker_image_id(image_ref):
-            raise self._build_setup_error(
-                "HunyuanOCR",
-                "Docker가 고정된 HunyuanOCR 이미지의 ID를 반환하지 않았습니다: "
-                f"{image_ref}",
-            )
+        raise self._build_setup_error(
+            "HunyuanOCR",
+            f"The setup-sealed HunyuanOCR image is missing: {image_ref}",
+        )
 
     def _probe_hunyuan_ocr_model_volume(
         self,

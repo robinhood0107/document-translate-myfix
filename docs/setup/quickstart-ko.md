@@ -43,7 +43,8 @@ setup_cuda13.bat
 설치는 질문 없이 아래 항목을 순서대로 준비합니다.
 
 - 선택한 `.venv-win` 또는 `.venv-win-cuda13`과 pinned Python package
-- CTD/LaMa 계열 필수 앱 모델
+- RT-DETR v2 ONNX, font-detector ONNX, CTD Torch/ONNX 및 positive-claim ONNX
+- LaMa large와 LaMa MPE 앱 모델
 - HunyuanOCR Q8 model/mmproj
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf`(약 13.58 GiB)
@@ -67,10 +68,10 @@ run_comic.bat
 run_comic_cuda13.bat
 ```
 
-실행 런처는 venv만 확인하고 앱을 띄우므로, 이미 준비된 상태에서는 수 초 안에
-뜹니다. 이미지를 pull하거나 모델 볼륨을 만들지 않습니다. 준비되지 않은 런타임을
-처음 쓰면 앱이 GUI 안에서 그때 준비합니다. 동작은 하지만 설치를 먼저 돌리는
-편이 훨씬 빠릅니다.
+실행 런처는 venv와 원자적 install-state를 확인하고 setup이 선택한 정확한
+llama.cpp image를 전달한 뒤 앱을 띄웁니다. package/model/image/volume을 설치,
+다운로드, pull, 생성, 재봉인하지 않습니다. core 상태가 없으면 해당 setup BAT,
+MangaLMM/Spotting 상태가 없으면 페이지 처리 전에 setup_full을 요구합니다.
 
 CUDA13 launcher는 컨테이너를 만들기 전에 이미지의 `NVIDIA_REQUIRE_CUDA`와
 드라이버 호환 버전을 비교합니다. 준비 완료 뒤에는 ready manifest, image ID,
@@ -216,8 +217,8 @@ ready manifest에 기록합니다. 검증만 다시 하려면 `-Mode Verify`를 
 모든 준비 스크립트는 `-Mode Auto`를 받습니다. 유효한 봉인은 즉시 재사용하고,
 볼륨이 비어 있으면 준비합니다. 업스트림이 llama.cpp 태그를 갱신해 image digest가
 움직이면 모델이 멀쩡한데도 manifest만 어긋나는데, 이때만 `Auto`가 `Reseal`을
-선택해 원본 파일 없이 복구합니다. 앱도 같은 상태를
-스스로 감지해 한 번 복구합니다. 자세한 내용은
+선택해 원본 파일 없이 복구합니다. 실행 중인 앱은 어긋난 봉인을 보고하고 해당
+setup BAT을 요구할 뿐 volume을 복구하지 않습니다. 자세한 내용은
 [관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
 참고하세요.
 
