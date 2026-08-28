@@ -257,6 +257,12 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("llama.cpp:server-cuda'", image_policy)
         self.assertIn("llama.cpp:server-cuda13'", image_policy)
+        self.assertIn("Preferred = $Cuda12", image_policy)
+        self.assertIn("Fallback = ''", image_policy)
+        self.assertNotIn(
+            "Preferred = if ($Runtime -eq 'cuda12')",
+            image_policy,
+        )
         self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
         self.assertIn("Get-BootstrapDockerImageCudaCompatibility", bootstrap)
         self.assertIn("Skipping incompatible llama.cpp image", bootstrap)
