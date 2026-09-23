@@ -4,7 +4,7 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-The fork's product release version is `1.5.1`. Upstream `2.7.1` is recorded
+The fork's product release version is `1.6.0`. Upstream `2.7.1` is recorded
 separately as the latest selective-backport lineage and is not this fork's
 product version.
 
@@ -255,7 +255,7 @@ report.
 
 ### 2. Local translation runtime
 
-The default `Custom Local Server(Gemma)` setting uses the launcher's prepared
+The default `Custom Local Server(Gemma)` setting uses the setup-prepared
 read-only `gemma-4-26B-IQ4_NL.gguf` volume. Run
 `scripts/prepare_gemma_runtime.ps1 -Mode Verify` only for an explicit full hash check.
 
@@ -263,7 +263,7 @@ The **User Dictionaries** settings page also controls the persistent block-resul
 
 ### 3. Local OCR runtimes
 
-The launcher also prepares both runtimes used by
+The setup BAT also prepares both runtimes used by
 `Optimal (HunyuanOCR / PaddleOCR VL)`. See the
 [HunyuanOCR guide](docs/hunyuan/local-server-ko.md) and
 [PaddleOCR VL bundle](paddleocr_vl_docker_files/README.md) for their contracts.

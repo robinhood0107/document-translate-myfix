@@ -45,8 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 업스트림이 지원 llama.cpp 태그를 갱신하면 모델은 멀쩡한데 manifest에 봉인된
 image identity만 어긋납니다. 이때는 `-Mode Reseal`이 원본 없이 스모크를 다시
-통과시키고 manifest만 다시 씁니다. 앱도 같은 상태를 스스로 감지해 한 번
-복구합니다. 자세한 내용은
+통과시키고 manifest만 다시 씁니다. 앱은 봉인 불일치를 보고하고 해당 setup
+BAT 실행을 안내하며 직접 복구하지 않습니다. 자세한 내용은
 [관리형 llama.cpp 볼륨 복구 가이드](../runtime/managed-volume-repair-ko.md)를
 참고하세요.
 
