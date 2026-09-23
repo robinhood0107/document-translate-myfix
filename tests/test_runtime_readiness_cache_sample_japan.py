@@ -102,6 +102,7 @@ def test_sample_japan_three_ocr_initializations_recheck_managed_ocr_health() -> 
     main_page = _DummyMainPage()
 
     with mock.patch.object(main_page.local_ocr_runtime_manager, "validate_engine", return_value=None), \
+         mock.patch.object(main_page.local_ocr_runtime_manager, "_present_managed_container_names", return_value=[]), \
          mock.patch.object(main_page.local_ocr_runtime_manager, "_probe_health_state", return_value="healthy") as probe_health, \
          mock.patch("modules.ocr.processor.OCRFactory.create_engine", return_value=object()):
         for _path in SAMPLE_JAPAN_PAGES:
