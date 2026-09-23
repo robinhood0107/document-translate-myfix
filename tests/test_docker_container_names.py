@@ -141,7 +141,9 @@ class DockerContainerNameTests(unittest.TestCase):
                 if items[0] != "docker" or items[1] != "run":
                     continue
                 if "--name" in items:
-                    names.append(items[items.index("--name") + 1])
+                    name = items[items.index("--name") + 1]
+                    if name:
+                        names.append(name)
         self.assertEqual(sorted(names), sorted(set(names)))
 
 

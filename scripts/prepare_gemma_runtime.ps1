@@ -42,8 +42,7 @@ Import-Module (Join-Path $PSScriptRoot 'lib\ManagedRuntimeModelSource.psm1') -Fo
 $PreparationVersion = 2
 $ManifestSchemaVersion = 2
 $ReadyManifestName = '.comic-translate-gemma-ready-v2.json'
-# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy
 $ImageRef = Resolve-ManagedLlamaCppImageRef `
     -RequestedImage $ImageRef `
     -RuntimeOverride ''
@@ -355,7 +354,7 @@ $SmokeResult = $null
 try {
     Write-Host "Running a real model-load smoke from the new volume: $SmokeModelName"
     Invoke-Docker -Arguments @(
-        'run', '-d', '--rm',
+        'run', '-d',
         '--name', $SmokeContainer,
         '--label', 'comic-translate.runtime=gemma-prepare-smoke',
         '--gpus', 'all',
@@ -403,13 +402,16 @@ try {
         }
         catch {
         }
+        if (-not (Test-ManagedRuntimeContainerRunning -Name $SmokeContainer)) {
+            break
+        }
         if (-not $HealthReady) {
             Start-Sleep -Seconds 2
         }
     } while ([DateTime]::UtcNow -lt $Deadline)
     if (-not $HealthReady) {
         $Logs = Invoke-DockerResult -Arguments @('logs', '--tail', '100', $SmokeContainer)
-        throw "Gemma volume smoke health timeout (${SmokeTimeoutSec}s).`n$($Logs.Output)"
+        throw "Gemma volume smoke failed before health became ready.`n$($Logs.Output)"
     }
 
     $Models = Invoke-RestMethod `
@@ -472,14 +474,7 @@ try {
     }
 }
 finally {
-    $SmokeInspect = Invoke-DockerResult -Arguments @(
-        'inspect', '--format', '{{.Name}}', $SmokeContainer
-    )
-    if ($SmokeInspect.ExitCode -eq 0) {
-        Invoke-Docker -Arguments @(
-            'stop', '--timeout', '10', $SmokeContainer
-        ) -ShowOutput | Out-Null
-    }
+    Remove-ManagedRuntimeContainer -Name $SmokeContainer
 }
 
 $Manifest = [ordered]@{

@@ -4,7 +4,7 @@
 PaddleOCR-VL Spotting)는 모두 준비된 Docker 볼륨 안의 ready manifest 로 자신을
 증명한다. manifest 는 준비 당시의 llama.cpp image identity 를 함께 봉인한다.
 
-기본 image 참조가 고정 digest 가 아니라 움직이는 태그(``:server-cuda13``)이므로,
+기본 image 참조가 고정 digest 가 아니라 움직이는 태그(``:server-cuda``)이므로,
 업스트림이 그 태그를 갱신하면 로컬 image digest 가 바뀐다. 그러면 모델 파일이
 완벽히 멀쩡한데도 manifest 의 image identity 만 어긋나 런타임 계약이 깨진다.
 이 모듈은 그 상태를 정확히 식별하고, 준비 스크립트의 ``Reseal`` 경로로

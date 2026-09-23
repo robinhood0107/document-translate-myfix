@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import subprocess
 import unittest
 from unittest import mock
@@ -992,6 +993,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         events: list[dict] = []
 
         with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health, \
              mock.patch.object(manager, "_run_compose") as run_compose:
             manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
@@ -1012,6 +1014,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
         with mock.patch.object(manager, "should_manage_engine", return_value=True), \
              mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health:
             manager.ensure_engine("PaddleOCR VL", first_settings)
             manager.ensure_engine("PaddleOCR VL", second_settings)
@@ -1023,6 +1026,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         settings_page = _DummySettingsPage()
 
         with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health, \
              mock.patch.object(manager, "_stop_engine") as stop_engine:
             manager.ensure_engine("PaddleOCR VL", settings_page)
@@ -1043,6 +1047,46 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             manager.ensure_engine("PaddleOCR VL", settings_page, cancel_checker=cancel)
 
         self.assertEqual(probe_health.call_count, 1)
+
+    def test_router_startup_checks_cancel_before_building_runtime_spec(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        with mock.patch.object(manager, "router_pair_for_engine") as pair:
+            with self.assertRaises(OperationCancelledError):
+                manager.ensure_engine(
+                    "HunyuanOCR",
+                    settings_page,
+                    cancel_checker=lambda: True,
+                )
+        pair.assert_not_called()
+
+    def test_cancelled_hunyuan_probe_always_cleans_named_container(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        labels = subprocess.CompletedProcess(
+            ["docker"],
+            0,
+            '{"comic-translate.runtime":"HunyuanOCR-llama.cpp",'
+            '"comic-translate.preparation-version":"1"}',
+            "",
+        )
+        cancelled = OperationCancelledError("cancelled")
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            side_effect=[labels, cancelled],
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.remove_named_container",
+        ) as remove:
+            with self.assertRaises(OperationCancelledError):
+                manager._probe_hunyuan_ocr_model_volume(
+                    volume_name="comic-translate-hunyuanocr-models-v2",
+                    image_ref=DEFAULT_LLAMA_CPP_IMAGE,
+                )
+        self.assertEqual(remove.call_count, 2)
+
+    def test_router_runtime_spec_reuses_process_local_contract_cache(self) -> None:
+        source = inspect.getsource(LocalOCRRuntimeManager._router_runtime_spec)
+        self.assertNotIn("force_refresh=True", source)
+        self.assertGreaterEqual(source.count("force_refresh=False"), 4)
 
 
 if __name__ == "__main__":
