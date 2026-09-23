@@ -93,7 +93,7 @@ $ProvisioningTier = if ($Full) { 'full' } else { 'core' }
 $ManagedRuntimes = @(
     $AllManagedRuntimes | Where-Object { $Full -or $_.tier -eq 'core' }
 )
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime $Runtime
 $ActiveLlamaImage = [string]$ImagePolicy.Preferred
 
 $RequiredFiles = @(
@@ -124,6 +124,7 @@ if ($SourceVerify) {
     exit 0
 }
 
+$env:COMIC_WINDOWS_RUNTIME = $Runtime
 $Doctor = $RemainingArguments.Count -gt 0 -and $RemainingArguments[0] -eq '--doctor'
 if ($Doctor) { $RemainingArguments = @($RemainingArguments | Select-Object -Skip 1) }
 $BootstrapRoot = Join-Path $Root '.comic-bootstrap'
@@ -215,6 +216,28 @@ try {
         Write-BootstrapMessage (
             "NVIDIA driver CUDA compatibility: $HostCudaCompatibility"
         ) 'OK'
+        if ($Runtime -eq 'cuda13' -and $HostCudaCompatibility -lt [version]'13.1') {
+            throw (
+                "CUDA13 setup requires NVIDIA driver support for CUDA 13.1 or newer; " +
+                "this driver reports CUDA $HostCudaCompatibility. Update the NVIDIA " +
+                'driver, then retry the same CUDA13 setup. No CUDA12 image was selected.'
+            )
+        }
+        if (-not $Doctor) {
+            $ActiveImageCompatibility = Get-BootstrapDockerImageCudaCompatibility `
+                -Docker $Docker `
+                -Image $ActiveLlamaImage `
+                -HostCudaVersion $HostCudaCompatibility
+            if (-not $ActiveImageCompatibility.Compatible) {
+                throw (
+                    "The selected llama.cpp image $ActiveLlamaImage needs CUDA >= " +
+                    "$($ActiveImageCompatibility.RequiredCudaVersion), but the installed " +
+                    "driver supports CUDA $($ActiveImageCompatibility.HostCudaVersion). " +
+                    'Update the NVIDIA driver, then retry the same runtime.'
+                )
+            }
+            Assert-BootstrapCudaImageGpu -Docker $Docker -Image $ActiveLlamaImage
+        }
         Write-BootstrapMessage 'Docker Desktop, Compose, WSL2, and NVIDIA checks passed.' 'OK'
     }
 
@@ -335,17 +358,7 @@ try {
     if ($SkipManagedBootstrap) {
         Write-BootstrapMessage 'Managed model volume preparation skipped by smoke/test environment.' 'SKIP'
     } else {
-        $Compatibility = Get-BootstrapDockerImageCudaCompatibility `
-            -Docker $Docker `
-            -Image $ActiveLlamaImage `
-            -HostCudaVersion $HostCudaCompatibility
-        if (-not $Compatibility.Compatible) {
-            throw (
-                "The required llama.cpp image $ActiveLlamaImage needs CUDA >= " +
-                "$($Compatibility.RequiredCudaVersion), but the installed driver supports " +
-                "CUDA $($Compatibility.HostCudaVersion)."
-            )
-        }
+        $Compatibility = $ActiveImageCompatibility
         if (Test-BootstrapManagedRuntimeState `
             -Docker $Docker `
             -Path $ManagedRuntimeStatePath `

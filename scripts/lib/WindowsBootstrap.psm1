@@ -392,7 +392,7 @@ function Get-NvidiaCudaCompatibilityVersion {
         throw 'Unable to read NVIDIA driver CUDA compatibility from nvidia-smi.'
     }
 
-    $Match = [regex]::Match($Result.Output, 'CUDA Version:\s*(?<version>\d+(?:\.\d+){1,2})')
+    $Match = [regex]::Match($Result.Output, 'CUDA (?:UMD )?Version:\s*(?<version>\d+(?:\.\d+){1,2})')
     if (-not $Match.Success) {
         throw 'nvidia-smi did not report the NVIDIA driver CUDA compatibility version.'
     }
@@ -408,7 +408,13 @@ function Get-BootstrapDockerImageCudaCompatibility {
 
     if ((Invoke-BootstrapProbe -FilePath $Docker -Arguments @('image', 'inspect', $Image)) -ne 0) {
         Write-BootstrapMessage "Pulling llama.cpp image for compatibility inspection: $Image"
-        Invoke-BootstrapCommand -FilePath $Docker -Arguments @('pull', $Image)
+        $Pull = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @('pull', $Image)
+        if ($Pull.ExitCode -ne 0) {
+            throw (
+                "Unable to pull the selected llama.cpp image $Image (Docker registry/network " +
+                "failure, exit=$($Pull.ExitCode)). $($Pull.Output)"
+            )
+        }
     }
 
     $Inspect = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
@@ -432,13 +438,38 @@ function Get-BootstrapDockerImageCudaCompatibility {
         $Match = [regex]::Match([string]$Requirement, '(?:=|\s)cuda>=(?<version>\d+(?:\.\d+){1,2})')
         if ($Match.Success) { $RequiredVersion = [version]$Match.Groups['version'].Value }
     }
+    if ($null -eq $RequiredVersion) {
+        throw "The selected llama.cpp image does not expose a readable NVIDIA_REQUIRE_CUDA value: $Image"
+    }
 
     return [pscustomobject]@{
         Image = $Image
         ImageId = $InspectParts[0].Trim()
         HostCudaVersion = $HostCudaVersion
         RequiredCudaVersion = $RequiredVersion
-        Compatible = $null -eq $RequiredVersion -or $HostCudaVersion -ge $RequiredVersion
+        Compatible = $HostCudaVersion -ge $RequiredVersion
+    }
+}
+
+function Assert-BootstrapCudaImageGpu {
+    param(
+        [Parameter(Mandatory = $true)][string]$Docker,
+        [Parameter(Mandatory = $true)][string]$Image
+    )
+
+    $Result = Invoke-BootstrapCapturedCommand -FilePath $Docker -Arguments @(
+        'run', '--rm', '--gpus', 'all', '--pull', 'never',
+        '--entrypoint', 'nvidia-smi', $Image,
+        '--query-gpu=driver_version', '--format=csv,noheader'
+    )
+    if ($Result.ExitCode -ne 0) {
+        $Layer = if ($Result.Output -match 'NVML|nvidia-container-cli|prestart hook') {
+            'WSL/Docker NVIDIA GPU bridge or NVML prestart'
+        } else { 'Docker CUDA image GPU startup' }
+        throw "$Layer failed for $Image (exit=$($Result.ExitCode)): $($Result.Output)"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$Result.Output)) {
+        throw "Docker CUDA image GPU probe produced no driver evidence: $Image"
     }
 }
 
@@ -658,7 +689,8 @@ Export-ModuleMember -Function @(
     'Enter-BootstrapLock', 'Test-BootstrapWritableDirectory', 'Assert-BootstrapFreeSpace',
     'Get-DockerExecutable', 'Test-DockerReady', 'Ensure-DockerDesktopReady',
     'Assert-DockerCompose', 'Assert-NvidiaHost', 'Get-NvidiaCudaCompatibilityVersion',
-    'Get-BootstrapDockerImageCudaCompatibility', 'Test-BootstrapManagedRuntimeState',
+    'Get-BootstrapDockerImageCudaCompatibility', 'Assert-BootstrapCudaImageGpu',
+    'Test-BootstrapManagedRuntimeState',
     'Write-BootstrapManagedRuntimeState', 'Stop-BootstrapManagedContainer',
     'Set-BootstrapRuntimeEnvironment'
 )
