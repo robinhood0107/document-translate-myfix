@@ -1,7 +1,7 @@
 services:
   llama-router:
-    image: ${LLAMA_ROUTER_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13}
-    pull_policy: missing
+    image: ${LLAMA_ROUTER_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: never
     container_name: comic-translate-router-hunyuan-v2
     restart: "no"
     # 라우터는 다른 컨테이너와 통신하지 않는다. Compose 주소 풀이 고갈된 호스트에서도

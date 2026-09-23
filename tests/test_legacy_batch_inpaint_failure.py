@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import numpy as np
 
 from pipeline.batch_processor import BatchProcessor
@@ -81,3 +82,13 @@ def test_legacy_inpaint_failure_records_stage_and_traceback() -> None:
     assert processor.main_page.memlog_events[0][1]["ocr_total_block_count"] == 1
     assert skipped_saves
     assert skipped_logs[0][3].startswith("Inpaint: index 2160")
+
+
+def test_legacy_batch_uses_canonical_inpainter_and_preserves_cancellation() -> None:
+    source = inspect.getsource(BatchProcessor.batch_process)
+    assert "InpainterClass =" not in source
+    assert "inpainting.inpainter_cache = InpainterClass" not in source
+    assert source.count("except OperationCancelledError:") >= 3
+    assert source.index("except OperationCancelledError:") < source.index(
+        "OCR processing failed"
+    )

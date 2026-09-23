@@ -140,9 +140,91 @@ batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같�
 
 현재 llama.cpp 런타임 이미지에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
 
+## 12GB VRAM 환경과 GPU layer 수동 조정
+
+제품 기본값은 `LLAMA_N_GPU_LAYERS=23`입니다. 모델 파일, context 4096,
+F16 K/V cache, `--fit off`를 그대로 유지한 상태에서 GPU layer만 바꾸므로
+번역 모델과 요청 계약은 바뀌지 않습니다. 다만 CPU로 옮긴 layer가 늘면 속도는
+환경에 따라 낮아질 수 있습니다.
+
+Windows WDDM에서는 같은 12GB GPU라도 바탕 화면, 브라우저, Qt, 다른 CUDA
+프로세스의 점유량과 메모리 단편화에 따라 `23`의 성공 여부가 달라질 수 있습니다.
+2026-08-29에 16GB host RAM, WSL 12GB, swap 4GB, RTX 3060 12GB 환경에서
+동일한 IQ4_NL 계약을 다시 검사한 결과는 다음과 같습니다.
+
+| GPU layers | 모델 적재 | 짧은 생성 | 생성 후 GPU 표시값 | 판정 |
+|---:|---|---|---:|---|
+| 23 | 성공, 3분 33.8초 | 성공 | 11,851MiB 사용 / 265MiB 여유 | 기본값이지만 이 PC에서는 경계값 |
+| 22 | 성공, 2분 40.6초 | 성공 | 11,381MiB 사용 / 735MiB 여유 | 이 PC의 안정성 권장값 |
+
+같은 PC에서 `23`은 이전 실행 중 576MiB KV buffer 또는 약 10GiB weight
+buffer 할당에 실패한 기록도 있습니다. 이번 성공과 모순되는 것이 아니라,
+시작 당시 약 100MiB 수준의 다른 GPU 점유 차이도 결과를 바꿀 만큼 여유가
+작다는 뜻입니다. `22`는 이 측정에서 약 470MiB를 더 남겼습니다. 위 시작
+시간은 page cache와 WDDM 상태에 크게 좌우되므로 성능 순위로 사용하지 않습니다.
+
+환경별 시작점은 아래처럼 잡습니다. 물리 RAM과 WSL RAM은 GGUF 읽기와 page
+cache에 영향을 주지만 CUDA VRAM 부족을 대신 해결하지는 않습니다.
+
+| 환경 | 권장 시작점 | 설명 |
+|---|---:|---|
+| VRAM 16GB 이상 | 23 | 제품 기본값을 먼저 사용합니다. |
+| VRAM 12GB, 적재 전 여유가 반복해서 11.7GB 이상 | 23 | 실제 smoke를 두 번 이상 통과할 때 유지합니다. |
+| VRAM 12GB, Windows 표시용 GPU이거나 여유가 11.7GB 미만 | 22 | 23의 OOM이 한 번이라도 재현되면 안정성을 우선합니다. |
+| VRAM 12GB 미만 | 22 이하를 실측 | 고정 보장값은 없습니다. layer를 한 단계씩 낮추고 health와 실제 생성을 확인합니다. |
+| host RAM 16GB | WSL 10~12GB, swap 4GB | 모델 적재는 가능하지만 14.6GB 전체 prefetch는 보통 건너뜁니다. |
+| host RAM 32GB 이상 | WSL 20GB, swap 8GB | 전체 GGUF page-cache prefetch를 시도할 여유가 생깁니다. VRAM 판단은 별도입니다. |
+
+먼저 다른 모델 컨테이너와 앱을 종료하고 `nvidia-smi`의 적재 전 free VRAM을
+확인합니다. `23`이 안정적이면 기본값을 유지하고, OOM이 반복되거나 여유가 너무
+작으면 아래처럼 `22`를 적용합니다.
+
+standalone Gemma 경로는 앱을 시작한 같은 CMD 세션에서 환경변수를 지정합니다.
+
+```bat
+set "LLAMA_N_GPU_LAYERS=22"
+call run_comic_cuda13.bat
+```
+
+PowerShell에서 실행할 때는 다음과 같습니다.
+
+```powershell
+$env:LLAMA_N_GPU_LAYERS = '22'
+.\run_comic_cuda13.bat
+```
+
+Stage-Batched가 관리형 OCR과 Gemma를 같은 Router에서 순차 적재하는 경우에는
+Router preset의 Gemma section도 같은 값이어야 합니다. 사용하는 OCR에 해당하는
+파일 하나만 열어 `[gemma-4-26B-IQ4_NL.gguf]` 아래의 값을 바꿉니다. OCR section의
+`n-gpu-layers`는 건드리지 않습니다.
+
+| 선택 OCR | 수정할 preset |
+|---|---|
+| HunyuanOCR | `hunyuanocr_docker_files/router-models.ini` |
+| PaddleOCR VL | `paddleocr_vl_docker_files/router-models.ini` |
+| PaddleOCR VL Spotting | `paddleocr_vl_spotting_docker_files/router-models.ini` |
+| MangaLMM | `mangalmm_docker_files/router-models.ini` |
+
+```ini
+[gemma-4-26B-IQ4_NL.gguf]
+n-gpu-layers = 22
+```
+
+앱이 종료된 상태에서 수정한 뒤 다시 실행하면 preset SHA가 달라져 Router
+container가 새 fingerprint로 재생성됩니다. 기본값으로 돌아갈 때는 환경변수를
+지우고 preset 값을 `23`으로 복원합니다.
+
+```bat
+set "LLAMA_N_GPU_LAYERS="
+```
+
+Stage-Batched의 OCR/Gemma handoff와 page-cache prefetch가 GPU layer 설정과 어떻게
+분리되는지는 [Stage-Batched 파이프라인 작동 원리](../architecture/codebase-map-ko.md#stage-batched-파이프라인-작동-원리)를
+참고하세요.
+
 ## runtime image
 
-- Image: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
+- image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - 관측 image label version: `b10133`
 - Pull policy: `missing`
 - 태그는 moving tag이므로, 이미지가 바뀌면 ready manifest에 기록된 image ID와

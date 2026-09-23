@@ -33,6 +33,7 @@ from app.path_materialization import ensure_path_materialized
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
 from modules.utils.pdf_pages import PdfImportError
+from modules.utils.image_safety import ImageResourceLimitError, MAX_IMAGE_PIXELS
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
@@ -78,6 +79,7 @@ from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
+from app.controllers.open_workspace import OpenWorkspaceCoordinator
 from app.controllers.series import SeriesController
 from modules.utils.exceptions import (
     LocalServiceError,
@@ -227,6 +229,7 @@ class ComicTranslate(ComicTranslateUI):
         self.search_ctrl = SearchReplaceController(self)
         self.shortcut_ctrl = ShortcutController(self)
         self.task_runner_ctrl = TaskRunnerController(self)
+        self.open_workspace_ctrl = OpenWorkspaceCoordinator(self)
         self.batch_report_ctrl = BatchReportController(self)
         self.manual_workflow_ctrl = ManualWorkflowController(self)
         try:
@@ -1124,6 +1127,8 @@ class ComicTranslate(ComicTranslateUI):
         if self._batch_active:
             self._show_project_switch_locked_warning()
             return False
+        if getattr(getattr(self, "open_workspace_ctrl", None), "active", False):
+            return False
 
         if not self.has_unsaved_changes():
             proceed()
@@ -1431,6 +1436,26 @@ class ComicTranslate(ComicTranslateUI):
             callback, result_callback, error_callback, finished_callback, *args, **kwargs
         )
 
+    def run_threaded_with_progress(
+        self,
+        callback: Callable,
+        progress_callback: Callable,
+        result_callback: Callable = None,
+        error_callback: Callable = None,
+        finished_callback: Callable = None,
+        *args,
+        **kwargs,
+    ):
+        return self.task_runner_ctrl.run_threaded_with_progress(
+            callback,
+            progress_callback,
+            result_callback,
+            error_callback,
+            finished_callback,
+            *args,
+            **kwargs,
+        )
+
     def clear_operation_queue(self):
         self.task_runner_ctrl.clear_operation_queue()
 
@@ -1674,6 +1699,40 @@ class ComicTranslate(ComicTranslateUI):
             })
             self.set_pipeline_overlay_active(False)
             self.loading.setVisible(False)
+            return
+
+        if issubclass(exctype, ImageResourceLimitError):
+            message = self.tr(
+                "The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts."
+            ).replace("{pixels}", f"{MAX_IMAGE_PIXELS:,}")
+            detail = str(value)
+            if self._batch_active:
+                self._batch_failed = True
+                self._last_batch_failure_detail = detail
+                self.on_runtime_progress_update({
+                    "phase": "error",
+                    "service": "batch",
+                    "status": "failed",
+                    "step_key": "image_preflight",
+                    "message": message,
+                    "detail": detail,
+                    "page_total": len(self._last_batch_request_paths),
+                    "page_index": 0,
+                    "image_name": "",
+                    "panel_state": "failed",
+                    "panel_message_level": "error",
+                })
+                self.loading.setVisible(False)
+                return
+            Messages.show_error(
+                self,
+                f"{message}\n{detail}",
+                duration=None,
+                closable=True,
+                source="batch",
+            )
+            self.loading.setVisible(False)
+            self.enable_hbutton_group()
             return
 
         if issubclass(exctype, PdfImportError):
@@ -2967,6 +3026,7 @@ class ComicTranslate(ComicTranslateUI):
         try:
             self.pipeline_status_panel.hide()
             self.set_pipeline_overlay_active(False)
+            self.open_workspace_overlay.hide()
         except Exception:
             pass
         router_shutdown_error = None

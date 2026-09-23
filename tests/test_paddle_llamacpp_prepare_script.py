@@ -6,7 +6,6 @@ from pathlib import Path
 import yaml
 
 from modules.ocr.paddle_llamacpp_runtime_contract import (
-    DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
     PADDLE_LLAMA_MMPROJ_NAME,
     PADDLE_LLAMA_MODEL_NAME,
@@ -47,7 +46,8 @@ class PaddleLlamaPrepareScriptTests(unittest.TestCase):
         script = PREPARE_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn(DEFAULT_PADDLE_LLAMA_MODEL_VOLUME, script)
-        self.assertIn(f"$ImageRef = '{DEFAULT_PADDLE_LLAMA_CPP_IMAGE}'", script)
+        self.assertIn("Get-ManagedLlamaCppImagePolicy", script)
+        self.assertIn("Resolve-ManagedLlamaCppImageRef", script)
         for name, spec in PADDLE_LLAMA_MODEL_SPECS.items():
             self.assertIn(name, script)
             self.assertIn(str(spec["bytes"]), script)

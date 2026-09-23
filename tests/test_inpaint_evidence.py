@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
+try:
+    import pytest
+except ModuleNotFoundError as exc:  # unittest discovery in product venvs
+    import unittest
+
+    raise unittest.SkipTest("pytest-only test module") from exc
 
 from modules.utils.inpaint_evidence import (
     BlockInpaintEvidence,

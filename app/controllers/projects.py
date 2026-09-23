@@ -64,6 +64,7 @@ from modules.utils.automatic_output import (
     write_output_image,
 )
 from modules.utils.paths import get_user_data_dir, get_default_project_autosave_dir
+from modules.utils.file_handler import FileHandler
 
 logger = logging.getLogger(__name__)
 
@@ -2383,44 +2384,37 @@ class ProjectController:
             )
             return
 
-        prev_project_file = self.main.project_file
-        if prev_project_file and prev_project_file != normalized_path:
-            close_state_store(prev_project_file)
-        if clear_recovery:
-            self.clear_recovery_checkpoint()
-        busy_dialog = Messages.show_busy(
-            self.main,
-            self.main.tr("Loading project file..."),
-            title=self.main.tr("Project File"),
-            minimum_visible_ms=300,
-        )
-        self.main.image_ctrl.clear_state()
-        self.main.project_kind = PROJECT_KIND_SINGLE
-        self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
+        coordinator = self.main.open_workspace_ctrl
 
-        def _on_load_finished():
-            Messages.close_busy(busy_dialog)
-            self.add_recent_project(normalized_path)
-            self._refresh_home_screen()
-            self.update_ui_from_project()
+        def prepare(report_progress):
+            return coordinator.prepare_project(
+                report_progress,
+                self.main,
+                normalized_path,
+            )
 
-        def _on_load_error(error_tuple):
-            Messages.close_busy(busy_dialog, force=True)
-            self.main.default_error_handler(error_tuple)
-            exctype, value, _ = error_tuple
-            self.main.project_file = None
+        def commit(snapshot) -> None:
+            prev_project_file = self.main.project_file
+            if prev_project_file and prev_project_file != normalized_path:
+                snapshot.defer_success(lambda: close_state_store(prev_project_file))
+            if clear_recovery:
+                snapshot.defer_success(self.clear_recovery_checkpoint)
+            self.main.file_handler = FileHandler()
+            self.main.image_ctrl.clear_state()
+            snapshot.apply(self.main)
+            self.main.project_file = normalized_path
             self.main.project_kind = PROJECT_KIND_SINGLE
-            self.main.setWindowTitle("Project1.ctpr[*]")
-            if exctype is FileNotFoundError or isinstance(value, FileNotFoundError):
-                self.remove_recent_project(normalized_path)
-                self._refresh_home_screen()
+            self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
+            self.load_state_to_ui(snapshot.saved_context)
+            self.update_ui_from_project()
+            self.main.set_project_clean()
+            snapshot.defer_success(lambda: self.add_recent_project(normalized_path))
+            snapshot.defer_success(self._refresh_home_screen)
 
-        self.main.run_threaded(
-            self.load_project,
-            self.load_state_to_ui,
-            _on_load_error,
-            _on_load_finished,
-            normalized_path
+        coordinator.run(
+            message=self.main.tr("Loading project file..."),
+            prepare=prepare,
+            commit=commit,
         )
 
     def load_project(self, file_name):

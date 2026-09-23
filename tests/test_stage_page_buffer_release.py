@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import numpy as np
 
 from pipeline.stage_batched_processor import (
     StagePageContext,
+    StageBatchedProcessor,
     _approximate_buffer_bytes,
 )
 
@@ -115,3 +117,37 @@ class BufferSizeEstimateTests(unittest.TestCase):
 
     def test_plain_scalars_contribute_nothing(self) -> None:
         self.assertEqual(_approximate_buffer_bytes({"n": 5, "s": "x" * 1000}), 0)
+
+    def test_stage_memory_telemetry_is_observational_only(self) -> None:
+        processor = StageBatchedProcessor.__new__(StageBatchedProcessor)
+        processor._released_page_buffer_bytes = 123
+        processor._record_performance_workload = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((10, 20, 3), dtype=np.uint8),
+        )
+        memory = mock.Mock(available=4_000_000_000)
+        process = mock.Mock()
+        process.memory_info.return_value = mock.Mock(rss=1_000_000_000)
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.psutil.Process",
+            return_value=process,
+        ), mock.patch(
+            "pipeline.stage_batched_processor.psutil.virtual_memory",
+            return_value=memory,
+        ):
+            processor._record_stage_memory_telemetry("detect", [page])
+
+        processor._record_performance_workload.assert_called_once_with(
+            "detect",
+            process_rss_bytes=1_000_000_000,
+            available_ram_bytes=4_000_000_000,
+            full_resolution_page_buffer_count=1,
+            estimated_page_buffer_bytes=page.image.nbytes,
+            released_page_buffer_bytes=123,
+        )
+        self.assertIsNotNone(page.image)
