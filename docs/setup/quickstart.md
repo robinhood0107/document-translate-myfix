@@ -233,10 +233,11 @@ records the result in the ready manifest. Use `-Mode Verify` to re-check only.
 Every preparation script accepts `-Mode Auto`: it immediately reuses a valid
 seal and prepares an empty volume. When upstream refreshes the llama.cpp tag the
 image digest moves, so the models stay correct while the ready manifest no
-longer matches; only then does setup's `Auto` choose `Reseal` and recover without
-the original source files. The running app reports the stale seal and requires
-the matching setup BAT; it never repairs the volume. See the Korean guide at
-[docs/runtime/managed-volume-repair-ko.md](../runtime/managed-volume-repair-ko.md).
+longer matches; only then does setup's `Auto` choose `Reseal` and recover
+without the original source files. `Reseal` leaves the volume contents alone,
+re-verifies model SHA-256s, re-runs the GPU smoke against the current image,
+and rewrites only the manifest. The running app reports the stale seal and
+requires the matching setup BAT; it never repairs the volume itself.
 
 Omitting `-ModelDirectory` searches the repository's gitignored `testmodel/` and
 its immediate subdirectories first. The launcher instead supplies its shared
