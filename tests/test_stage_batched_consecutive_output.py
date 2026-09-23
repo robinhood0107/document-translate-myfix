@@ -98,8 +98,11 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
                 return_value=None,
             ):
                 processor.batch_process(["chapter-a.png"])
+                retired_event = processor._render_cancel_event
                 processor.batch_process(["chapter-b.png"])
 
+            self.assertTrue(retired_event.is_set())
+            self.assertIsNot(retired_event, processor._render_cancel_event)
             for name, value in (("chapter-a", 31), ("chapter-b", 219)):
                 target = output_root / f"{name}-translated.png"
                 self.assertTrue(target.is_file(), name)
