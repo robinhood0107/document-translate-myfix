@@ -252,6 +252,23 @@ class OutputReconciliationTests(unittest.TestCase):
         self.assertEqual(ctx.output_path, "")
         self.assertEqual(len(recorder.preflight_errors), 1)
 
+    def test_corrupt_fallback_never_publishes_success_to_ui(self) -> None:
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("055.png")
+
+        def corrupt_writer(*_args, **_kwargs):
+            target = self.out_dir / "055.png"
+            target.write_bytes(b"invalid image")
+            return str(target), str(self.out_dir)
+
+        processor._write_final_render_export = corrupt_writer
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
+
+        self.assertEqual(summary["missing"], ["055.png"])
+        self.assertNotIn("055.png", recorder.summaries)
+        self.assertNotIn("page_output_fallback", [tag for tag, _ in recorder.events])
+
     def test_a_page_with_no_recorded_failure_states_the_real_cause(self) -> None:
         # 없는 실패를 지어내면 안 된다. 실패가 기록되지 않았는데 출력이 없으면
         # 원인은 다른 곳이다.
