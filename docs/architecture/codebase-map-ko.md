@@ -22,7 +22,101 @@ flowchart LR
 
 Stage-Batched 자동 처리는 각 GPU 모델을 동시에 상주시켜 처리하지 않는다.
 OCR 폴더 stage가 끝나면 OCR runtime을 멈추고 VRAM 반환을 확인한 뒤
-inpainter와 Gemma를 순서대로 실행한다.
+Gemma와 inpainter를 순서대로 실행한다.
+
+## Stage-Batched 파이프라인 작동 원리
+
+Stage-Batched는 폴더나 아카이브의 모든 선택 페이지를 한 단계씩 묶어 처리한다.
+페이지 하나에서 OCR부터 렌더까지 끝낸 뒤 다음 페이지로 가는 legacy workflow와
+달리, GPU 모델을 단계 경계에서 명시적으로 교대해 같은 GPU에 여러 대형 모델이
+동시에 올라가지 않게 하는 것이 핵심이다.
+
+```mermaid
+flowchart LR
+    PRE["설치 seal·입력 preflight"] --> DET["detect-all"]
+    DET --> OCR["ocr-all"]
+    OCR --> HO1["OCR drain·unload·VRAM handoff"]
+    HO1 --> TR["translate-all / Gemma"]
+    TR --> HO2["Gemma release·Router stop"]
+    HO2 --> INP["inpaint-all"]
+    INP --> REN["render-all"]
+    REN --> DONE["checkpoint·buffer release"]
+```
+
+`stage_batched_pipeline`을 선택하면 페이지 수나 전체 예상 메모리와 관계없이
+`StageBatchedProcessor`가 실행된다. 이미지 hard cap과 단일 페이지 RAM 검사는
+입력 안전성만 판단하며 workflow를 legacy로 바꾸지 않는다.
+
+1. 설치 상태와 선택 모델을 검사한다. 앱은 여기서 모델, image, volume을
+   다운로드하거나 복구하지 않는다.
+2. 검출 중에는 OCR Router **컨테이너만** 미리 시작할 수 있다.
+   `--no-models-autoload`이므로 이때 GPU OCR 모델은 아직 올라가지 않는다.
+3. `detect-all`이 모든 페이지의 텍스트 영역을 검출한다.
+4. 검출이 끝나면 OCR 모델을 준비하고 `ocr-all`이 모든 페이지를 처리한다.
+5. OCR sweep 종료 후 요청을 drain하고 OCR instance를 unload한다. GPU lease와
+   반환 확인을 통과한 뒤에만 Gemma 적재로 넘어간다.
+6. `translate-all`이 전체 페이지의 번역 대상 block을 처리한다. result cache와
+   승인형 Exact TM이 전체 hit이면 Gemma 자체를 시작하지 않을 수 있다.
+7. 번역 종료 후 Gemma를 unload하고 Router container를 멈춰 CUDA context까지
+   inpainter에 넘긴다.
+8. `inpaint-all`이 원문 영역을 복원하고, 이어서 `render-all`이 번역문을
+   렌더링한다.
+9. checkpoint와 지연된 자동 저장을 반영하고 페이지 buffer를 해제한다.
+
+### OCR 중 Gemma 준비가 보이는 이유
+
+OCR sweep과 겹쳐 실행되는 Gemma 준비에는 서로 다른 두 종류가 있다.
+
+- **page-cache prefetch**: GGUF를 디스크에서 WSL/Linux RAM page cache로 읽는다.
+  GPU model lease를 잡지 않으며 OCR VRAM과 동시에 상주하는 기능이 아니다.
+- **Gemma model prewarm**: OCR이 완전히 unload된 handoff 이후에만 실제 CUDA
+  모델을 적재한다.
+
+prefetch는 최적화일 뿐 필수 단계가 아니다. 현재 가용 WSL RAM이 14.6GB 모델
+크기보다 작으면 안전하게 건너뛴다. 이 경우 번역 단계의 cold load가 느려질 수
+있지만 workflow 순서나 번역 결과가 바뀌지는 않는다.
+
+`Gemma 예열 실패. 해당 단계에서 다시 준비합니다.` 같은 메시지는 선택적인
+비동기 prewarm이 끝나지 않았거나 실패해 번역 단계에서 동기 적재를 한 번
+시도한다는 뜻이다. 최종 동기 적재까지 실패했을 때만 배치 실패다.
+
+### shared llama.cpp Router
+
+관리형 PaddleOCR VL, PaddleOCR VL Spotting, HunyuanOCR, MangaLMM은 Gemma와 한
+Router container를 공유할 수 있다. 이것은 두 모델을 동시에 올린다는 뜻이
+아니다.
+
+- Router는 `--models-max 1`과 `--no-models-autoload`로 시작한다.
+- OCR 단계에는 선택 OCR instance 하나만 적재한다.
+- handoff에서 OCR을 unload하고 zero-loaded 상태를 확인한다.
+- 번역 단계에는 Gemma instance 하나만 적재한다.
+- 같은 GPU model lease가 동시에 두 서비스에 발급되면 계약 위반이다.
+
+따라서 HunyuanOCR가 lease를 쥔 상태에서 Gemma를 시작하려는 로그가 보이면 정상
+Stage-Batched handoff가 아니라 workflow routing 또는 release 회귀를 의심해야
+한다.
+
+### 메모리와 GPU layer의 관계
+
+Stage-Batched 순서는 GPU layer 수와 독립적이다. `LLAMA_N_GPU_LAYERS`는 Gemma의
+몇 개 layer를 CUDA에 둘지만 정하며 `detect-all → ocr-all → translate-all →
+inpaint-all → render-all` 순서를 바꾸지 않는다.
+
+- host/WSL RAM: GGUF mmap, page cache, cold-load 시간에 영향
+- swap: RAM 압박 시 실패 완화에 도움을 줄 수 있지만 속도 저하 가능
+- VRAM: GPU layer, KV cache, compute buffer 적재 가능 여부를 결정
+- Windows WDDM 점유: 같은 12GB GPU에서도 실행마다 가용 연속 VRAM을 바꿀 수 있음
+
+12GB GPU의 layer 선택과 standalone/Router 수동 조정은
+[Gemma 로컬 서버 설정 가이드](../gemma/local-server-ko.md#12gb-vram-환경과-gpu-layer-수동-조정)를
+참고한다.
+
+정상 실행에서는 `detect-all → ocr-all → OCR-to-translate handoff →
+translate-all → translation-to-inpaint handoff → inpaint-all → render-all`
+전이를 확인할 수 있다. 중간 prewarm, cache hit, page skip 로그는 해당 stage
+안의 최적화이며 stage 순서를 추가하거나 바꾸는 별도 workflow가 아니다.
+
+
 
 ## 주요 디렉터리
 

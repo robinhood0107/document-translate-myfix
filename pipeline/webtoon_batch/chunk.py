@@ -16,10 +16,9 @@ from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
-from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
 from modules.utils.ocr_debug import drop_rejected_empty_ocr_blocks
-from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
+from modules.utils.pipeline_config import get_config
 from modules.utils.textblock import TextBlock, sort_blk_list
 
 if TYPE_CHECKING:
@@ -75,24 +74,7 @@ class ChunkMixin:
             )
 
     def _ensure_inpainter(self: WebtoonBatchProcessor):
-        settings_page = self.main_page.settings_page
-        runtime = get_inpainter_runtime(settings_page)
-        inpainter_key = runtime["key"]
-        if (
-            self.inpainting.inpainter_cache is None
-            or self.inpainting.cached_inpainter_key != inpainter_key
-        ):
-            backend = runtime["backend"]
-            device = resolve_device(settings_page.is_gpu_enabled(), backend=backend)
-            InpainterClass = inpaint_map[inpainter_key]
-            self.inpainting.inpainter_cache = InpainterClass(
-                device,
-                backend=backend,
-                runtime_device=runtime.get("device", device),
-                inpaint_size=runtime.get("inpaint_size"),
-                precision=runtime.get("precision"),
-            )
-            self.inpainting.cached_inpainter_key = inpainter_key
+        return self.inpainting._ensure_inpainter()
 
     def _detect_blocks_for_page(
         self: WebtoonBatchProcessor, image: np.ndarray

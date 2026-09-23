@@ -48,14 +48,18 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         )
         self.assertEqual(normalize_llama_cpp_image(pinned), pinned)
 
-    def test_repository_default_is_the_cuda13_server_tag(self) -> None:
+    def test_repository_default_is_the_broadly_compatible_cuda_server_tag(self) -> None:
         self.assertEqual(
             DEFAULT_LLAMA_CPP_IMAGE,
-            "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+            "ghcr.io/ggml-org/llama.cpp:server-cuda",
         )
         self.assertEqual(SUPPORTED_LLAMA_CPP_IMAGES[0], DEFAULT_LLAMA_CPP_IMAGE)
 
     def test_supported_cuda_tags_are_preserved(self) -> None:
+        self.assertIn(
+            "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+            SUPPORTED_LLAMA_CPP_IMAGES,
+        )
         for supported in SUPPORTED_LLAMA_CPP_IMAGES:
             with self.subTest(image=supported):
                 self.assertEqual(normalize_llama_cpp_image(supported), supported)
