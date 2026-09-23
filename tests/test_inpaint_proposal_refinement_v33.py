@@ -114,6 +114,29 @@ def test_product_semantic_action_is_explicit_and_fail_closed() -> None:
     )
     assert invalid.action == REVIEW
     assert invalid.available is False
+    conflicting_sfx = product_semantic_decision(
+        {
+            "proposal": {
+                "text_class": "text_free",
+                "semantic_role": "sfx",
+                "processing_action": TRANSLATE,
+            }
+        }
+    )
+    assert conflicting_sfx.action == REVIEW
+    assert conflicting_sfx.available is False
+    assert conflicting_sfx.reason == "explicit_role_action_conflict"
+    conflicting_dialogue = product_semantic_decision(
+        {
+            "proposal": {
+                "text_class": "text_bubble",
+                "semantic_role": "dialogue_bubble",
+                "processing_action": PRESERVE,
+            }
+        }
+    )
+    assert conflicting_dialogue.action == REVIEW
+    assert conflicting_dialogue.available is False
 
 
 def test_g1_keeps_only_component_touching_pr6_and_its_connected_halo() -> None:
