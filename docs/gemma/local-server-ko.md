@@ -45,9 +45,9 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 업스트림이 지원 llama.cpp 태그를 갱신하면 모델은 멀쩡한데 manifest에 봉인된
 image identity만 어긋납니다. 이때는 `-Mode Reseal`이 원본 없이 스모크를 다시
-통과시키고 manifest만 다시 씁니다. 앱도 같은 상태를 스스로 감지해 한 번
-복구합니다. 준비 스크립트를 직접 돌릴 때는 `-Mode Auto`가 볼륨 상태를 보고
-`Prepare`와 `Reseal` 중에 고릅니다.
+통과시키고 manifest만 다시 씁니다. 앱은 봉인 불일치를 보고하고 해당 setup
+BAT 실행을 안내하며 직접 복구하지 않습니다. 준비 스크립트를 직접 돌릴 때는
+`-Mode Auto`가 볼륨 상태를 보고 `Prepare`와 `Reseal` 중에 고릅니다.
 
 준비 스크립트의 공개 옵션은 아래와 같습니다.
 
