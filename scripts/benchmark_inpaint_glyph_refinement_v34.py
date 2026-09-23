@@ -147,9 +147,9 @@ DETECTOR_BUNDLE_EXPECTATIONS = {
     "tiled": DetectorBundleExpectation(
         bundle_id="tiled512_native3",
         candidate_id="ballons-ctd-tiled",
-        role_model_sha256="b39223bdad3927e966e5f7b326f5b4f66dc2a3294b50af57e717f62689c7e58e",
+        role_model_sha256="08fdd7d633f64a68113306ec6024c35c973da0f9ea0c25fac0c261ad2fb7ce4f",
         model_asset_sha256="1f90fa60aeeb1eb82e2ac1167a66bf139a8a61b8780acd351ead55268540cccb",
-        preprocessing_contract_sha256="0cdc6a555cd0bd61ba4b8475b8c1a015fdfe03caf97cd12777ebb3ae4450c57b",
+        preprocessing_contract_sha256="48cff8c3d43d64c0b9a7cf1269de85ad715c2f887a491a18de9b2378669ae2c2",
     ),
 }
 
