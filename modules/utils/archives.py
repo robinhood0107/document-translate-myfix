@@ -1,3 +1,4 @@
+import io
 import math
 import os
 import re
@@ -14,6 +15,7 @@ from .pdf_pages import (
     materialize_transaction,
     scan_pdf,
 )
+from .image_safety import inspect_image_stream_dimensions
 
 SUPPORTED_SAVE_AS_EXTS = {'.pdf', '.cbz', '.cb7', '.zip'}
 _IMAGE_EXTENSIONS = (
@@ -326,6 +328,85 @@ def materialize_archive_entry(file_path: str, entry: dict, output_path: str) -> 
         return True
 
     return False
+
+
+def inspect_archive_entry_dimensions(file_path: str, entry: dict) -> tuple[int, int]:
+    """Read one archive page header without creating its lazy output file."""
+
+    kind = str(entry.get("kind", ""))
+    if kind == "pdf_page":
+        plan = _pdf_plan_from_entry(file_path, entry)
+        return int(plan.width), int(plan.height)
+    if kind != "archive_entry":
+        raise ValueError("Unsupported archive image entry")
+
+    entry_name = _archive_member_name(entry)
+    if not entry_name:
+        raise ValueError("Unsafe archive image entry")
+    source_label = f"{os.path.basename(file_path)}::{entry_name}"
+    file_lower = file_path.lower()
+
+    if file_lower.endswith((".zip", ".epub", ".cbz")):
+        with zipfile.ZipFile(file_path, "r") as archive:
+            with archive.open(entry_name) as stream:
+                return inspect_image_stream_dimensions(
+                    stream,
+                    source_label=source_label,
+                )
+
+    if _is_cbz_native_archive(file_lower):
+        page_index = int(entry.get("page_index", -1))
+        comic = _get_cached_comic(file_path)
+        if page_index < 0 or page_index >= len(comic):
+            raise ValueError("Archive page index is out of range")
+        content = getattr(comic[page_index], "content", None)
+        if not isinstance(content, (bytes, bytearray)):
+            raise ValueError("Archive page content is unavailable")
+        with io.BytesIO(bytes(content)) as stream:
+            return inspect_image_stream_dimensions(
+                stream,
+                source_label=source_label,
+            )
+
+    if file_lower.endswith(".rar"):
+        import rarfile
+
+        with rarfile.RarFile(file_path, "r") as archive:
+            with archive.open(entry_name) as stream:
+                return inspect_image_stream_dimensions(
+                    stream,
+                    source_label=source_label,
+                )
+
+    if file_lower.endswith((".cbt", ".tar")):
+        with tarfile.open(file_path, "r") as archive:
+            member = archive.getmember(entry_name)
+            stream = archive.extractfile(member)
+            if stream is None:
+                raise ValueError("Archive page content is unavailable")
+            with stream:
+                return inspect_image_stream_dimensions(
+                    stream,
+                    source_label=source_label,
+                )
+
+    if file_lower.endswith((".cb7", ".7z")):
+        import py7zr
+
+        # py7zr exposes an in-memory writer factory rather than a member
+        # stream. The bounded buffer avoids creating the lazy output on disk.
+        factory = py7zr.io.BytesIOFactory(limit=32 * 1024 * 1024)
+        with py7zr.SevenZipFile(file_path, "r") as archive:
+            archive.extract(targets=[entry_name], factory=factory)
+        stream = factory.get(entry_name)
+        stream.seek(0)
+        with io.BytesIO(stream.read()) as buffered_stream:
+            return inspect_image_stream_dimensions(
+                buffered_stream,
+                source_label=source_label,
+            )
+
+    raise ValueError("Unsupported archive format")
 
 
 def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -> int:

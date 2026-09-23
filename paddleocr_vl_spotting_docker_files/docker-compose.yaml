@@ -1,7 +1,7 @@
 services:
   paddleocr-spotting-llamacpp:
-    image: ${PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13}
-    pull_policy: missing
+    image: ${PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: never
     container_name: paddleocr-spotting-llamacpp
     restart: unless-stopped
     labels:
