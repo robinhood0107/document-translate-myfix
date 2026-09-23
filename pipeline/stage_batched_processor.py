@@ -15,6 +15,7 @@ from typing import Any, Callable
 import imkit as imk
 import numpy as np
 import psutil
+from PIL import Image, UnidentifiedImageError
 from PySide6.QtCore import QCoreApplication
 
 from app.path_materialization import ensure_path_materialized
@@ -4724,6 +4725,13 @@ class StageBatchedProcessor(BatchProcessor):
                 exc_info=True,
             )
             return False
+        if not self._output_file_is_decodable(output_path):
+            logger.error(
+                "Fallback export is not a decodable image for %s: %s",
+                ctx.image_name,
+                output_path,
+            )
+            return False
         ctx.output_path = output_path
         ctx.output_fallback_kind = kind
         self.main_page.image_ctrl.update_processing_summary(
@@ -4771,6 +4779,25 @@ class StageBatchedProcessor(BatchProcessor):
             )
         return "no rendered output was recorded for it"
 
+    @staticmethod
+    def _output_file_is_decodable(path: str) -> bool:
+        if not path:
+            return False
+        try:
+            if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+                return False
+            with Image.open(path) as image:
+                image.load()
+                return image.width > 0 and image.height > 0
+        except (
+            OSError,
+            ValueError,
+            UnidentifiedImageError,
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+        ):
+            return False
+
     def _reconcile_page_outputs(
         self,
         pages: list[StagePageContext],
@@ -4786,11 +4813,13 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         fallbacks: list[dict[str, str]] = []
         unrecoverable: list[str] = []
+        produced = 0
         for index, ctx in enumerate(pages):
             # 내부 기록만 믿지 않고 파일이 실제로 있는지 본다. 어느 한 경로가
             # 출력 기록을 빠뜨려도(실측으로 그런 페이지가 15장 있었다) 여기서
             # 잡힌다. 디스크에 있는 파일이 유일한 진실이다.
-            if ctx.output_path and os.path.exists(ctx.output_path):
+            if self._output_file_is_decodable(ctx.output_path):
+                produced += 1
                 continue
             if ctx.output_path:
                 logger.warning(
@@ -4804,7 +4833,8 @@ class StageBatchedProcessor(BatchProcessor):
                 index=index,
                 total_images=total_images,
                 export_settings=export_settings,
-            ):
+            ) and self._output_file_is_decodable(ctx.output_path):
+                produced += 1
                 fallbacks.append(
                     {
                         "image_name": ctx.image_name,
@@ -4816,9 +4846,9 @@ class StageBatchedProcessor(BatchProcessor):
                 )
             else:
                 unrecoverable.append(ctx.image_name)
+                ctx.output_path = ""
             self._release_page_buffers(ctx)
 
-        produced = sum(1 for ctx in pages if ctx.output_path)
         summary = {
             "input_count": total_images,
             "output_count": produced,
@@ -4970,6 +5000,10 @@ class StageBatchedProcessor(BatchProcessor):
                 )
 
     def batch_process(self, selected_paths: list[str] | None = None):
+        # A completed run sets its render token during teardown. Render jobs
+        # capture that Event at submission, so a new run needs a fresh token;
+        # clearing the old one could wake a retiring job.
+        self._render_cancel_event = threading.Event()
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
         benchmark_stage_ceiling = self._benchmark_stage_ceiling()
@@ -5286,15 +5320,32 @@ class StageBatchedProcessor(BatchProcessor):
                     self.main_page.settings_page
                 ),
             )
+            self._write_run_report(pages, output_summary=output_summary)
+            if int(output_summary.get("output_count", 0)) != total_images:
+                raise RuntimeError(
+                    self._stage_tr("출력 페이지 수가 입력과 다릅니다.")
+                    + f" {output_summary.get('output_count', 0)}/{total_images}"
+                )
             self._emit_benchmark_event(
                 "batch_run_done",
                 total_images=total_images,
                 output_count=int(output_summary.get("output_count", 0)),
                 fallback_count=int(output_summary.get("fallback_count", 0)),
             )
-            self._write_run_report(pages, output_summary=output_summary)
             batch_completed = True
-        except OperationCancelledError:
+        except OperationCancelledError as exc:
+            checker = getattr(self.main_page, "is_current_task_cancelled", None)
+            try:
+                requested = bool(checker()) if callable(checker) else bool(self._is_cancelled())
+            except Exception:
+                requested = False
+            if not requested:
+                self._emit_benchmark_event(
+                    "batch_run_failed",
+                    total_images=total_images,
+                    reason=f"Unexpected render cancellation: {exc}",
+                )
+                raise RuntimeError(str(exc) or "Unexpected render cancellation") from exc
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
         except Exception as exc:
