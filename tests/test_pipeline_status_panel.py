@@ -29,6 +29,29 @@ class PipelineStatusPanelTests(unittest.TestCase):
     def test_panel_defaults_to_embedded_mode(self) -> None:
         self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.EMBEDDED_MODE)
         self.assertIs(self.panel.parentWidget(), self.parent)
+        for button in self.panel._action_buttons:
+            self.assertIs(button.parentWidget(), self.panel.left_panel)
+            self.assertFalse(button.isWindow())
+
+    def test_download_message_during_pipeline_never_creates_a_close_window(self) -> None:
+        self.panel.prepare_for_new_run()
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "batch",
+                "message": "running",
+            }
+        )
+        self.panel.show_download_message("download status")
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(self.panel.close_button.isHidden())
+        self.assertEqual(self.panel.message_value.text(), "download status")
+        for button in self.panel._action_buttons:
+            self.assertIs(button.parentWidget(), self.panel.left_panel)
+            self.assertFalse(button.isWindow())
+            self.assertNotIn(button, QtWidgets.QApplication.topLevelWidgets())
 
     def test_toggle_display_mode_switches_to_window_and_back(self) -> None:
         self.panel.show()

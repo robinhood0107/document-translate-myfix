@@ -48,7 +48,7 @@ fingerprint만 빠르게 검사합니다.
 
 ## 런타임
 
-- llama.cpp: `ghcr.io/ggml-org/llama.cpp:server-cuda13` (`:server-cuda`도 지원)
+- llama.cpp: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - direct API: llama.cpp `/v1/chat/completions`, image-first PNG + `OCR:`
 - context: 4096
 - parallel slots: 1

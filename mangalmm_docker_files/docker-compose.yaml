@@ -1,7 +1,7 @@
 services:
   mangalmm-local-server:
-    image: ${MANGALMM_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13}
-    pull_policy: missing
+    image: ${MANGALMM_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: never
     container_name: mangalmm-local-server
     restart: unless-stopped
     labels:

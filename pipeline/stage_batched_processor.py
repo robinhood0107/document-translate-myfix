@@ -14,6 +14,8 @@ from typing import Any, Callable
 
 import imkit as imk
 import numpy as np
+import psutil
+from PIL import Image, UnidentifiedImageError
 from PySide6.QtCore import QCoreApplication
 
 from app.path_materialization import ensure_path_materialized
@@ -3567,14 +3569,15 @@ class StageBatchedProcessor(BatchProcessor):
             inpainter_vram_release_status=str(gate.get("status") or ""),
             inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
         )
-        release_succeeded = not bool(
+        release_observed = not bool(
             gate.get("required") and not gate.get("observed")
         )
+        enforce_release = gpu_release_enforcement_enabled()
         self._release_inpainter_runtime_lease(
-            release_succeeded=release_succeeded,
+            release_succeeded=release_observed or not enforce_release,
         )
-        if not release_succeeded:
-            if gpu_release_enforcement_enabled():
+        if not release_observed:
+            if enforce_release:
                 raise RuntimeError(
                     QCoreApplication.translate(
                         "StageBatchedProcessor",
@@ -4560,6 +4563,52 @@ class StageBatchedProcessor(BatchProcessor):
             self._released_page_buffer_bytes / (1024 * 1024),
         )
 
+    def _record_stage_memory_telemetry(
+        self,
+        stage: str,
+        pages: list[StagePageContext],
+    ) -> None:
+        buffer_bytes = 0
+        buffered_pages = 0
+        for ctx in pages:
+            page_bytes = _approximate_buffer_bytes(
+                {
+                    "image": getattr(ctx, "image", None),
+                    "inpaint_input_img": getattr(ctx, "inpaint_input_img", None),
+                    "raw_mask": getattr(ctx, "raw_mask", None),
+                    "mask": getattr(ctx, "mask", None),
+                    "patches": getattr(ctx, "patches", None),
+                    "mask_details": getattr(ctx, "mask_details", None),
+                }
+            )
+            if page_bytes > 0:
+                buffered_pages += 1
+                buffer_bytes += page_bytes
+        try:
+            process_rss = int(psutil.Process().memory_info().rss)
+            available_ram = int(psutil.virtual_memory().available)
+        except Exception:
+            process_rss = 0
+            available_ram = 0
+        self._record_performance_workload(
+            stage,
+            process_rss_bytes=process_rss,
+            available_ram_bytes=available_ram,
+            full_resolution_page_buffer_count=buffered_pages,
+            estimated_page_buffer_bytes=buffer_bytes,
+            released_page_buffer_bytes=int(self._released_page_buffer_bytes),
+        )
+        logger.info(
+            "Stage memory: stage=%s rss=%d available=%d page_buffers=%d "
+            "estimated_buffer_bytes=%d released_bytes=%d",
+            stage,
+            process_rss,
+            available_ram,
+            buffered_pages,
+            buffer_bytes,
+            int(self._released_page_buffer_bytes),
+        )
+
     def _resolve_render_future(self, pending: _PendingRenderJob) -> None:
         try:
             result = pending.future.result()
@@ -4676,6 +4725,13 @@ class StageBatchedProcessor(BatchProcessor):
                 exc_info=True,
             )
             return False
+        if not self._output_file_is_decodable(output_path):
+            logger.error(
+                "Fallback export is not a decodable image for %s: %s",
+                ctx.image_name,
+                output_path,
+            )
+            return False
         ctx.output_path = output_path
         ctx.output_fallback_kind = kind
         self.main_page.image_ctrl.update_processing_summary(
@@ -4723,6 +4779,25 @@ class StageBatchedProcessor(BatchProcessor):
             )
         return "no rendered output was recorded for it"
 
+    @staticmethod
+    def _output_file_is_decodable(path: str) -> bool:
+        if not path:
+            return False
+        try:
+            if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+                return False
+            with Image.open(path) as image:
+                image.load()
+                return image.width > 0 and image.height > 0
+        except (
+            OSError,
+            ValueError,
+            UnidentifiedImageError,
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+        ):
+            return False
+
     def _reconcile_page_outputs(
         self,
         pages: list[StagePageContext],
@@ -4738,11 +4813,13 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         fallbacks: list[dict[str, str]] = []
         unrecoverable: list[str] = []
+        produced = 0
         for index, ctx in enumerate(pages):
             # 내부 기록만 믿지 않고 파일이 실제로 있는지 본다. 어느 한 경로가
             # 출력 기록을 빠뜨려도(실측으로 그런 페이지가 15장 있었다) 여기서
             # 잡힌다. 디스크에 있는 파일이 유일한 진실이다.
-            if ctx.output_path and os.path.exists(ctx.output_path):
+            if self._output_file_is_decodable(ctx.output_path):
+                produced += 1
                 continue
             if ctx.output_path:
                 logger.warning(
@@ -4756,7 +4833,8 @@ class StageBatchedProcessor(BatchProcessor):
                 index=index,
                 total_images=total_images,
                 export_settings=export_settings,
-            ):
+            ) and self._output_file_is_decodable(ctx.output_path):
+                produced += 1
                 fallbacks.append(
                     {
                         "image_name": ctx.image_name,
@@ -4768,9 +4846,9 @@ class StageBatchedProcessor(BatchProcessor):
                 )
             else:
                 unrecoverable.append(ctx.image_name)
+                ctx.output_path = ""
             self._release_page_buffers(ctx)
 
-        produced = sum(1 for ctx in pages if ctx.output_path)
         summary = {
             "input_count": total_images,
             "output_count": produced,
@@ -4922,6 +5000,10 @@ class StageBatchedProcessor(BatchProcessor):
                 )
 
     def batch_process(self, selected_paths: list[str] | None = None):
+        # A completed run sets its render token during teardown. Render jobs
+        # capture that Event at submission, so a new run needs a fresh token;
+        # clearing the old one could wake a retiring job.
+        self._render_cancel_event = threading.Event()
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
         benchmark_stage_ceiling = self._benchmark_stage_ceiling()
@@ -4941,6 +5023,11 @@ class StageBatchedProcessor(BatchProcessor):
             "pipeline",
             page_count=total_images,
             workflow_mode="stage_batched",
+        )
+        resource_plan_getter = getattr(
+            self.main_page.file_handler,
+            "image_resource_plan",
+            None,
         )
         self._reset_prewarm_lifecycle()
         pdf_preflight = getattr(
@@ -4977,17 +5064,16 @@ class StageBatchedProcessor(BatchProcessor):
                         "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
                     ).replace("{pages}", pages).replace("{sizes}", sizes),
                 )
-        try:
-            with self._measure_performance(
-                stage="pipeline",
-                operation="pre_materialize",
-                workload={"page_count": total_images},
-            ):
-                if self.main_page.file_handler.should_pre_materialize(image_list):
-                    self.main_page.file_handler.pre_materialize(image_list)
-        except Exception:
-            logger.debug("Stage-batched pre-materialization failed; continuing lazily.", exc_info=True)
-
+        if callable(resource_plan_getter):
+            resource_plan = resource_plan_getter()
+            self._record_performance_workload(
+                "pipeline",
+                page_count=int(getattr(resource_plan, "page_count", total_images)),
+                largest_page_pixels=int(getattr(resource_plan, "largest_pixels", 0)),
+                largest_page_peak_bytes=int(
+                    getattr(resource_plan, "largest_page_peak_bytes", 0)
+                ),
+            )
         with self._measure_performance(
             stage="pipeline",
             operation="prepare_work_context",
@@ -5059,6 +5145,7 @@ class StageBatchedProcessor(BatchProcessor):
                 detected_block_count=detected_blocks,
             )
             self._sample_performance_resources("detect_stage_end")
+            self._record_stage_memory_telemetry("detect", pages)
             self._raise_if_cancelled()
             # GPU detection can keep an ONNX session resident.  Delay model
             # prewarm until it completes so the model-start baseline and the
@@ -5098,6 +5185,7 @@ class StageBatchedProcessor(BatchProcessor):
                 runtime_required=bool(ocr_blocks),
             )
             self._sample_performance_resources("ocr_stage_end")
+            self._record_stage_memory_telemetry("ocr", pages)
             self._raise_if_cancelled()
             if benchmark_stage_ceiling == "ocr":
                 self._complete_ocr_stage_ceiling(pages)
@@ -5153,6 +5241,7 @@ class StageBatchedProcessor(BatchProcessor):
                 source_character_count=source_character_count,
             )
             self._sample_performance_resources("translate_stage_end")
+            self._record_stage_memory_telemetry("translate", pages)
             self._raise_if_cancelled()
             # 번역이 끝나면 Router 컨테이너를 완전히 정지한다. 예전에는 OCR sweep
             # 뒤에도 컨테이너를 살려둔 채 인페인팅 sweep 전체(실측 467초)를 지나서,
@@ -5200,6 +5289,7 @@ class StageBatchedProcessor(BatchProcessor):
                 roi_count=inpaint_roi_count,
             )
             self._sample_performance_resources("inpaint_stage_end")
+            self._record_stage_memory_telemetry("inpaint", pages)
             self._raise_if_cancelled()
             with self._measure_performance(
                 stage="render",
@@ -5221,6 +5311,7 @@ class StageBatchedProcessor(BatchProcessor):
                 source_megapixels=source_pixels / 1_000_000.0,
             )
             self._sample_performance_resources("render_stage_end")
+            self._record_stage_memory_telemetry("render", pages)
             # 한 스테이지의 실패로 페이지가 출력에서 사라지지 않게, 아직 파일을
             # 남기지 못한 페이지를 여기서 마지막으로 채운다.
             output_summary = self._reconcile_page_outputs(
@@ -5229,15 +5320,32 @@ class StageBatchedProcessor(BatchProcessor):
                     self.main_page.settings_page
                 ),
             )
+            self._write_run_report(pages, output_summary=output_summary)
+            if int(output_summary.get("output_count", 0)) != total_images:
+                raise RuntimeError(
+                    self._stage_tr("출력 페이지 수가 입력과 다릅니다.")
+                    + f" {output_summary.get('output_count', 0)}/{total_images}"
+                )
             self._emit_benchmark_event(
                 "batch_run_done",
                 total_images=total_images,
                 output_count=int(output_summary.get("output_count", 0)),
                 fallback_count=int(output_summary.get("fallback_count", 0)),
             )
-            self._write_run_report(pages, output_summary=output_summary)
             batch_completed = True
-        except OperationCancelledError:
+        except OperationCancelledError as exc:
+            checker = getattr(self.main_page, "is_current_task_cancelled", None)
+            try:
+                requested = bool(checker()) if callable(checker) else bool(self._is_cancelled())
+            except Exception:
+                requested = False
+            if not requested:
+                self._emit_benchmark_event(
+                    "batch_run_failed",
+                    total_images=total_images,
+                    reason=f"Unexpected render cancellation: {exc}",
+                )
+                raise RuntimeError(str(exc) or "Unexpected render cancellation") from exc
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
         except Exception as exc:
