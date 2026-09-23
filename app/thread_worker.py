@@ -6,6 +6,7 @@ class WorkerSignals(QObject):
     finished = Signal()
     error = Signal(tuple)
     result = Signal(object)
+    progress = Signal(dict)
 
 class GenericWorker(QRunnable):
     def __init__(self, fn, *args, **kwargs):

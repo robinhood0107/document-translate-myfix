@@ -218,6 +218,10 @@ Choisissez soit un fichier de projet, soit uniquement des fichiers image/documen
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>L’image ne peut pas être traitée en toute sécurité. La limite prise en charge est de {pixels} pixels et la mémoire est vérifiée avant le démarrage du pipeline.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1461,8 +1465,24 @@ Veuillez vérifier votre connexion Internet.</translation>
         <translation>Modèle de reconnaissance de texte</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>L’environnement OCR sélectionné n’est pas installé. Exécutez le BAT setup_full correspondant avant de démarrer cette tâche.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>L’environnement OCR facultatif n’est pas installé</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>L’outil d’inpainting facultatif sélectionné n’est pas installé. Exécutez le BAT setup_full correspondant avant de démarrer cette tâche.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>L’outil d’inpainting facultatif n’est pas installé</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
@@ -1897,6 +1917,40 @@ L’application garde les messages sous la limite de texte par défaut de 4 Kio 
     <message>
         <source>System sound</source>
         <translation>Son système</translation>
+    </message>
+</context>
+<context>
+    <name>OpenWorkspace</name>
+    <message>
+        <source>Checking selected files...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Indexing archive...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Indexing archive pages...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing the first page...</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>OpenWorkspaceOverlay</name>
+    <message>
+        <source>Opening workspace</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Fermer</translation>
+    </message>
+    <message>
+        <source>Could not open workspace</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -4888,6 +4942,29 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>main</name>
+    <message>
+        <source>Checking selected files...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing the first page preview...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The first page could not be decoded.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking the project file...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reading project pages...</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -5201,6 +5278,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Preparing the series item...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Opening series item...</source>
         <translation>Ouverture de l&apos;élément de série...</translation>
     </message>
@@ -5272,12 +5353,16 @@ The current running item stays fixed, and you can change the queue after the run
         <translation>Importation des fichiers PSD...</translation>
     </message>
     <message>
-        <source>Import</source>
-        <translation>Importer</translation>
+        <source>Building the page list...</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Loading images...</source>
-        <translation>Chargement des images...</translation>
+        <source>Checking selected files...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>Importer</translation>
     </message>
     <message>
         <source>Importing pages...</source>
@@ -5310,6 +5395,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Rendering text...</source>
         <translation>Rendu du texte...</translation>
+    </message>
+    <message>
+        <source>The selected workspace could not be opened.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>See the application log for technical details.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Building the workspace...</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

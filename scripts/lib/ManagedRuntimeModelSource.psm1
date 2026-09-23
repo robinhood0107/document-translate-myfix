@@ -53,7 +53,16 @@ function Get-ManagedRuntimeFileSha256 {
         [Parameter(Mandatory = $true)][string]$Path
     )
 
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $Stream = [System.IO.File]::OpenRead($Path)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $HashBytes = $Hasher.ComputeHash($Stream)
+        return ([BitConverter]::ToString($HashBytes) -replace '-', '').ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+        $Stream.Dispose()
+    }
 }
 
 function Test-ManagedRuntimeModelCandidate {
@@ -113,40 +122,76 @@ function Invoke-ManagedRuntimeDownloadAttempt {
     $Partial = "$Destination.partial"
 
     $Handler = [System.Net.Http.HttpClientHandler]::new()
-    $Handler.AllowAutoRedirect = $true
+    # HttpClientHandler can drop Range while automatically following the signed
+    # Hugging Face redirect. Follow redirects explicitly so every hop receives
+    # the same resume header and a multi-GiB retry does not restart at byte zero.
+    $Handler.AllowAutoRedirect = $false
     $Client = [System.Net.Http.HttpClient]::new($Handler)
     $Client.Timeout = [TimeSpan]::FromMinutes($TimeoutMinutes)
     try {
         $Existing = 0L
         if (Test-Path -LiteralPath $Partial -PathType Leaf) {
             $Existing = [int64](Get-Item -LiteralPath $Partial).Length
-            if ($Existing -ge $Bytes) {
-                # 계약보다 크거나 같은 잔여물은 신뢰할 수 없다. 버리고 다시 받는다.
+            if ($Existing -gt $Bytes) {
+                # 계약보다 큰 잔여물은 신뢰할 수 없다. 버리고 다시 받는다.
+                Remove-Item -LiteralPath $Partial -Force
+                $Existing = 0L
+            } elseif ($Existing -eq $Bytes) {
+                Write-Host "Checking completed partial SHA-256: $Destination"
+                if ((Get-ManagedRuntimeFileSha256 -Path $Partial) -eq $Sha256.ToLowerInvariant()) {
+                    Move-Item -LiteralPath $Partial -Destination $Destination -Force
+                    return $Destination
+                }
                 Remove-Item -LiteralPath $Partial -Force
                 $Existing = 0L
             }
         }
 
-        $Request = [System.Net.Http.HttpRequestMessage]::new(
-            [System.Net.Http.HttpMethod]::Get,
-            $Uri
-        )
         if ($Existing -gt 0) {
             Write-Host (
                 "Resuming download at {0:N2} GiB of {1:N2} GiB" -f
                 ($Existing / 1GB),
                 ($Bytes / 1GB)
             )
-            $Request.Headers.Range = [System.Net.Http.Headers.RangeHeaderValue]::new(
-                $Existing,
-                $null
-            )
         }
 
-        $Response = $Client.SendAsync(
-            $Request,
-            [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
-        ).GetAwaiter().GetResult()
+        $RequestUri = [Uri]::new($Uri)
+        $Request = $null
+        $Response = $null
+        for ($Redirect = 0; $Redirect -le 10; $Redirect++) {
+            $Request = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::Get,
+                $RequestUri
+            )
+            if ($Existing -gt 0) {
+                $Request.Headers.Range = [System.Net.Http.Headers.RangeHeaderValue]::new(
+                    $Existing,
+                    $null
+                )
+            }
+            $Response = $Client.SendAsync(
+                $Request,
+                [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+            ).GetAwaiter().GetResult()
+            $StatusCode = [int]$Response.StatusCode
+            $Location = $Response.Headers.Location
+            if ($StatusCode -ge 300 -and $StatusCode -lt 400 -and $null -ne $Location) {
+                $RequestUri = if ($Location.IsAbsoluteUri) {
+                    $Location
+                } else {
+                    [Uri]::new($RequestUri, $Location)
+                }
+                $Response.Dispose()
+                $Request.Dispose()
+                $Response = $null
+                $Request = $null
+                continue
+            }
+            break
+        }
+        if ($null -eq $Response -or $null -eq $Request) {
+            throw "Model download exceeded the redirect limit: $Uri"
+        }
         try {
             if (-not $Response.IsSuccessStatusCode) {
                 throw (

@@ -55,7 +55,7 @@ class PaddleSpottingPreparationScriptTests(unittest.TestCase):
                 / "derive_paddleocr_spotting_mmproj.py"
             ).read_text(encoding="utf-8"),
         )
-        self.assertIn("'stop', '--timeout'", self.script)
+        self.assertIn("Remove-ManagedRuntimeContainer -Name $SmokeContainer", self.script)
         self.assertNotIn("'down'", self.script)
         self.assertNotIn("docker compose down", self.script.lower())
         self.assertIn(
