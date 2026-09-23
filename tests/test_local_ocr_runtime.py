@@ -993,6 +993,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         events: list[dict] = []
 
         with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health, \
              mock.patch.object(manager, "_run_compose") as run_compose:
             manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
@@ -1013,6 +1014,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
         with mock.patch.object(manager, "should_manage_engine", return_value=True), \
              mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health:
             manager.ensure_engine("PaddleOCR VL", first_settings)
             manager.ensure_engine("PaddleOCR VL", second_settings)
@@ -1024,6 +1026,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         settings_page = _DummySettingsPage()
 
         with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health, \
              mock.patch.object(manager, "_stop_engine") as stop_engine:
             manager.ensure_engine("PaddleOCR VL", settings_page)

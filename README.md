@@ -214,8 +214,9 @@ only to create the isolated venv; global packages are never imported.
 Setup and launch are separate. Run setup once, then launch as often as you
 like; the launcher never downloads model volumes, so it starts in seconds.
 
-**Step 1 - provision once** (CUDA12 uses Python cu128 and CUDA13 uses cu130;
-both setup paths use the broadly compatible llama.cpp `server-cuda` image):
+**Step 1 - provision once** (CUDA12 pairs Python cu128 with llama.cpp
+`server-cuda`; CUDA13 pairs Python cu130 with `server-cuda13`. An unsupported
+driver stops setup rather than switching CUDA variants):
 
 ```bat
 setup.bat
@@ -319,9 +320,10 @@ Official ntfy docs:
 Tracked compose/runtime images used by the repo:
 
 Every managed llama.cpp runtime (Gemma, PaddleOCR VL, PaddleOCR VL Spotting,
-HunyuanOCR, MangaLMM, and the Router) uses one CUDA server image:
+HunyuanOCR, MangaLMM, and the Router) uses the image matching the selected runtime:
 
-- Required Windows setup image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- CUDA12: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- CUDA13: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
 
 ## Reference Setup Docs
 
