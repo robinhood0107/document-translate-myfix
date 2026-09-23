@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -47,7 +48,7 @@ class _Recorder:
         """정상 렌더가 이미 남긴 파일을 흉내낸다."""
 
         path = self.out_dir / name
-        path.write_bytes(b"png")
+        Image.new("RGB", (8, 8), (1, 2, 3)).save(path)
         return str(path)
 
 
@@ -63,7 +64,7 @@ def _processor(recorder: _Recorder, *, export_fails: set[str] | None = None):
         recorder.exports.append((name, int(kw["page_index"])))
         # 정합성 검사는 디스크의 파일을 본다. 폴백도 진짜 파일을 남겨야 한다.
         written = recorder.out_dir / name
-        written.write_bytes(b"png")
+        Image.new("RGB", (8, 8), (4, 5, 6)).save(written)
         return (str(written), str(recorder.out_dir))
 
     processor._write_final_render_export = write_export
@@ -202,6 +203,71 @@ class OutputReconciliationTests(unittest.TestCase):
         self.assertEqual(recorder.exports, [("050.png", 0)])
         self.assertEqual(summary["output_count"], 1)
         self.assertTrue(ctx.output_path.endswith("050.png"))
+
+    def test_a_zero_byte_recorded_output_is_rewritten(self) -> None:
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("052.png")
+        target = self.out_dir / "empty.png"
+        target.touch()
+        ctx.output_path = str(target)
+
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
+
+        self.assertEqual(summary["output_count"], 1)
+        self.assertEqual(recorder.exports, [("052.png", 0)])
+        self.assertNotEqual(ctx.output_path, str(target))
+
+    def test_a_corrupt_recorded_output_is_rewritten(self) -> None:
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("053.png")
+        target = self.out_dir / "corrupt.png"
+        target.write_bytes(b"not an image")
+        ctx.output_path = str(target)
+
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
+
+        self.assertEqual(summary["output_count"], 1)
+        self.assertEqual(recorder.exports, [("053.png", 0)])
+        with Image.open(ctx.output_path) as image:
+            self.assertEqual(image.getpixel((0, 0)), (4, 5, 6))
+
+    def test_corrupt_fallback_does_not_count_as_output(self) -> None:
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("054.png")
+        corrupt = self.out_dir / "corrupt-fallback.png"
+        corrupt.write_bytes(b"invalid")
+
+        def invalid_fallback(*_args, **_kwargs) -> bool:
+            ctx.output_path = str(corrupt)
+            return True
+
+        processor._write_fallback_export = invalid_fallback
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
+
+        self.assertEqual(summary["output_count"], 0)
+        self.assertEqual(summary["missing"], ["054.png"])
+        self.assertEqual(ctx.output_path, "")
+        self.assertEqual(len(recorder.preflight_errors), 1)
+
+    def test_corrupt_fallback_never_publishes_success_to_ui(self) -> None:
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("055.png")
+
+        def corrupt_writer(*_args, **_kwargs):
+            target = self.out_dir / "055.png"
+            target.write_bytes(b"invalid image")
+            return str(target), str(self.out_dir)
+
+        processor._write_final_render_export = corrupt_writer
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
+
+        self.assertEqual(summary["missing"], ["055.png"])
+        self.assertNotIn("055.png", recorder.summaries)
+        self.assertNotIn("page_output_fallback", [tag for tag, _ in recorder.events])
 
     def test_a_page_with_no_recorded_failure_states_the_real_cause(self) -> None:
         # 없는 실패를 지어내면 안 된다. 실패가 기록되지 않았는데 출력이 없으면

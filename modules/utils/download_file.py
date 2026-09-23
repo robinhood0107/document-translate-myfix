@@ -22,7 +22,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from typing import Optional
+from typing import Callable, Optional
 
 CHUNK_SIZE = 64 * 1024  # 64KB per read
 
@@ -60,6 +60,7 @@ def download_url_to_file(
     base_delay: float = 0.75,
     timeout: float | None = 30.0,
     resume: bool = True,
+    progress_callback: Callable[[int, int | None], None] | None = None,
 ):  # noqa: D401
     """Download a URL to a local file with optional retries and resume.
 
@@ -185,6 +186,8 @@ def download_url_to_file(
                             if sys.stderr:
                                 sys.stderr.flush()
                             last_progress_at = now
+                        if progress_callback is not None and should_report:
+                            progress_callback(downloaded, total)
 
             if progress:
                 if sys.stderr:

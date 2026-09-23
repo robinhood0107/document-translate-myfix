@@ -4,7 +4,12 @@ from threading import Event, Thread
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
+try:
+    import pytest
+except ModuleNotFoundError as exc:  # unittest discovery in product venvs
+    import unittest
+
+    raise unittest.SkipTest("pytest-only test module") from exc
 
 from modules.masking import ctd_positive_claim
 from modules.utils.download import ModelDownloader, ModelID

@@ -1,7 +1,7 @@
 services:
   llama-router:
-    image: ${LLAMA_ROUTER_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13}
-    pull_policy: missing
+    image: ${LLAMA_ROUTER_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: never
     container_name: comic-translate-router-spotting-v2
     restart: "no"
     # See the Crop Router Compose: this service has no inter-container peers.

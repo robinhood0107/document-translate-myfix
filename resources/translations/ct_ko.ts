@@ -218,6 +218,10 @@ Choose either a project file or image/document/archive files.</source>
         <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
+        <source>The image cannot be processed safely. The supported limit is {pixels} pixels, and memory is checked before the pipeline starts.</source>
+        <translation>이미지를 안전하게 처리할 수 없습니다. 지원 한도는 {pixels}픽셀이며 파이프라인 시작 전에 메모리를 확인합니다.</translation>
+    </message>
+    <message>
         <source>This PDF is password-protected. Password entry is not supported yet.</source>
         <translation>이 PDF는 비밀번호로 보호되어 있습니다. 아직 비밀번호 입력은 지원하지 않습니다.</translation>
     </message>
@@ -1494,8 +1498,24 @@ Please check your internet connection.</source>
         <translation>텍스트 인식 모델</translation>
     </message>
     <message>
+        <source>The selected OCR runtime is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>선택한 OCR 런타임이 설치되지 않았습니다. 작업을 시작하기 전에 해당 setup_full BAT을 실행하세요.</translation>
+    </message>
+    <message>
+        <source>Optional OCR runtime is not installed</source>
+        <translation>선택형 OCR 런타임이 설치되지 않음</translation>
+    </message>
+    <message>
         <source>{service} settings missing</source>
         <translation>{service} 설정 누락</translation>
+    </message>
+    <message>
+        <source>The selected optional inpainter is not installed. Run the matching setup_full BAT before starting this job.</source>
+        <translation>선택한 인페인터가 설치되지 않았습니다. 작업을 시작하기 전에 해당 setup_full BAT을 실행하세요.</translation>
+    </message>
+    <message>
+        <source>Optional inpainter is not installed</source>
+        <translation>선택형 인페인터가 설치되지 않음</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
@@ -1930,6 +1950,40 @@ The app keeps messages below ntfy&apos;s default 4 KiB text limit and never send
     <message>
         <source>System sound</source>
         <translation>시스템 소리</translation>
+    </message>
+</context>
+<context>
+    <name>OpenWorkspace</name>
+    <message>
+        <source>Checking selected files...</source>
+        <translation>선택한 파일을 확인하는 중...</translation>
+    </message>
+    <message>
+        <source>Indexing archive...</source>
+        <translation>압축 파일을 정리하는 중...</translation>
+    </message>
+    <message>
+        <source>Indexing archive pages...</source>
+        <translation>압축 파일 페이지를 정리하는 중...</translation>
+    </message>
+    <message>
+        <source>Preparing the first page...</source>
+        <translation>첫 페이지를 준비하는 중...</translation>
+    </message>
+</context>
+<context>
+    <name>OpenWorkspaceOverlay</name>
+    <message>
+        <source>Opening workspace</source>
+        <translation>작업 공간 여는 중</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>닫기</translation>
+    </message>
+    <message>
+        <source>Could not open workspace</source>
+        <translation>작업 공간을 열지 못했습니다</translation>
     </message>
 </context>
 <context>
@@ -4932,6 +4986,29 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>main</name>
+    <message>
+        <source>Checking selected files...</source>
+        <translation>선택한 파일을 확인하는 중...</translation>
+    </message>
+    <message>
+        <source>Preparing the first page preview...</source>
+        <translation>첫 페이지 미리보기를 준비하는 중...</translation>
+    </message>
+    <message>
+        <source>The first page could not be decoded.</source>
+        <translation>첫 페이지를 읽지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>Checking the project file...</source>
+        <translation>프로젝트 파일을 확인하는 중...</translation>
+    </message>
+    <message>
+        <source>Reading project pages...</source>
+        <translation>프로젝트 페이지를 읽는 중...</translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -5252,6 +5329,10 @@ It may have been moved, renamed, or deleted.
         <translation>시리즈 프로젝트 만들기</translation>
     </message>
     <message>
+        <source>Preparing the series item...</source>
+        <translation>시리즈 항목을 준비하는 중...</translation>
+    </message>
+    <message>
         <source>Opening series item...</source>
         <translation>시리즈 항목을 여는 중입니다...</translation>
     </message>
@@ -5342,12 +5423,16 @@ The current running item stays fixed, and you can change the queue after the run
         <translation>PSD 파일을 가져오는 중입니다...</translation>
     </message>
     <message>
-        <source>Import</source>
-        <translation>가져오기</translation>
+        <source>Building the page list...</source>
+        <translation>페이지 목록을 구성하는 중...</translation>
     </message>
     <message>
-        <source>Loading images...</source>
-        <translation>이미지를 불러오는 중입니다...</translation>
+        <source>Checking selected files...</source>
+        <translation>선택한 파일을 확인하는 중...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>가져오기</translation>
     </message>
     <message>
         <source>Importing pages...</source>
@@ -5380,6 +5465,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Rendering text...</source>
         <translation>텍스트를 렌더링하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>The selected workspace could not be opened.</source>
+        <translation>선택한 작업 공간을 열지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>See the application log for technical details.</source>
+        <translation>기술적인 상세 내용은 애플리케이션 로그를 확인하세요.</translation>
+    </message>
+    <message>
+        <source>Building the workspace...</source>
+        <translation>작업 공간을 구성하는 중...</translation>
     </message>
 </context>
 <context>

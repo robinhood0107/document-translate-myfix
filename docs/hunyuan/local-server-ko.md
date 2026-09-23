@@ -10,10 +10,10 @@
 - `HunyuanOCR.mmproj-Q8_0.gguf`
 - external volume: `comic-translate-hunyuanocr-models-v2`
 
-`run_comic.bat`은 `ghcr.io/ggml-org/llama.cpp:server-cuda`,
-`run_comic_cuda13.bat`은 `:server-cuda13`을 사용합니다. 선택한 image가 로컬에
-없을 때만 pull하고, 모델 원본은 설치 폴더의
-`models/managed-runtime-sources` cache에서 이어받습니다.
+`setup.bat`과 `setup_cuda13.bat`은 모두
+`ghcr.io/ggml-org/llama.cpp:server-cuda`를 준비합니다. 실행 BAT는 setup이 봉인한
+정확한 로컬 image만 읽기 전용으로 사용하며 pull하지 않습니다. 모델 원본은 설치
+폴더의 `models/managed-runtime-sources` cache에서 setup이 이어받습니다.
 
 ## 서버 실행
 
