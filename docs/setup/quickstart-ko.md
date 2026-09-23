@@ -138,7 +138,7 @@ llama.cpp의 CUDA 사용자 공간은 선택한 Docker image 안에 있습니다
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
 
-런처는 이 exact 모델을 자동으로 준비합니다. 수동 준비가 필요하면:
+setup BAT은 이 exact 모델을 자동으로 준비합니다. 수동 준비가 필요하면:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
