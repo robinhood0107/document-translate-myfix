@@ -8,18 +8,18 @@ $script:ReadyManifestName = ''
 $script:ModelSpecs = @()
 
 function Get-ManagedLlamaCppImagePolicy {
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateSet('cuda12', 'cuda13')]
-        [string]$Runtime
-    )
+    param([string]$Runtime = '')
 
-    $Cuda12 = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
-    $Cuda13 = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    $Cuda12Image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
+    $Cuda13Image = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    if (-not $Runtime) { $Runtime = [string]$env:COMIC_WINDOWS_RUNTIME }
+    if ($Runtime -and $Runtime -notin @('cuda12', 'cuda13')) {
+        throw "Unsupported managed CUDA runtime: $Runtime"
+    }
+    $PreferredImage = if ($Runtime -eq 'cuda13') { $Cuda13Image } else { $Cuda12Image }
     return [pscustomobject]@{
-        Preferred = if ($Runtime -eq 'cuda12') { $Cuda12 } else { $Cuda13 }
-        Fallback = if ($Runtime -eq 'cuda13') { $Cuda12 } else { '' }
-        Supported = @($Cuda13, $Cuda12)
+        Preferred = $PreferredImage
+        Supported = @($Cuda12Image, $Cuda13Image)
     }
 }
 
@@ -29,17 +29,17 @@ function Resolve-ManagedLlamaCppImageRef {
         [string]$RuntimeOverride = ''
     )
 
-    $Policy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
-    $Resolved = @($RequestedImage, $RuntimeOverride, $env:LLAMA_CPP_IMAGE) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($Resolved)) {
-        $Resolved = $Policy.Preferred
+    $Policy = Get-ManagedLlamaCppImagePolicy
+    $Candidate = if ($RequestedImage) { $RequestedImage } elseif ($RuntimeOverride) {
+        $RuntimeOverride
+    } else { [string]$Policy.Preferred }
+    if ($Policy.Supported -notcontains $Candidate) {
+        throw "Unsupported managed llama.cpp image: $Candidate"
     }
-    if ($Policy.Supported -notcontains $Resolved) {
-        throw "Unsupported llama.cpp image: $Resolved"
+    if ($env:COMIC_WINDOWS_RUNTIME -and $Candidate -ne $Policy.Preferred) {
+        throw "The $($env:COMIC_WINDOWS_RUNTIME) runtime requires $($Policy.Preferred), not $Candidate."
     }
-    return [string]$Resolved
+    return [string]$Candidate
 }
 
 function ConvertTo-NativeArgument {
@@ -158,6 +158,23 @@ function Invoke-Docker {
         )
     }
     return $Result.Output.Trim()
+}
+
+function Test-ManagedRuntimeContainerRunning {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $Result = Invoke-DockerResult -Arguments @(
+        'inspect', '--format', '{{.State.Running}}', $Name
+    )
+    return $Result.ExitCode -eq 0 -and $Result.Output.Trim() -eq 'true'
+}
+
+function Remove-ManagedRuntimeContainer {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    if ((Invoke-DockerResult -Arguments @('inspect', $Name)).ExitCode -eq 0) {
+        Invoke-Docker -Arguments @('rm', '--force', $Name) | Out-Null
+    }
 }
 
 function Get-PinnedImageId {

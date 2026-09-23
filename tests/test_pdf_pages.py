@@ -781,7 +781,7 @@ class PdfPagesTests(unittest.TestCase):
 
         self.assertTrue(all(not os.path.exists(path) for path in outputs))
 
-    def test_file_handler_keeps_first_page_lazy_then_preflights_all_pages(self) -> None:
+    def test_file_handler_preflight_keeps_unopened_pdf_pages_lazy(self) -> None:
         pdf_path, _images = self._image_pdf(image_format="JPEG", count=3)
         handler = FileHandler()
         prepared = handler.prepare_files([pdf_path])
@@ -792,7 +792,12 @@ class PdfPagesTests(unittest.TestCase):
         self.assertFalse(os.path.exists(prepared[2]))
 
         self.assertEqual(handler.preflight_for_processing(prepared), 3)
-        self.assertTrue(all(os.path.isfile(path) for path in prepared))
+        self.assertTrue(os.path.isfile(prepared[0]))
+        self.assertFalse(os.path.exists(prepared[1]))
+        self.assertFalse(os.path.exists(prepared[2]))
+        resource_plan = handler.image_resource_plan()
+        self.assertEqual(resource_plan.page_count, 3)
+        self.assertTrue(resource_plan.hard_cap_passed)
 
         entries = list_archive_image_entries(pdf_path)
         self.assertEqual([entry["page_index"] for entry in entries], [0, 1, 2])
@@ -813,7 +818,7 @@ class PdfPagesTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "PDF_SOURCE_CHANGED")
 
-    def test_file_handler_preflight_cleans_prior_group_when_later_pdf_fails(self) -> None:
+    def test_file_handler_preflight_never_materializes_multiple_pdf_groups(self) -> None:
         first_pdf, _images = self._image_pdf(image_format="JPEG", count=2)
         first_pdf_copy = self._path("first.pdf")
         os.replace(first_pdf, first_pdf_copy)
@@ -824,29 +829,14 @@ class PdfPagesTests(unittest.TestCase):
         prepared = handler.prepare_files([first_pdf_copy, second_pdf_copy])
         first_lazy_page_two = prepared[1]
         second_lazy_page_two = prepared[3]
-        real_transaction = materialize_transaction
-
-        def fail_second_group(file_path, items, should_cancel=None) -> None:
-            if os.path.abspath(file_path) == os.path.abspath(second_pdf_copy):
-                raise PdfImportError(
-                    "PDF_PAGE_MATERIALIZATION_FAILED",
-                    detail_code="publish_failed",
-                )
-            real_transaction(file_path, items, should_cancel)
-
-        with mock.patch(
-            "modules.utils.file_handler.materialize_transaction",
-            side_effect=fail_second_group,
-        ):
-            with self.assertRaises(PdfImportError):
-                handler.preflight_for_processing(prepared)
+        self.assertEqual(handler.preflight_for_processing(prepared), 4)
 
         self.assertFalse(os.path.exists(first_lazy_page_two))
         self.assertFalse(os.path.exists(second_lazy_page_two))
         self.assertTrue(os.path.isfile(prepared[0]))
         self.assertTrue(os.path.isfile(prepared[2]))
 
-    def test_preflight_final_validation_failure_cleans_new_output(self) -> None:
+    def test_pdf_header_preflight_does_not_validate_a_missing_materialized_page(self) -> None:
         pdf_path, _images = self._image_pdf(image_format="JPEG", count=2)
         handler = FileHandler()
         prepared = handler.prepare_files([pdf_path])
@@ -854,10 +844,9 @@ class PdfPagesTests(unittest.TestCase):
 
         with mock.patch(
             "modules.utils.file_handler.validate_materialized_page",
-            return_value=False,
+            side_effect=AssertionError("preflight must not inspect a rendered page"),
         ):
-            with self.assertRaises(PdfImportError):
-                handler.preflight_for_processing([prepared[1]])
+            self.assertEqual(handler.preflight_for_processing([prepared[1]]), 1)
 
         self.assertFalse(os.path.exists(prepared[1]))
 

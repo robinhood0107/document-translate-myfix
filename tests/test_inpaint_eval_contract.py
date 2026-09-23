@@ -9,7 +9,12 @@ from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
-import pytest
+try:
+    import pytest
+except ModuleNotFoundError as exc:  # unittest discovery in product venvs
+    import unittest
+
+    raise unittest.SkipTest("pytest-only test module") from exc
 import imkit as imk
 
 from scripts.inpaint_eval_contract import (

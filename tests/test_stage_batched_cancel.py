@@ -621,6 +621,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
         identity_probe.assert_not_called()
         processor._await_ocr_runtime.assert_called_once_with(policy)
         processor._run_primary_ocr.assert_called_once()
+        processor._shutdown_runtime_with_retry.assert_called_once_with(
+            "OCR",
+            runtime_manager,
+            context="OCR-to-translate handoff",
+            raise_on_failure=True,
+            release_for_handoff=True,
+            service="paddleocr_vl",
+        )
 
     def test_detection_checkpoint_hit_skips_detector_construction_and_inference(self) -> None:
         processor = self._processor(cancelled=False)
