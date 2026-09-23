@@ -4725,6 +4725,13 @@ class StageBatchedProcessor(BatchProcessor):
                 exc_info=True,
             )
             return False
+        if not self._output_file_is_decodable(output_path):
+            logger.error(
+                "Fallback export is not a decodable image for %s: %s",
+                ctx.image_name,
+                output_path,
+            )
+            return False
         ctx.output_path = output_path
         ctx.output_fallback_kind = kind
         self.main_page.image_ctrl.update_processing_summary(

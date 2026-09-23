@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 from contextlib import nullcontext
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -13,7 +14,11 @@ from PIL import Image
 from PySide6 import QtCore
 
 from app.controllers.series import SeriesController
-from app.projects.series_state_v1 import create_series_project, load_series_project
+from app.projects.series_state_v1 import (
+    create_series_project,
+    load_series_project,
+    load_series_project_blob,
+)
 from modules.utils.exceptions import OperationCancelledError
 from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 
@@ -137,6 +142,7 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
                 self.pipeline_status_panel = SimpleNamespace(
                     set_series_queue_pause_visible=mock.Mock()
                 )
+                self.project_ctrl = SimpleNamespace(save_current_state=mock.Mock())
 
         with TemporaryDirectory() as temporary:
             output_root = Path(temporary)
@@ -184,7 +190,7 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
             controller._queue_retry_remaining = {}
             controller._apply_workspace_state = mock.Mock()
             controller._show_board = mock.Mock()
-            controller.sync_active_child_to_series = mock.Mock()
+            controller._set_series_window_title = mock.Mock()
             processor = self._processor(output_root)
 
             def render(pages: list[StagePageContext]) -> None:
@@ -211,6 +217,12 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
 
             controller._open_item = open_child
             controller._start_batch_for_active_child = process_child
+
+            def save_child(_main, child_path: str, **_kwargs) -> None:
+                index = int(Path(child_path).stem[-1])
+                output = output_root / f"chapter-{index}-translated.png"
+                Path(child_path).write_bytes(output.read_bytes())
+
             with (
                 mock.patch(
                     "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
@@ -220,6 +232,7 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
                     "app.controllers.series.QtCore.QTimer.singleShot",
                     side_effect=lambda _delay, _receiver, callback: callback(),
                 ),
+                mock.patch("app.controllers.series.save_state_to_proj_file", save_child),
             ):
                 controller._run_next_queue_item()
 
@@ -230,6 +243,12 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
             for index, value in ((1, 35), (2, 225)):
                 with Image.open(output_root / f"chapter-{index}-translated.png") as image:
                     self.assertEqual(image.getpixel((0, 0)), (value, 0, 0))
+                item = reloaded["items"][index - 1]
+                blob = load_series_project_blob(
+                    str(series_file), item["embedded_project_blob_hash"]
+                )
+                with Image.open(BytesIO(blob)) as embedded:
+                    self.assertEqual(embedded.getpixel((0, 0)), (value, 0, 0))
 
     def test_cancelled_run_does_not_poison_the_next_run(self) -> None:
         with TemporaryDirectory() as temporary:
@@ -332,6 +351,83 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
             with Image.open(output_root / "fresh-translated.png") as image:
                 self.assertEqual(image.getpixel((0, 0)), (117, 0, 0))
             self.assertEqual(processor._write_run_report.call_count, 2)
+
+    def test_checkpoint_hit_then_real_qt_pool_job_keeps_new_token(self) -> None:
+        with TemporaryDirectory() as temporary:
+            output_root = Path(temporary)
+            processor = self._processor(output_root)
+            cached = output_root / "cached-translated.png"
+            Image.new("RGB", (8, 8), (27, 0, 0)).save(cached)
+            processor.main_page.curr_img_idx = -1
+            processor.main_page.button_to_alignment = {1: QtCore.Qt.AlignmentFlag.AlignCenter}
+            processor.main_page.button_to_vertical_alignment = {1: "center"}
+            processor._lazy_render_context = lambda _ctx: (SimpleNamespace(alignment_id=1), "ko")
+            processor._set_current_image = mock.Mock()
+            processor._write_json_exports = mock.Mock()
+            processor._ensure_page_state = lambda _path: {"viewer_state": {}}
+            processor._restore_render_project_state = mock.Mock()
+            processor._finish_render_checkpoint_hit = lambda ctx, **_kwargs: setattr(
+                ctx, "output_path", str(cached)
+            )
+            processor._reserve_render_output_path = lambda ctx, **_kwargs: (
+                str(output_root / f"{Path(ctx.image_path).stem}-translated.png"),
+                str(output_root),
+                "png",
+            )
+            processor._render_worker_count = lambda: 1
+            processor._record_performance_detail = mock.Mock()
+
+            def finish_render(pending, *, result, exc) -> None:
+                if exc is not None:
+                    raise exc
+                pending.ctx.output_path = result.final_output_path
+
+            def prepare_checkpoint(ctx, **_kwargs):
+                if ctx.image_path == "cached.png":
+                    return SimpleNamespace(
+                        output_root=str(output_root), output_exists=True
+                    ), str(output_root)
+                return None, str(output_root)
+
+            def inpaint_and_submit(pages: list[StagePageContext]) -> None:
+                for index, page in enumerate(pages):
+                    processor._submit_or_inline_render(
+                        page, index=index, total_images=len(pages), export_settings={}
+                    )
+
+            processor._finish_render_page_bookkeeping = finish_render
+            processor._prepare_render_checkpoint = prepare_checkpoint
+            processor._inpaint_all = inpaint_and_submit
+            processor._render_all = lambda pages: processor._drain_render_futures(block=True)
+            seen_tokens: list[bool] = []
+
+            def render_job(job):
+                seen_tokens.append(bool(job.is_cancelled()))
+                if job.is_cancelled():
+                    raise OperationCancelledError("retired token reached Qt pool")
+                Image.new("RGB", (8, 8), (127, 0, 0)).save(job.output_path)
+                return SimpleNamespace(final_output_path=job.output_path)
+
+            with (
+                mock.patch(
+                    "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
+                    return_value=None,
+                ),
+                mock.patch(
+                    "pipeline.stage_batched_processor.materialize_render_checkpoint_output",
+                    return_value=str(cached),
+                ),
+                mock.patch("pipeline.stage_batched_processor.run_render_job", render_job),
+            ):
+                processor.batch_process(["cached.png"])
+                retired = processor._render_cancel_event
+                processor.batch_process(["fresh.png"])
+
+            self.assertTrue(retired.is_set())
+            self.assertIsNot(retired, processor._render_cancel_event)
+            self.assertEqual(seen_tokens, [False])
+            with Image.open(output_root / "fresh-translated.png") as image:
+                self.assertEqual(image.getpixel((0, 0)), (127, 0, 0))
 
 
 if __name__ == "__main__":
