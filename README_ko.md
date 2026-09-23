@@ -211,8 +211,9 @@ Python installer에서는 `py` launcher를 포함하세요. 시스템 Python은 
 설치와 실행은 분리되어 있습니다. 설치는 한 번만 하고, 이후에는 계속 실행만
 하면 됩니다. 실행 런처는 모델 volume을 내려받지 않으므로 수 초 안에 뜹니다.
 
-**1단계 - 최초 1회 준비**(CUDA12는 Python cu128, CUDA13은 cu130을 사용하며
-두 setup 모두 Docker llama.cpp에는 호환 범위가 넓은 `server-cuda`를 사용):
+**1단계 - 최초 1회 준비**(CUDA12는 Python cu128과 `server-cuda`, CUDA13은
+Python cu130과 `server-cuda13`을 함께 사용합니다. 드라이버가 지원하지 않으면
+다른 CUDA 버전으로 조용히 전환하지 않고 준비를 중단합니다):
 
 ```bat
 setup.bat
@@ -311,9 +312,10 @@ miss 모두 정확히 한 번 적용하고, 사전 변경 시 소비 결과와 d
 현재 추적 중인 compose/runtime 이미지:
 
 관리형 llama.cpp 런타임(Gemma, PaddleOCR VL, PaddleOCR VL Spotting, HunyuanOCR,
-MangaLMM, Router)은 모두 하나의 CUDA 서버 이미지를 씁니다.
+MangaLMM, Router)은 선택한 CUDA 버전에 맞는 이미지를 씁니다.
 
-- Windows setup 필수 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- CUDA12: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- CUDA13: `ghcr.io/ggml-org/llama.cpp:server-cuda13`
 
 ## 참고 설치 문서
 

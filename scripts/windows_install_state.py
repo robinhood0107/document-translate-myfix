@@ -28,6 +28,10 @@ CORE_MANAGED_RUNTIMES = frozenset(
 FULL_MANAGED_RUNTIMES = CORE_MANAGED_RUNTIMES | frozenset(
     {"MangaLMM-llama.cpp", "PaddleOCR-VL-Spotting-llama.cpp"}
 )
+EXPECTED_IMAGE_BY_RUNTIME = {
+    "cuda12": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "cuda13": "ghcr.io/ggml-org/llama.cpp:server-cuda13",
+}
 
 
 class InstallStateError(RuntimeError):
@@ -259,6 +263,7 @@ def command_provision(args: argparse.Namespace) -> int:
 
 
 def command_write(args: argparse.Namespace) -> int:
+    _assert_runtime_image(args.runtime, args.image_ref)
     managed_path = Path(args.managed_state).resolve()
     try:
         managed = json.loads(managed_path.read_text(encoding="utf-8-sig"))
@@ -323,9 +328,15 @@ def command_preflight(args: argparse.Namespace) -> int:
     expected_requirements = _requirements_record((ROOT / args.requirements).resolve())
     if payload.get("requirements") != expected_requirements:
         raise InstallStateError("Pinned requirements changed. Run the matching setup BAT.")
+    sealed_image = payload.get("llama_image")
+    image_ref = (
+        str(sealed_image.get("ref") or "")
+        if isinstance(sealed_image, dict)
+        else ""
+    )
+    _assert_runtime_image(args.runtime, image_ref)
     _validate_application_models(payload, profile=tier, allow_digest_fallback=True)
     _validate_docker_state(payload, tier=tier)
-    image_ref = str(payload["llama_image"]["ref"])
     if args.emit_cmd:
         print(f"LLAMA_CPP_IMAGE={image_ref}")
         print(f"COMIC_WINDOWS_RUNTIME={args.runtime}")
@@ -336,6 +347,15 @@ def command_preflight(args: argparse.Namespace) -> int:
     else:
         print(f"Windows install state is ready: {args.runtime}/{tier}/{image_ref}")
     return 0
+
+
+def _assert_runtime_image(runtime: str, image_ref: str) -> None:
+    expected = EXPECTED_IMAGE_BY_RUNTIME[runtime]
+    if image_ref != expected:
+        raise InstallStateError(
+            f"{runtime.upper()} setup requires llama.cpp image {expected}; "
+            f"found {image_ref or '<missing>'}. Run the matching setup BAT."
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:

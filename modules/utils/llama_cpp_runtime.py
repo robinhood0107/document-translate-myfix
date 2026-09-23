@@ -12,10 +12,11 @@ from typing import Any, Callable
 from modules.utils.exceptions import OperationCancelledError
 
 
-# Windows setup은 CUDA12/CUDA13 Python 경로 모두 같은 검증된 CUDA 이미지만
-# 사용한다. 다른 llama.cpp 태그는 설치 상태나 관리형 런타임 계약으로 인정하지 않는다.
+# Each Windows Python runtime has a matching llama.cpp CUDA image. Setup and
+# install-state preflight enforce the pair before any model is launched.
 SUPPORTED_LLAMA_CPP_IMAGES: tuple[str, ...] = (
     "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "ghcr.io/ggml-org/llama.cpp:server-cuda13",
 )
 _requested_default_image = os.environ.get("LLAMA_CPP_IMAGE", "").strip()
 DEFAULT_LLAMA_CPP_IMAGE = (
