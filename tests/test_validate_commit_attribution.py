@@ -295,6 +295,40 @@ class CommitAttributionValidationTests(unittest.TestCase):
                 )
         self.assertEqual(commits, [after])
 
+    def test_force_pushed_before_commit_falls_back_to_new_ref_walk(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            historical = commit_file(
+                repo,
+                message=(
+                    "chore(repo): historical commit\n\n"
+                    "Co-authored-by: Codex <codex@example.com>"
+                ),
+                content="historical",
+            )
+            git(
+                repo,
+                "update-ref",
+                "refs/remotes/origin/develop",
+                historical,
+            )
+            current = commit_file(
+                repo,
+                message="fix(repo): current human commit",
+                content="current",
+            )
+            with working_directory(repo):
+                commits = push_commits(
+                    "b" * 40,
+                    current,
+                    branch="fix/example",
+                    remote="origin",
+                )
+        self.assertEqual(commits, [current])
+
     def test_deleted_ref_has_no_commits(self) -> None:
         commits = push_commits(
             "a" * 40,
