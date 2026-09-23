@@ -39,6 +39,30 @@ class TaskRunnerController:
             **kwargs,
         )
 
+    def run_threaded_with_progress(
+        self,
+        callback: Callable,
+        progress_callback: Callable,
+        result_callback: Callable = None,
+        error_callback: Callable = None,
+        finished_callback: Callable = None,
+        *args,
+        **kwargs,
+    ):
+        operation = {
+            "callback": callback,
+            "progress_callback": progress_callback,
+            "inject_progress": True,
+            "result_callback": result_callback,
+            "error_callback": error_callback,
+            "finished_callback": finished_callback,
+            "args": args,
+            "kwargs": kwargs,
+        }
+        self.operation_queue.append(operation)
+        if not self.is_processing_queue:
+            self._process_next_operation()
+
     def _queue_operation(
         self,
         callback: Callable,
@@ -50,6 +74,8 @@ class TaskRunnerController:
     ):
         operation = {
             "callback": callback,
+            "progress_callback": None,
+            "inject_progress": False,
             "result_callback": result_callback,
             "error_callback": error_callback,
             "finished_callback": finished_callback,
@@ -101,6 +127,8 @@ class TaskRunnerController:
             enhanced_error_callback,
             enhanced_finished_callback,
             *operation["args"],
+            _progress_callback=operation.get("progress_callback"),
+            _inject_progress=bool(operation.get("inject_progress")),
             **operation["kwargs"],
         )
 
@@ -111,9 +139,16 @@ class TaskRunnerController:
         error_callback: Callable = None,
         finished_callback: Callable = None,
         *args,
+        _progress_callback: Callable = None,
+        _inject_progress: bool = False,
         **kwargs,
     ):
-        worker = GenericWorker(callback, *args, **kwargs)
+        if _inject_progress:
+            worker = GenericWorker(
+                lambda: callback(worker.signals.progress.emit, *args, **kwargs)
+            )
+        else:
+            worker = GenericWorker(callback, *args, **kwargs)
 
         def _clear_current_worker() -> None:
             if getattr(self.main, "current_worker", None) is worker:
@@ -129,6 +164,12 @@ class TaskRunnerController:
             worker.signals.error.connect(
                 lambda error: QtCore.QTimer.singleShot(
                     0, self.main, lambda: error_callback(error)
+                )
+            )
+        if _progress_callback:
+            worker.signals.progress.connect(
+                lambda event: QtCore.QTimer.singleShot(
+                    0, self.main, lambda: _progress_callback(dict(event or {}))
                 )
             )
         if finished_callback:

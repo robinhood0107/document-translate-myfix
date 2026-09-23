@@ -54,8 +54,7 @@ $ReadyManifestName = (
     '.comic-translate-paddleocr-vl-spotting-llamacpp-ready-v2.json'
 )
 $RuntimeName = 'PaddleOCR-VL-Spotting-llama.cpp'
-# CUDA 13 태그가 기본이지만, CUDA 12 태그로 준비한 볼륨도 그대로 인정한다.
-$ImagePolicy = Get-ManagedLlamaCppImagePolicy -Runtime 'cuda13'
+$ImagePolicy = Get-ManagedLlamaCppImagePolicy
 $ImageRef = Resolve-ManagedLlamaCppImageRef `
     -RequestedImage $ImageRef `
     -RuntimeOverride $env:PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE
@@ -417,9 +416,7 @@ try {
                 -AllowDownload:$AllowDownload `
                 -SkipFreeSpaceCheck:$SkipFreeSpaceCheck).Path
         }
-        $TargetHash = (
-            Get-FileHash -LiteralPath $TargetSourcePath -Algorithm SHA256
-        ).Hash.ToLowerInvariant()
+        $TargetHash = Get-ManagedRuntimeFileSha256 -Path $TargetSourcePath
         if (
             (Get-Item -LiteralPath $TargetSourcePath).Length -ne
                 $TargetSpec.Bytes -or
@@ -478,9 +475,7 @@ try {
             }
         )
         foreach ($Source in $PreparedSources) {
-            $ActualHash = (
-                Get-FileHash -LiteralPath $Source.Path -Algorithm SHA256
-            ).Hash.ToLowerInvariant()
+            $ActualHash = Get-ManagedRuntimeFileSha256 -Path $Source.Path
             $ActualBytes = (Get-Item -LiteralPath $Source.Path).Length
             if (
                 $ActualBytes -ne $Source.Spec.Bytes -or
@@ -710,7 +705,7 @@ mv -f "$partial" "$target"
     $SmokeResult = $null
     try {
         Invoke-Docker -Arguments @(
-            'run', '-d', '--rm',
+            'run', '-d',
             '--name', $SmokeContainer,
             '--label',
             'comic-translate.runtime=paddle-spotting-prepare-smoke',
@@ -755,13 +750,16 @@ mv -f "$partial" "$target"
             }
             catch {
             }
+            if (-not (Test-ManagedRuntimeContainerRunning -Name $SmokeContainer)) {
+                break
+            }
             Start-Sleep -Seconds 1
         } while ([DateTime]::UtcNow -lt $Deadline)
         if (-not $HealthReady) {
             $Logs = Invoke-DockerResult -Arguments @(
                 'logs', '--tail', '160', $SmokeContainer
             )
-            throw "PaddleOCR-VL Spotting smoke timed out.`n$($Logs.Output)"
+            throw "PaddleOCR-VL Spotting smoke failed before health became ready.`n$($Logs.Output)"
         }
 
         $ImageBase64 = [Convert]::ToBase64String(
@@ -829,17 +827,7 @@ mv -f "$partial" "$target"
         }
     }
     finally {
-        if (
-            (
-                Invoke-DockerResult -Arguments @(
-                    'inspect', '--format', '{{.Name}}', $SmokeContainer
-                )
-            ).ExitCode -eq 0
-        ) {
-            Invoke-Docker -Arguments @(
-                'stop', '--timeout', '10', $SmokeContainer
-            ) | Out-Null
-        }
+        Remove-ManagedRuntimeContainer -Name $SmokeContainer
     }
 
     $Manifest = [ordered]@{

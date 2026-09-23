@@ -17,6 +17,7 @@ from app.ui.canvas.rectangle import MoveableRectItem
 from app.ui.canvas.text_item import TextBlockItem
 from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
 from app.controllers.psd_support import ensure_photoshopapi_available
+from app.controllers.open_workspace import OpenWorkspaceCoordinator, PreparedWorkspace
 from app.ui.list_view import PageListItemData
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
@@ -640,48 +641,117 @@ class ImageStateController:
                 prepare_psd_font_catalog()
             except Exception:
                 pass
-            busy_dialog = Messages.show_busy(
-                self.main,
-                self.main.tr("Importing PSD files..."),
-                title=self.main.tr("Import"),
-                minimum_visible_ms=300,
-            )
-            self.main.project_ctrl.clear_recovery_checkpoint()
-            self.clear_state()
+            coordinator = self.main.open_workspace_ctrl
 
-            def on_psd_error(error_tuple):
-                Messages.close_busy(busy_dialog, force=True)
-                self.main.default_error_handler(error_tuple)
+            def prepare_psd(report_progress):
+                report_progress(
+                    {
+                        "stage": "decode",
+                        "message": self.main.tr("Importing PSD files..."),
+                        "current": 0,
+                        "total": len(psd_paths),
+                    }
+                )
+                return self._import_psd_files(psd_paths)
 
-            self.main.run_threaded(
-                self._import_psd_files,
-                self.on_psd_imported,
-                on_psd_error,
-                lambda: Messages.close_busy(busy_dialog),
-                psd_paths,
+            def commit_psd(pages):
+                self.main.project_ctrl.clear_recovery_checkpoint()
+                self.clear_state()
+                self.on_psd_imported(pages)
+
+            coordinator.run(
+                message=self.main.tr("Importing PSD files..."),
+                prepare=prepare_psd,
+                commit=commit_psd,
             )
             return
 
-        busy_dialog = Messages.show_busy(
-            self.main,
-            self.main.tr("Loading images..."),
-            title=self.main.tr("Import"),
-            minimum_visible_ms=300,
-        )
-        self.main.project_ctrl.clear_recovery_checkpoint()
-        self.clear_state()
+        coordinator = self.main.open_workspace_ctrl
 
-        def on_load_error(error_tuple):
-            Messages.close_busy(busy_dialog, force=True)
-            self.main.default_error_handler(error_tuple)
+        def prepare(report_progress):
+            return OpenWorkspaceCoordinator.prepare_regular_files(
+                report_progress,
+                self.main,
+                normalized_paths,
+            )
 
-        self.main.run_threaded(
-            self.load_initial_image,
-            self.on_initial_image_loaded,
-            on_load_error,
-            lambda: Messages.close_busy(busy_dialog),
-            normalized_paths,
+        def commit(prepared: PreparedWorkspace) -> bool:
+            prepared.defer_success(self.main.project_ctrl.clear_recovery_checkpoint)
+            self.clear_state()
+            self.main.file_handler = prepared.file_handler
+            self.main.image_files = list(prepared.file_paths)
+            self._apply_prepared_workspace_incrementally(
+                prepared,
+                coordinator=coordinator,
+            )
+            return False
+
+        coordinator.run(
+            message=self.main.tr("Checking selected files..."),
+            prepare=prepare,
+            commit=commit,
         )
+
+    def _apply_prepared_workspace_incrementally(
+        self,
+        prepared: PreparedWorkspace,
+        *,
+        coordinator: OpenWorkspaceCoordinator,
+    ) -> None:
+        files = list(prepared.file_paths)
+        first_image = prepared.first_image
+        if files and first_image is not None:
+            first_path = files[0]
+            self.main.image_data[first_path] = first_image
+            self.main.image_history[first_path] = [first_path]
+            self.main.in_memory_history[first_path] = [first_image.copy()]
+            self.main.current_history_index[first_path] = 0
+
+        cursor = 0
+
+        def apply_chunk() -> None:
+            nonlocal cursor
+            timer = QtCore.QElapsedTimer()
+            timer.start()
+            try:
+                while cursor < len(files) and timer.elapsed() < 8:
+                    file_path = files[cursor]
+                    self.save_image_state(file_path)
+                    self.main.create_undo_stack_for_path(file_path)
+                    cursor += 1
+                coordinator.progress(
+                    {
+                        "stage": "page-list",
+                        "message": self.main.tr("Building the page list..."),
+                        "current": cursor,
+                        "total": len(files),
+                    }
+                )
+                if cursor < len(files):
+                    QtCore.QTimer.singleShot(0, self.main, apply_chunk)
+                    return
+
+                if files:
+                    self.main.page_list.blockSignals(True)
+                    self.update_image_cards()
+                    self.main.page_list.setCurrentRow(0)
+                    self.main.page_list.blockSignals(False)
+                    self.display_image_from_loaded(first_image, 0, switch_page=False)
+                    self.register_loaded_image(files[0])
+                    self.main.mark_project_dirty()
+                else:
+                    self.main.image_viewer.clear_scene()
+                self.main.image_viewer.resetTransform()
+                self.main.image_viewer.fitInView()
+                self.main.batch_report_ctrl.refresh_action_buttons()
+                self._show_pdf_import_warnings()
+                coordinator.complete()
+            except Exception as exc:
+                import traceback
+
+                coordinator.fail((type(exc), exc, traceback.format_exc()))
+
+        QtCore.QTimer.singleShot(0, self.main, apply_chunk)
 
     def _import_psd_files(self, psd_paths: List[str]) -> list[ImportedPsdPage]:
         return import_psd_files(psd_paths)

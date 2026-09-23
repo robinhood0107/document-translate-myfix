@@ -3,11 +3,17 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from PySide6 import QtCore
 
-from app.controllers.series import SeriesController
+from app.controllers.open_workspace import ProjectLoadSnapshot
+from app.controllers.series import (
+    SeriesController,
+    _PreparedSeriesChild,
+    _PreparedSeriesManifest,
+)
 from app.projects.series_state_v1 import create_series_project, load_series_project
 
 
@@ -184,6 +190,46 @@ class SeriesControllerBusyTests(unittest.TestCase):
             self.assertFalse(runtime["pause_requested"])
             self.assertFalse(controller._queue_active)
             self.assertFalse(controller._pause_requested)
+
+    def test_series_manifest_commit_failure_restores_controller_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = self._controller(self._series_file(temp_dir))
+            original_file = controller.series_file
+            original_items = list(controller.series_items)
+            prepared = _PreparedSeriesManifest(controller, {"items": []})
+            rollback = prepared.capture_for_commit(controller.main)
+
+            controller.series_file = "replacement.seriesctpr"
+            controller.series_items = []
+            rollback()
+
+            self.assertEqual(controller.series_file, original_file)
+            self.assertEqual(controller.series_items, original_items)
+
+    def test_failed_series_child_staging_cleans_new_temp_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = self._controller(self._series_file(temp_dir))
+            old_work = os.path.join(temp_dir, "existing-child")
+            new_work = os.path.join(temp_dir, "new-child")
+            staged_project = os.path.join(new_work, "staged-project")
+            os.makedirs(old_work)
+            os.makedirs(staged_project)
+            controller.active_child_temp_dir = old_work
+            snapshot = ProjectLoadSnapshot(
+                SimpleNamespace(temp_dir=staged_project),
+                "",
+            )
+            prepared = _PreparedSeriesChild(
+                controller,
+                os.path.join(new_work, "child.ctpr"),
+                snapshot,
+                new_work,
+            )
+
+            prepared.cleanup()
+
+            self.assertTrue(os.path.isdir(old_work))
+            self.assertFalse(os.path.exists(new_work))
 
 
 if __name__ == "__main__":
