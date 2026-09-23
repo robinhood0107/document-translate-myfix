@@ -1385,6 +1385,9 @@ class LocalLlamaRouterManagerBoundaryTests(unittest.TestCase):
             manager,
             "_router_runtime_spec",
             return_value=spec,
+        ), mock.patch.object(
+            manager,
+            "_release_separate_server_for_router",
         ):
             with self.assertRaisesRegex(OperationCancelledError, "cancelled"):
                 manager.ensure_engine(
