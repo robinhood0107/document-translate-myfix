@@ -382,12 +382,14 @@ class PrepareScriptContractTests(unittest.TestCase):
                 self.assertIn("Test-ManagedRuntimeContainerRunning", script)
                 self.assertIn("Remove-ManagedRuntimeContainer", script)
 
-    def test_every_prepare_script_accepts_only_the_managed_cuda_image(self) -> None:
+    def test_every_prepare_script_accepts_only_the_matching_managed_cuda_image(self) -> None:
         module = (
             ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
         ).read_text(encoding="utf-8")
         self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda'", module)
-        self.assertIn("Supported = @($ImageRef)", module)
+        self.assertIn("ghcr.io/ggml-org/llama.cpp:server-cuda13'", module)
+        self.assertIn("Supported = @($Cuda12Image, $Cuda13Image)", module)
+        self.assertIn("$Candidate -ne $Policy.Preferred", module)
         for name in PREPARE_SCRIPTS:
             with self.subTest(script=name):
                 script = (ROOT / "scripts" / name).read_text(encoding="utf-8")

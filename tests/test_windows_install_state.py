@@ -31,9 +31,9 @@ class WindowsInstallStateTests(unittest.TestCase):
                 for model_id in sorted(windows_installation.CORE_APPLICATION_MODEL_IDS)
             ],
             "llama_image": {
-                "ref": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+                "ref": "ghcr.io/ggml-org/llama.cpp:server-cuda13",
                 "id": "sha256:compatible",
-                "required_cuda": "12.8",
+                "required_cuda": "13.1",
             },
             "managed_runtimes": [
                 {"name": "hunyuan-volume", "runtime_name": "HunyuanOCR-llama.cpp"},
@@ -42,7 +42,7 @@ class WindowsInstallStateTests(unittest.TestCase):
             ],
         }
 
-    def test_preflight_exports_the_setup_selected_fallback_image(self) -> None:
+    def test_preflight_exports_the_matching_cuda13_image(self) -> None:
         args = argparse.Namespace(
             runtime="cuda13",
             requirements="requirements-cuda13.txt",
@@ -62,11 +62,88 @@ class WindowsInstallStateTests(unittest.TestCase):
         ):
             self.assertEqual(windows_install_state.command_preflight(args), 0)
         self.assertIn(
-            "LLAMA_CPP_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda",
+            "LLAMA_CPP_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda13",
             output.getvalue(),
         )
         self.assertIn("COMIC_MODEL_DOWNLOAD_POLICY=forbid", output.getvalue())
         self.assertIn("COMIC_WINDOWS_INSTALL_TIER=core", output.getvalue())
+
+    def test_preflight_exports_the_matching_cuda12_image(self) -> None:
+        payload = self._payload()
+        payload["runtime"] = "cuda12"
+        payload["requirements"] = {
+            "path": "requirements-cuda12.txt", "sha256": "b" * 64
+        }
+        payload["llama_image"]["ref"] = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+        args = argparse.Namespace(
+            runtime="cuda12", requirements="requirements-cuda12.txt", emit_cmd=True
+        )
+        output = io.StringIO()
+        with (
+            mock.patch.object(windows_install_state, "_read_state", return_value=payload),
+            mock.patch.object(
+                windows_install_state,
+                "_requirements_record",
+                return_value=payload["requirements"],
+            ),
+            mock.patch.object(windows_install_state, "_validate_application_models"),
+            mock.patch.object(windows_install_state, "_validate_docker_state"),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(windows_install_state.command_preflight(args), 0)
+        self.assertIn(
+            "LLAMA_CPP_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda\n",
+            output.getvalue(),
+        )
+
+    def test_preflight_rejects_cuda12_image_sealed_for_cuda13(self) -> None:
+        payload = self._payload()
+        payload["llama_image"]["ref"] = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+        args = argparse.Namespace(
+            runtime="cuda13", requirements="requirements-cuda13.txt", emit_cmd=True
+        )
+        with (
+            mock.patch.object(windows_install_state, "_read_state", return_value=payload),
+            mock.patch.object(
+                windows_install_state,
+                "_requirements_record",
+                return_value=payload["requirements"],
+            ),
+            mock.patch.object(windows_install_state, "_validate_application_models"),
+            mock.patch.object(windows_install_state, "_validate_docker_state") as docker,
+            self.assertRaisesRegex(windows_install_state.InstallStateError, "CUDA13"),
+        ):
+            windows_install_state.command_preflight(args)
+        docker.assert_not_called()
+
+    def test_write_rejects_cross_cuda_image_before_reading_managed_state(self) -> None:
+        args = argparse.Namespace(
+            runtime="cuda13",
+            image_ref="ghcr.io/ggml-org/llama.cpp:server-cuda",
+            managed_state="unused.json",
+        )
+        with self.assertRaisesRegex(windows_install_state.InstallStateError, "CUDA13"):
+            windows_install_state.command_write(args)
+
+    def test_preflight_rejects_missing_image_seal_without_docker_access(self) -> None:
+        payload = self._payload()
+        payload["llama_image"] = None
+        args = argparse.Namespace(
+            runtime="cuda13", requirements="requirements-cuda13.txt", emit_cmd=False
+        )
+        with (
+            mock.patch.object(windows_install_state, "_read_state", return_value=payload),
+            mock.patch.object(
+                windows_install_state,
+                "_requirements_record",
+                return_value=payload["requirements"],
+            ),
+            mock.patch.object(windows_install_state, "_validate_application_models"),
+            mock.patch.object(windows_install_state, "_validate_docker_state") as docker,
+            self.assertRaisesRegex(windows_install_state.InstallStateError, "CUDA13"),
+        ):
+            windows_install_state.command_preflight(args)
+        docker.assert_not_called()
 
     def test_full_preflight_validates_the_full_application_profile(self) -> None:
         payload = self._payload()

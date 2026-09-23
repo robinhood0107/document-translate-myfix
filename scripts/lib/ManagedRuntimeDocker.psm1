@@ -8,10 +8,18 @@ $script:ReadyManifestName = ''
 $script:ModelSpecs = @()
 
 function Get-ManagedLlamaCppImagePolicy {
-    $ImageRef = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
+    param([string]$Runtime = '')
+
+    $Cuda12Image = 'ghcr.io/ggml-org/llama.cpp:server-cuda'
+    $Cuda13Image = 'ghcr.io/ggml-org/llama.cpp:server-cuda13'
+    if (-not $Runtime) { $Runtime = [string]$env:COMIC_WINDOWS_RUNTIME }
+    if ($Runtime -and $Runtime -notin @('cuda12', 'cuda13')) {
+        throw "Unsupported managed CUDA runtime: $Runtime"
+    }
+    $PreferredImage = if ($Runtime -eq 'cuda13') { $Cuda13Image } else { $Cuda12Image }
     return [pscustomobject]@{
-        Preferred = $ImageRef
-        Supported = @($ImageRef)
+        Preferred = $PreferredImage
+        Supported = @($Cuda12Image, $Cuda13Image)
     }
 }
 
@@ -21,10 +29,17 @@ function Resolve-ManagedLlamaCppImageRef {
         [string]$RuntimeOverride = ''
     )
 
-    # Managed Windows runtimes intentionally use one image contract. Older
-    # environment values or manual arguments are normalized to that image so
-    # setup remains deterministic instead of failing on stale configuration.
-    return [string](Get-ManagedLlamaCppImagePolicy).Preferred
+    $Policy = Get-ManagedLlamaCppImagePolicy
+    $Candidate = if ($RequestedImage) { $RequestedImage } elseif ($RuntimeOverride) {
+        $RuntimeOverride
+    } else { [string]$Policy.Preferred }
+    if ($Policy.Supported -notcontains $Candidate) {
+        throw "Unsupported managed llama.cpp image: $Candidate"
+    }
+    if ($env:COMIC_WINDOWS_RUNTIME -and $Candidate -ne $Policy.Preferred) {
+        throw "The $($env:COMIC_WINDOWS_RUNTIME) runtime requires $($Policy.Preferred), not $Candidate."
+    }
+    return [string]$Candidate
 }
 
 function ConvertTo-NativeArgument {

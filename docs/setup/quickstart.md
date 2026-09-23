@@ -29,8 +29,8 @@ For the CUDA12 path (Python cu128 plus llama.cpp `server-cuda`):
 setup.bat
 ```
 
-For the CUDA13 Python path (cu130; Docker deliberately uses the same broadly
-compatible llama.cpp `server-cuda` image as the CUDA12 setup):
+For the CUDA13 path (Python cu130 plus llama.cpp `server-cuda13`; a driver that
+cannot run this image stops setup without falling back to CUDA12):
 
 ```bat
 setup_cuda13.bat
@@ -140,7 +140,7 @@ full hash verification, custom volumes, or optional runtime maintenance.
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker image: `server-cuda` for CUDA12 or `server-cuda13` for CUDA13
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 

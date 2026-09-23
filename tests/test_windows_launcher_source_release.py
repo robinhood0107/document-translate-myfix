@@ -258,10 +258,21 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             ROOT / "scripts" / "lib" / "ManagedRuntimeDocker.psm1"
         ).read_text(encoding="utf-8")
         self.assertIn("llama.cpp:server-cuda'", image_policy)
-        self.assertIn("Preferred = $ImageRef", image_policy)
-        self.assertIn("Supported = @($ImageRef)", image_policy)
-        self.assertIn("Get-ManagedLlamaCppImagePolicy", bootstrap)
+        self.assertIn("llama.cpp:server-cuda13'", image_policy)
+        self.assertIn("Preferred = $PreferredImage", image_policy)
+        self.assertIn("Supported = @($Cuda12Image, $Cuda13Image)", image_policy)
+        self.assertIn("Get-ManagedLlamaCppImagePolicy -Runtime $Runtime", bootstrap)
+        self.assertIn("$HostCudaCompatibility -lt [version]'13.1'", bootstrap)
+        self.assertLess(
+            bootstrap.index("$HostCudaCompatibility -lt [version]'13.1'"),
+            bootstrap.index("'Creating or repairing the isolated Python environment'"),
+        )
         self.assertIn("Get-BootstrapDockerImageCudaCompatibility", bootstrap)
+        self.assertIn("Assert-BootstrapCudaImageGpu -Docker $Docker -Image $ActiveLlamaImage", bootstrap)
+        self.assertLess(
+            bootstrap.index("if (-not $Doctor) {\n            $ActiveImageCompatibility"),
+            bootstrap.index("Assert-BootstrapCudaImageGpu -Docker $Docker -Image $ActiveLlamaImage"),
+        )
         self.assertNotIn("ImageCandidates", bootstrap)
         self.assertNotIn("HasFallback", bootstrap)
         windows_module = (
@@ -271,7 +282,9 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn('line.StartsWith("Resuming download"', windows_module)
         self.assertIn('line.StartsWith("The server ignored"', windows_module)
         self.assertIn("Get-NvidiaCudaCompatibilityVersion", windows_module)
+        self.assertIn("CUDA (?:UMD )?Version:", windows_module)
         self.assertIn("NVIDIA_REQUIRE_CUDA", windows_module)
+        self.assertIn("WSL/Docker NVIDIA GPU bridge or NVML prestart", windows_module)
         self.assertLess(
             bootstrap.index("label = 'HunyuanOCR'"),
             bootstrap.index("label = 'PaddleOCR VL'"),
