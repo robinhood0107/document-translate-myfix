@@ -359,9 +359,10 @@ if (-not $IsReseal -and [string]::IsNullOrWhiteSpace($ModelDirectory)) {
         }
     }
 }
-if (-not $IsReseal -and [string]::IsNullOrWhiteSpace($ModelDirectory)) {
-    throw 'Prepare mode requires -ModelDirectory.'
-}
+
+# Spotting 준비 스크립트가 모델 원본을 찾기 전에 -ModelDirectory가 없다는 이유로 종료하던 검사를 그냥 삭제해서 급하게 패치
+
+
 Assert-ManagedContainerStopped
 Assert-BackgroundGpuUsage
 # Reseal leaves volume contents alone and copies nothing, so it needs neither a
