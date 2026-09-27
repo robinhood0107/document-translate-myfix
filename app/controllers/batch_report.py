@@ -223,6 +223,10 @@ class BatchReportController:
             return ""
 
         lowered = summary.lower()
+        if lowered.startswith("review_required:"):
+            # Keep the block IDs and review cause visible in the existing
+            # skipped-page report instead of reducing this to a generic error.
+            return summary.split(":", 1)[1].strip()
         if "out of bounds" in lowered and "index" in lowered:
             return QtCore.QCoreApplication.translate(
                 "BatchReportController",
@@ -339,6 +343,7 @@ class BatchReportController:
         action = self._localize_batch_skip_action(skip_reason, error)
         reason_map = {
             "Text Blocks": self._tr("No text blocks detected"),
+            "ocr": self._tr("Text recognition failed"),
             "OCR": self._tr("Text recognition failed"),
             "inpaint": QtCore.QCoreApplication.translate(
                 "BatchReportController",
@@ -349,6 +354,7 @@ class BatchReportController:
                 "Inpainting failed",
             ),
             "Translator": self._tr("Translation failed"),
+            "translation": self._tr("Translation failed"),
             "OCR Chunk Failed": self._tr("Webtoon text recognition chunk failed"),
             "Translation": self._tr("Webtoon translation chunk failed"),
             "Translation Chunk Failed": self._tr(

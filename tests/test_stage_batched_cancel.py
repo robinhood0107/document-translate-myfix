@@ -1097,6 +1097,127 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor.cache_manager._can_serve_all_blocks_from_ocr_cache.assert_not_called()
         processor.cache_manager._cache_ocr_results.assert_not_called()
 
+    def test_truncated_ocr_block_stays_review_and_keeps_its_id(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.lang_mapping = {"Japanese": "Japanese"}
+        processor.main_page.settings_page = SimpleNamespace(
+            is_gpu_enabled=lambda: False,
+            get_ocr_result_dictionary_rules=lambda: [],
+        )
+        processor.cache_manager = mock.Mock()
+        processor._paddleocr_cache_store = None
+        processor._paddleocr_cache_identity = None
+        block = TextBlock(
+            text_bbox=np.array([10, 10, 100, 100], dtype=np.int32),
+            text_class="text_bubble",
+            source_lang="ja",
+            block_id="required-block-ocr-1",
+        )
+        engine = PaddleOCRVLEngine()
+
+        def return_truncated_empty(_image, blocks) -> None:
+            blocks[0].ocr_status = "empty_after_retry"
+            blocks[0].ocr_empty_reason = PaddleOCRVLEngine.TRUNCATED_OCR_REASON
+            blocks[0].ocr_reject_reason = "ocr_response_truncated"
+
+        engine.process_image = mock.Mock(side_effect=return_truncated_empty)
+        engine.last_page_profile = {"page_status": "ok"}
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((120, 120, 3), dtype=np.uint8),
+            blk_list=[block],
+        )
+
+        with mock.patch.object(OCRFactory, "create_engine", return_value=engine):
+            result = processor._run_primary_ocr(
+                page,
+                {
+                    "primary_ocr_engine": "PaddleOCR VL",
+                    "normalized_ocr_mode": "best_local",
+                },
+            )
+
+        self.assertEqual(block.processing_action, "review")
+        self.assertEqual(
+            result["block_failures"],
+            [
+                {
+                    "block_id": "required-block-ocr-1",
+                    "stage": "ocr",
+                    "cause": "ocr_truncated",
+                    "reason": "ocr_response_truncated",
+                    "review_required": True,
+                }
+            ],
+        )
+        self.assertEqual(page.block_failure_ledger, result["block_failures"])
+        self.assertEqual(result["metrics"]["ocr_truncated_block_count"], 1)
+
+    def test_ocr_block_failure_marks_page_failed_before_later_stages(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {"persistent_cache_enabled": False},
+            is_gpu_enabled=lambda: False,
+            get_tool_selection=lambda _tool: "PaddleOCR VL",
+        )
+        processor._await_ocr_runtime = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._raise_if_cancelled = mock.Mock()
+        processor._ensure_source_image = mock.Mock(return_value=np.zeros((20, 20, 3)))
+        processor._release_source_image = mock.Mock()
+        processor._log_ocr_quality = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        failure = {
+            "block_id": "required-block-ocr-2",
+            "stage": "ocr",
+            "cause": "ocr_truncated",
+            "reason": "ocr_response_truncated",
+            "review_required": True,
+        }
+        processor._run_primary_ocr = mock.Mock(
+            return_value={
+                "quality": {"non_empty": 0, "low_quality": False},
+                "metrics": {"ocr_truncated_block_count": 1},
+                "block_failures": [failure],
+                "attempt_count": 1,
+                "cache_status": "disabled",
+                "engine_name": "PaddleOCRVLEngine",
+                "page_profile": {},
+            }
+        )
+        processor._mark_page_failed = mock.Mock(
+            side_effect=lambda page, **kwargs: (
+                setattr(page, "failed_stage", kwargs["stage"]),
+                setattr(page, "failed_reason", kwargs["reason"]),
+            )
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[TextBlock(text_bbox=np.array([1, 1, 10, 10]))],
+        )
+
+        processor._ocr_all(
+            [page],
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+        )
+
+        self.assertEqual(page.failed_stage, "ocr")
+        self.assertIn("block_id=required-block-ocr-2", page.failed_reason)
+        self.assertIn("page will not be translated or inpainted", page.failed_reason)
+        processor._run_primary_ocr.assert_called_once()
+        processor._mark_page_failed.assert_called_once()
+
     def test_paddle_cache_plan_failure_is_page_scoped(self) -> None:
         processor = self._processor(cancelled=False)
         processor.main_page.lang_mapping = {"Japanese": "Japanese"}

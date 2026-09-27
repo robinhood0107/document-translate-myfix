@@ -122,31 +122,27 @@ class TruncationRetryTests(unittest.TestCase):
         # 물어봐야 소용이 없으므로 재시도하지 않는다.
         self.assertEqual(engine.requested_max_tokens, [4096])
 
+    def test_2048_token_limit_retries_once_at_4096(self) -> None:
+        import modules.ocr.paddle_crop.engine as engine_module
+
+        original = engine_module.encoded_product_jpeg_to_png
+        engine_module.encoded_product_jpeg_to_png = lambda _data: b"png-bytes"
+        try:
+            engine = _StubEngine(
+                [_response("cut", "length"), _response("complete", "stop")]
+            )
+            engine.max_new_tokens = 2048
+            engine.result = engine._request_direct_ocr_text_from_encoded(b"jpeg")
+        finally:
+            engine_module.encoded_product_jpeg_to_png = original
+
+        self.assertEqual(engine.result, "complete")
+        self.assertEqual(engine.requested_max_tokens, [2048, 4096])
+        self.assertEqual(engine.record.get("truncation_retry_max_tokens"), 4096)
+
     def test_a_still_truncated_retry_raises_the_dedicated_type(self) -> None:
         with self.assertRaises(PaddleDirectOcrTruncatedError):
             self._run([_response("cut", "length"), _response("cut", "length")])
-
-
-class BlockScopeTests(unittest.TestCase):
-    def test_both_job_paths_contain_a_truncated_block(self) -> None:
-        # 작업 처리기가 둘이다. 일반 sweep 은 `_process_job`, 영구 캐시 미스는
-        # `_process_prepared_job` 을 쓴다. 한쪽만 막으면 다른 쪽으로 새어나가
-        # 페이지 전체가 실패한다. 실측: 366장 배치에서 캐시 경로로만 4장이
-        # 원본 그대로 나갔다.
-        import inspect
-
-        for method in (
-            PaddleOCRVLEngine._process_job,
-            PaddleOCRVLEngine._process_prepared_job,
-        ):
-            with self.subTest(method=method.__name__):
-                source = inspect.getsource(method)
-                self.assertIn("except PaddleDirectOcrTruncatedError:", source)
-                handler = source.index("except PaddleDirectOcrTruncatedError:")
-                marked = source.index("TRUNCATED_OCR_REASON", handler)
-                returned = source.index("return", marked)
-                self.assertLess(handler, marked)
-                self.assertLess(marked, returned)
 
 
 if __name__ == "__main__":

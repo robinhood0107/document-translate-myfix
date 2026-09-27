@@ -14,12 +14,13 @@ import numpy as np
 import requests
 
 from .base import BaseLLMTranslation
-from ...utils.textblock import TextBlock
+from ...utils.textblock import TextBlock, ensure_text_block_id
 from ...utils.translator_utils import extract_json_object
 from ...utils.exceptions import LocalServiceConnectionError
 from ...utils.debug_artifacts import append_active_raw_response
 from ...utils.repetition_guard import guard_severe_repetition
 from ...utils.text_normalization import strip_unsafe_text_control_chars
+from modules.utils.ocr_debug import OCR_STATUS_OK, OCR_STATUS_OK_AFTER_RETRY
 from ..translation_memory import (
     EXACT_TM_NORMALIZATION_VERSION,
     TRANSLATION_MEMORY_SCHEMA_VERSION,
@@ -199,6 +200,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_json_retry_count": 0,
             "gemma_chunk_retry_events": 0,
             "gemma_truncated_count": 0,
+            "gemma_boundary_split_count": 0,
+            "gemma_boundary_fragment_count": 0,
+            "gemma_boundary_split_failure_count": 0,
             "gemma_empty_content_count": 0,
             "gemma_request_retry_count": 0,
             "gemma_missing_key_count": 0,
@@ -1021,6 +1025,20 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 except GemmaLocalServerResponseError as strict_exc:
                     exc = strict_exc
 
+            if len(blk_list) == 1 and isinstance(
+                exc,
+                GemmaLocalServerTruncatedError,
+            ):
+                block = blk_list[0]
+                block_id = ensure_text_block_id(block)
+                self._attach_translation_failure_ids(exc, [block_id])
+                if self._translate_truncated_block_at_ocr_paragraphs(
+                    block,
+                    extra_context,
+                ):
+                    return 1
+                raise exc
+
             if self.contextual_merge_input:
                 self._current_benchmark_stats["gemma_contextual_merge_fallback_count"] += 1
                 logger.warning(
@@ -1038,7 +1056,11 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                     exc = fallback_exc
 
             if len(blk_list) <= 1:
-                raise
+                block = blk_list[0] if blk_list else None
+                if block is not None:
+                    block_id = ensure_text_block_id(block)
+                    self._attach_translation_failure_ids(exc, [block_id])
+                raise exc
 
             split_point = max(1, len(blk_list) // 2)
             self._current_benchmark_stats["gemma_chunk_retry_events"] += 1
@@ -1052,6 +1074,81 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             left = self._translate_chunk_with_retry(blk_list[:split_point], extra_context)
             right = self._translate_chunk_with_retry(blk_list[split_point:], extra_context)
             return left + right
+
+    @staticmethod
+    def _attach_translation_failure_ids(
+        error: GemmaLocalServerResponseError,
+        block_ids: list[str],
+        *,
+        fragment_ids: list[str] | None = None,
+    ) -> None:
+        error.block_ids = list(dict.fromkeys(str(value) for value in block_ids if value))
+        error.block_failure_kind = (
+            "translation_truncated"
+            if isinstance(error, GemmaLocalServerTruncatedError)
+            else "translation_failed"
+        )
+        if fragment_ids:
+            error.fragment_ids = list(
+                dict.fromkeys(str(value) for value in fragment_ids if value)
+            )
+
+    def _translate_truncated_block_at_ocr_paragraphs(
+        self,
+        block: TextBlock,
+        extra_context: str,
+    ) -> bool:
+        """Retry a proven long OCR block only at OCR-preserved paragraph breaks."""
+
+        if str(getattr(block, "ocr_status", "") or "") not in {
+            OCR_STATUS_OK,
+            OCR_STATUS_OK_AFTER_RETRY,
+        }:
+            return False
+        source_text = str(block.get_text() or "")
+        paragraphs = [
+            value.strip()
+            for value in re.split(r"\n[ \t]*\n+", source_text.strip())
+            if value.strip()
+        ]
+        if len(paragraphs) < 2:
+            return False
+
+        original_block_id = ensure_text_block_id(block)
+        translated_paragraphs: list[str] = []
+        for index, paragraph in enumerate(paragraphs, start=1):
+            fragment = block.deep_copy()
+            fragment.block_id = f"{original_block_id}:gemma-fragment:{index}"
+            fragment.text = paragraph
+            fragment.texts = []
+            fragment.translation = ""
+            fragment.rich_text = ""
+            self._current_benchmark_stats[
+                "gemma_boundary_fragment_count"
+            ] += 1
+            try:
+                self._translate_chunk_with_retry([fragment], extra_context)
+                translated = str(fragment.translation or "").strip()
+                if not translated:
+                    raise GemmaLocalServerResponseError(
+                        "Gemma returned an empty translation for an OCR-confirmed paragraph.",
+                        strict_retryable=False,
+                    )
+            except GemmaLocalServerResponseError as fragment_error:
+                self._current_benchmark_stats[
+                    "gemma_boundary_split_failure_count"
+                ] += 1
+                self._attach_translation_failure_ids(
+                    fragment_error,
+                    [original_block_id],
+                    fragment_ids=[fragment.block_id],
+                )
+                raise
+            translated_paragraphs.append(translated)
+
+        block.translation = "\n\n".join(translated_paragraphs)
+        self._current_benchmark_stats["gemma_boundary_split_count"] += 1
+        return True
 
     def _create_request_context(self, blk_list: list[TextBlock]) -> GemmaRequestContext:
         expected_keys = tuple(self._expected_block_keys(blk_list))

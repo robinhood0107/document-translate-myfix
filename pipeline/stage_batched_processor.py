@@ -64,6 +64,9 @@ from modules.ocr.persistent_cache import (
     snapshot_raw_ocr_result,
 )
 from modules.ocr.common.result_contract import (
+    PROCESSING_ACTION_REVIEW,
+    SEMANTIC_ROLE_AMBIGUOUS,
+    assign_ocr_processing_contract,
     canonicalize_exact_duplicate_blocks,
     finalize_ocr_processing_contracts,
     select_translate_inpaint_blocks,
@@ -124,9 +127,11 @@ from modules.utils.inpaint_composite import (
 from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, language_codes
 from modules.utils.ocr_debug import (
+    OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
     all_empty_blocks_are_rejected,
     drop_embedded_ui_ocr_blocks,
     drop_rejected_empty_ocr_blocks,
+    is_block_ocr_empty,
     split_inpaint_protected_ocr_blocks,
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
@@ -196,6 +201,7 @@ class StagePageContext:
     project_render_fingerprint: str = ""
     project_render_checkpoint_status: str = "disabled"
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
+    block_failure_ledger: list[dict[str, Any]] = field(default_factory=list)
     ocr_canonicalization_summary: dict[str, Any] = field(
         default_factory=dict
     )
@@ -2197,6 +2203,12 @@ class StageBatchedProcessor(BatchProcessor):
             project_checkpoint_hit is None
             and engine_key != "PaddleOCR VL Spotting"
             and quality.get("low_quality", False)
+            and not any(
+                is_block_ocr_empty(block)
+                and str(getattr(block, "ocr_empty_reason", "") or "")
+                == PaddleOCRVLEngine.TRUNCATED_OCR_REASON
+                for block in ctx.blk_list
+            )
             and not all_empty_blocks_are_rejected(ctx.blk_list)
         ):
             attempt_count += 1
@@ -2247,16 +2259,62 @@ class StageBatchedProcessor(BatchProcessor):
         if records and self._paddleocr_cache_store is not None:
             self._paddleocr_cache_store.store_records(records)
 
-        ctx.blk_list, rejected_empty_blocks = drop_rejected_empty_ocr_blocks(ctx.blk_list)
+        all_ocr_blocks = list(ctx.blk_list)
+        _kept_empty_blocks, rejected_empty_blocks = (
+            drop_rejected_empty_ocr_blocks(all_ocr_blocks)
+        )
+        # Keep every detected ID in the stage ledger. REVIEW blocks stay visible
+        # and protected; they must not disappear before Batch Report accounting.
+        ctx.blk_list = all_ocr_blocks
+        block_failures: list[dict[str, Any]] = []
+        for block in ctx.blk_list:
+            if not is_block_ocr_empty(block):
+                continue
+            empty_reason = str(
+                getattr(block, "ocr_empty_reason", "") or ""
+            )
+            if empty_reason == OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE:
+                continue
+            block_id = ensure_text_block_id(block)
+            cause = (
+                "ocr_truncated"
+                if empty_reason == PaddleOCRVLEngine.TRUNCATED_OCR_REASON
+                else "ocr_empty"
+            )
+            assign_ocr_processing_contract(
+                block,
+                semantic_role=(
+                    str(getattr(block, "semantic_role", "") or "")
+                    or SEMANTIC_ROLE_AMBIGUOUS
+                ),
+                processing_action=PROCESSING_ACTION_REVIEW,
+                decision_source="ocr_failure",
+                reasons=(cause, empty_reason or "ocr_result_empty"),
+            )
+            block_failures.append(
+                {
+                    "block_id": block_id,
+                    "stage": "ocr",
+                    "cause": cause,
+                    "reason": empty_reason or "ocr_result_empty",
+                    "review_required": True,
+                }
+            )
+        if block_failures:
+            ctx.block_failure_ledger.extend(block_failures)
+            page_profile = dict(page_profile or {})
+            page_profile["block_failures"] = list(block_failures)
         if rejected_empty_blocks:
             logger.info(
-                "Dropped %d rejected empty OCR block(s) before stage-batched inpaint for %s.",
+                "Retained %d rejected-empty OCR block(s) as REVIEW for %s.",
                 len(rejected_empty_blocks),
                 ctx.image_name,
             )
-            quality = summarize_ocr_quality(ctx.blk_list)
             page_profile = dict(page_profile or {})
-            page_profile["rejected_empty_dropped_block_count"] = len(rejected_empty_blocks)
+            page_profile["ocr_review_block_count"] = len(
+                rejected_empty_blocks
+            )
+        quality = summarize_ocr_quality(ctx.blk_list)
 
         source_shape = ctx.source_image_shape or (
             tuple(int(value) for value in ctx.image.shape)
@@ -2279,7 +2337,6 @@ class StageBatchedProcessor(BatchProcessor):
 
         routed_blocks = [
             *ctx.blk_list,
-            *rejected_empty_blocks,
             *embedded_ui_blocks,
         ]
         ctx.ocr_processing_summary = finalize_ocr_processing_contracts(
@@ -2306,6 +2363,14 @@ class StageBatchedProcessor(BatchProcessor):
             }
 
         metrics = self._ocr_quality_metrics(quality)
+        metrics["ocr_truncated_block_count"] = sum(
+            failure["cause"] == "ocr_truncated"
+            for failure in block_failures
+        )
+        metrics["ocr_empty_block_count"] = sum(
+            failure["cause"] == "ocr_empty"
+            for failure in block_failures
+        )
         retained_ids = {
             str(getattr(block, "block_id", "") or "")
             for block in ctx.blk_list
@@ -2323,6 +2388,7 @@ class StageBatchedProcessor(BatchProcessor):
             "page_profile": page_profile,
             "engine_name": engine_name,
             "raw_results": raw_results,
+            "block_failures": block_failures,
         }
 
     def _prepare_project_ocr_hits(
@@ -2625,6 +2691,47 @@ class StageBatchedProcessor(BatchProcessor):
                 self._raise_if_cancelled()
                 quality = result["quality"]
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
+                ctx.page_ocr_metrics = dict(result["metrics"] or {})
+                block_failures = list(result.get("block_failures") or [])
+                if block_failures:
+                    failure_detail = "; ".join(
+                        f"block_id={item['block_id']} cause={item['cause']}"
+                        for item in block_failures[:2]
+                    )
+                    if len(block_failures) > 2:
+                        failure_detail += (
+                            f"; +{len(block_failures) - 2} more block(s)"
+                        )
+                    reason = (
+                        "review_required: OCR returned no complete text for "
+                        f"{len(block_failures)} block(s); {failure_detail}; "
+                        "page will not be translated or inpainted."
+                    )
+                    self._mark_page_failed(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        stage="ocr",
+                        reason=reason,
+                        extra=dict(ctx.page_ocr_metrics or {}),
+                    )
+                    self._emit_benchmark_event(
+                        "ocr_end",
+                        image_path=ctx.image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        block_count=len(ctx.blk_list or []),
+                        ocr_model=str(policy["primary_ocr_engine"]),
+                        ocr_engine=result["engine_name"],
+                        cache_status=result["cache_status"],
+                        attempt_count=int(result["attempt_count"]),
+                        project_checkpoint_status=(
+                            ctx.project_ocr_checkpoint_status
+                        ),
+                        block_failures=block_failures,
+                        **ctx.page_ocr_metrics,
+                    )
+                    continue
                 if not ctx.blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
                     ctx.blk_list = []
                     self._record_project_ocr_result(ctx, result)
@@ -4248,12 +4355,62 @@ class StageBatchedProcessor(BatchProcessor):
             except OperationCancelledError:
                 raise
             except Exception as exc:
+                failure_kind = str(
+                    getattr(exc, "block_failure_kind", "") or ""
+                )
+                failure_block_ids = list(
+                    dict.fromkeys(
+                        str(value)
+                        for value in list(getattr(exc, "block_ids", []) or [])
+                        if str(value)
+                    )
+                )
+                if failure_block_ids:
+                    fragment_ids = [
+                        str(value)
+                        for value in list(getattr(exc, "fragment_ids", []) or [])
+                        if str(value)
+                    ]
+                    failure_kind = failure_kind or "translation_failed"
+                    ctx.block_failure_ledger.extend(
+                        {
+                            "block_id": block_id,
+                            "stage": "translation",
+                            "cause": failure_kind,
+                            "reason": str(exc),
+                            "fragment_ids": list(fragment_ids),
+                            "review_required": True,
+                        }
+                        for block_id in failure_block_ids
+                    )
+                    ctx.page_translation_metrics = (
+                        self._translation_benchmark_metrics(translator)
+                    )
+                    if failure_kind == "translation_truncated":
+                        ctx.page_translation_metrics[
+                            "gemma_translation_truncated_block_count"
+                        ] = len(failure_block_ids)
+                    id_detail = ", ".join(
+                        f"block_id={block_id} cause={failure_kind}"
+                        for block_id in failure_block_ids
+                    )
+                    if fragment_ids:
+                        id_detail += (
+                            "; unresolved_fragment_ids="
+                            + ",".join(fragment_ids)
+                        )
+                    reason = (
+                        f"review_required: {failure_kind}; {id_detail}; "
+                        "translation incomplete; page will not be inpainted."
+                    )
+                else:
+                    reason = str(exc)
                 self._mark_page_failed(
                     ctx,
                     index=index,
                     total_images=total_images,
                     stage="translation",
-                    reason=str(exc),
+                    reason=reason,
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
             finally:
@@ -5211,6 +5368,9 @@ class StageBatchedProcessor(BatchProcessor):
                 "failed_reason": ctx.failed_reason,
                 "no_text_detected": bool(ctx.no_text_detected),
                 "block_count": len(ctx.blk_list or []),
+                "block_failure_ledger": [
+                    dict(item) for item in ctx.block_failure_ledger
+                ],
             }
             for ctx in pages
         ]
