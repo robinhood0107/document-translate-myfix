@@ -17,6 +17,10 @@ from app.projects.stage_checkpoints import (
     TranslationCheckpointResult,
     decoded_image_sha256,
 )
+from modules.ocr.common.result_contract import (
+    PROCESSING_ACTION_REVIEW,
+    select_translate_inpaint_blocks,
+)
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
@@ -1149,6 +1153,8 @@ class StageBatchedCancellationTests(unittest.TestCase):
                     "stage": "ocr",
                     "cause": "ocr_truncated",
                     "reason": "ocr_response_truncated",
+                    "block_class": "text_bubble",
+                    "page_blocking": True,
                     "review_required": True,
                 }
             ],
@@ -1217,6 +1223,89 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertIn("page will not be translated or inpainted", page.failed_reason)
         processor._run_primary_ocr.assert_called_once()
         processor._mark_page_failed.assert_called_once()
+
+    def test_text_free_nontext_review_is_reported_and_other_bubble_can_continue(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.lang_mapping = {"Japanese": "Japanese"}
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {"persistent_cache_enabled": False},
+            is_gpu_enabled=lambda: False,
+            get_tool_selection=lambda _tool: "PaddleOCR VL",
+            get_ocr_result_dictionary_rules=lambda: [],
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+            update_processing_summary=mock.Mock(),
+        )
+        processor.main_page.image_skipped = SimpleNamespace(emit=mock.Mock())
+        processor._await_ocr_runtime = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._raise_if_cancelled = mock.Mock()
+        processor._ensure_source_image = mock.Mock(return_value=np.zeros((120, 120, 3)))
+        processor._release_source_image = mock.Mock()
+        processor._log_ocr_quality = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._record_project_ocr_result = mock.Mock()
+        processor._persist_ocr_state = mock.Mock()
+        processor._mark_page_failed = mock.Mock()
+        processor._get_paddleocr_cache_store = mock.Mock(return_value=None)
+        processor._paddleocr_cache_store = None
+        processor._paddleocr_cache_identity = None
+        bubble = TextBlock(
+            text_bbox=np.array([10, 10, 80, 80]),
+            text_class="text_bubble",
+            source_lang="ja",
+            block_id="bubble-ocr-1",
+        )
+        watermark = TextBlock(
+            text_bbox=np.array([85, 90, 110, 110]),
+            text_class="text_free",
+            source_lang="en",
+            block_id="watermark-review-1",
+        )
+        engine = PaddleOCRVLEngine()
+
+        def return_mixed_ocr(_image, blocks) -> None:
+            blocks[0].text = "Hello."
+            blocks[0].ocr_status = "ok"
+            blocks[0].ocr_empty_reason = ""
+            blocks[1].text = ""
+            blocks[1].ocr_status = "empty_initial"
+            blocks[1].ocr_empty_reason = engine.NON_TEXT_RESPONSE_REASON
+            blocks[1].ocr_reject_reason = "no_visual_text_evidence"
+
+        engine.process_image = mock.Mock(side_effect=return_mixed_ocr)
+        engine.last_page_profile = {"page_status": "ok"}
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((120, 120, 3), dtype=np.uint8),
+            blk_list=[bubble, watermark],
+        )
+
+        with mock.patch.object(OCRFactory, "create_engine", return_value=engine):
+            processor._ocr_all(
+                [page],
+                {
+                    "primary_ocr_engine": "PaddleOCR VL",
+                    "normalized_ocr_mode": "best_local",
+                },
+            )
+
+        processor._mark_page_failed.assert_not_called()
+        self.assertEqual(page.failed_stage, "")
+        processor.main_page.image_skipped.emit.assert_called_once()
+        emitted_reason = processor.main_page.image_skipped.emit.call_args.args[2]
+        self.assertIn("block_id=watermark-review-1", emitted_reason)
+        self.assertIn("kept unchanged", emitted_reason)
+        self.assertEqual(len(page.block_failure_ledger), 1)
+        self.assertFalse(page.block_failure_ledger[0]["page_blocking"])
+        routed = select_translate_inpaint_blocks(page.blk_list)
+        self.assertEqual(routed, [bubble])
+        self.assertEqual(watermark.processing_action, PROCESSING_ACTION_REVIEW)
 
     def test_paddle_cache_plan_failure_is_page_scoped(self) -> None:
         processor = self._processor(cancelled=False)
