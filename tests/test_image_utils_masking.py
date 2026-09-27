@@ -474,6 +474,139 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertEqual(details["mask_policy_bubble_silhouette_applied_count"], 1)
         self.assertEqual(details["mask_policy_bubble_silhouette_fallback_count"], 0)
 
+    def test_verified_bubble_cap_reduces_dilation_but_fallback_keeps_current_width(self) -> None:
+        image = np.zeros((80, 100, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([30, 34, 70, 46]),
+            bubble_bbox=np.array([10, 10, 90, 70]),
+            text_class="text_bubble",
+        )
+        base_mask = np.zeros((80, 100), dtype=np.uint8)
+        base_mask[36:44, 34:66] = 255
+        empty_mask = np.zeros_like(base_mask)
+        legacy_details = {
+            "legacy_base_mask": empty_mask.copy(),
+            "hard_box_rescue_mask": empty_mask.copy(),
+            "hard_box_applied_count": 0,
+            "hard_box_reason_totals": {},
+            "legacy_base_mask_pixel_count": 0,
+            "hard_box_rescue_mask_pixel_count": 0,
+        }
+        cap_crop = np.full((60, 80), 255, dtype=np.uint8)
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=empty_mask.copy(),
+            ),
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ),
+            mock.patch(
+                "modules.utils.image_utils.extract_bubble_interior_cap_crop",
+                return_value=cap_crop,
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            capped = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 8,
+                },
+                return_details=True,
+            )
+
+        radius_four = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (9, 9),
+            (4, 4),
+        )
+        expected_capped = cv2.dilate(base_mask, radius_four, iterations=1)
+        expected_capped = np.where(
+            (expected_capped > 0) & (capped["bubble_interior_cap_mask"] > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        self.assertTrue(np.array_equal(capped["final_mask"], expected_capped))
+        self.assertEqual(
+            capped["mask_policy_verified_bubble_dilate_reduction_applied_count"],
+            1,
+        )
+        self.assertGreater(
+            capped["mask_policy_verified_bubble_dilate_reduced_pixel_count"],
+            0,
+        )
+        self.assertEqual(
+            int(np.count_nonzero((capped["final_mask"] > 0) & (capped["bubble_interior_cap_mask"] == 0))),
+            0,
+        )
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=empty_mask.copy(),
+            ),
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ),
+            mock.patch(
+                "modules.utils.image_utils.extract_bubble_interior_cap_crop",
+                return_value=None,
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            fallback = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 8,
+                },
+                return_details=True,
+            )
+
+        radius_eight = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (17, 17),
+            (8, 8),
+        )
+        expected_fallback = cv2.dilate(base_mask, radius_eight, iterations=1)
+        x1, y1, x2, y2 = block.bubble_xyxy
+        window = np.zeros_like(base_mask)
+        window[y1:y2, x1:x2] = 255
+        expected_fallback = np.where(
+            (expected_fallback > 0) & (window > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        self.assertTrue(np.array_equal(fallback["final_mask"], expected_fallback))
+        self.assertEqual(
+            fallback["mask_policy_verified_bubble_dilate_reduction_applied_count"],
+            0,
+        )
+        self.assertEqual(fallback["mask_policy_bubble_silhouette_fallback_count"], 1)
+
     def test_overlapping_bubble_cap_is_not_marked_as_a_protected_corner(self) -> None:
         image = np.zeros((20, 20, 3), dtype=np.uint8)
         first = TextBlock(

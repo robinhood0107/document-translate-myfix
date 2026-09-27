@@ -25,7 +25,7 @@ from modules.utils.mask_inpaint_mode import (
 )
 from modules.utils.mask_roi import resolve_block_ctd_roi, resolve_inpaint_text_xyxy
 
-MASK_POLICY_VERSION = "ctd_lama_mask_policy_v3"
+MASK_POLICY_VERSION = "ctd_lama_mask_policy_v4"
 MASK_DECISION_ACCEPTED = "accepted"
 MASK_DECISION_REVIEW = "review"
 MASK_CANDIDATE_SOURCE_CTD_REFINED = "ctd_refined"
@@ -34,6 +34,8 @@ MASK_CANDIDATE_SOURCE_TEXT_FREE_GLYPH_THIN = "text_free_glyph_thin"
 MASK_CANDIDATE_SOURCE_NONE = "none"
 MASK_REJECT_LEGACY_WINDOW_ONLY_NO_CTD_MASK = "legacy_bbox_window_only_no_ctd_mask"
 MASK_REJECT_RENDER_WITHOUT_ERASE_MASK = "render_without_erase_mask"
+BUBBLE_VERIFIED_INTERIOR_FINAL_DILATE_SIZE = 4
+BUBBLE_VERIFIED_INTERIOR_FINAL_DILATE_SIZE = 4
 
 
 def rgba2hex(rgba_list):
@@ -693,6 +695,66 @@ def generate_mask(
         details["mask_policy_bubble_silhouette_fallback_count"] = int(
             bubble_silhouette_fallback_count
         )
+        details["mask_policy_verified_bubble_dilate_reduction_applied_count"] = 0
+        details["mask_policy_verified_bubble_dilate_reduced_pixel_count"] = 0
+        if (
+            bubble_silhouette_applied_count > 0
+            and final_dilate_size > BUBBLE_VERIFIED_INTERIOR_FINAL_DILATE_SIZE
+            and np.any(bubble_cap_mask)
+        ):
+            pre_expand_mask = details.get("final_mask_pre_expand")
+            if (
+                isinstance(pre_expand_mask, np.ndarray)
+                and pre_expand_mask.shape[:2] == img.shape[:2]
+            ):
+                reduced_mask, _text_free_glyph_count = (
+                    _dilate_ctd_final_mask_by_block_policy(
+                        pre_expand_mask,
+                        img.shape,
+                        blk_list,
+                        final_dilate_size=(
+                            BUBBLE_VERIFIED_INTERIOR_FINAL_DILATE_SIZE
+                        ),
+                        text_free_dilate_size=int(
+                            cfg.get("text_free_final_mask_dilate_size", 1) or 1
+                        ),
+                    )
+                )
+                current_mask = np.where(
+                    np.asarray(details.get("final_mask")) > 0,
+                    255,
+                    0,
+                ).astype(np.uint8)
+                verified_cap = np.asarray(bubble_cap_mask) > 0
+                reduced_inside_cap = (
+                    (current_mask > 0)
+                    & (np.asarray(reduced_mask) > 0)
+                    & verified_cap
+                )
+                removed_by_narrower_dilation = int(
+                    np.count_nonzero(
+                        (current_mask > 0)
+                        & verified_cap
+                        & ~reduced_inside_cap
+                    )
+                )
+                if removed_by_narrower_dilation:
+                    current_mask[verified_cap] = np.where(
+                        reduced_inside_cap[verified_cap],
+                        255,
+                        0,
+                    ).astype(np.uint8)
+                    details["final_mask_post_expand"] = current_mask.copy()
+                    details["final_mask"] = current_mask
+                    details["final_mask_pixel_count"] = int(
+                        np.count_nonzero(current_mask)
+                    )
+                    details[
+                        "mask_policy_verified_bubble_dilate_reduction_applied_count"
+                    ] = int(bubble_silhouette_applied_count)
+                    details[
+                        "mask_policy_verified_bubble_dilate_reduced_pixel_count"
+                    ] = removed_by_narrower_dilation
     details["final_mask_dilate_size"] = final_dilate_size
     annotate_block_mask_attribution(
         blk_list,
