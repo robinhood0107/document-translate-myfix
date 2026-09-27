@@ -144,7 +144,7 @@ full hash verification, custom volumes, or optional runtime maintenance.
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
-The launcher prepares this exact model automatically. For manual preparation:
+The setup BAT prepares this exact model automatically. For manual preparation:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `

@@ -4,7 +4,7 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
-현재 포크의 제품 릴리스 버전은 `1.5.1`입니다. upstream `2.7.1`은
+현재 포크의 제품 릴리스 버전은 `1.6.0`입니다. upstream `2.7.1`은
 마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
 같은 의미로 사용하지 않습니다.
 
@@ -250,7 +250,7 @@ MangaLMM/Spotting을 full 없이 선택하면 페이지 1 전에 `setup_full*.ba
 
 ### 2. 로컬 번역 서버 사용
 
-앱 기본값인 `Custom Local Server(Gemma)`는 런처가 준비한 read-only volume의
+앱 기본값인 `Custom Local Server(Gemma)`는 setup BAT이 준비한 read-only volume의
 `gemma-4-26B-IQ4_NL.gguf`를 사용합니다. 전체 SHA-256을 수동으로 다시 검사할
 때만 `scripts/prepare_gemma_runtime.ps1 -Mode Verify`를 사용합니다.
 
@@ -258,7 +258,7 @@ MangaLMM/Spotting을 full 없이 선택하면 페이지 1 전에 `setup_full*.ba
 
 ### 3. 로컬 OCR 서버 사용
 
-권장 `Optimal (HunyuanOCR / PaddleOCR VL)` 경로의 두 runtime도 런처가
+권장 `Optimal (HunyuanOCR / PaddleOCR VL)` 경로의 두 runtime도 setup BAT이
 자동 준비합니다. 상세 계약은 [HunyuanOCR 문서](docs/hunyuan/local-server-ko.md)와
 [PaddleOCR VL 문서](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
 
