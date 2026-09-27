@@ -64,7 +64,7 @@ OCR_POSTPROCESS_SCHEMA_VERSION = (
 )
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
 INPAINT_INPUT_SCHEMA_VERSION = (
-    "semantic-action-mask-deterministic-ordered-input-brush-v5"
+    "semantic-action-mask-deterministic-ordered-input-brush-v6"
 )
 INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v3"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"

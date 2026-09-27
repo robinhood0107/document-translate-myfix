@@ -652,7 +652,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         )
         self.assertEqual(
             translate_identity["input_schema"],
-            "semantic-action-mask-deterministic-ordered-input-brush-v5",
+            "semantic-action-mask-deterministic-ordered-input-brush-v6",
         )
         self.assertEqual(
             translate_identity["cleanup_schema"],
