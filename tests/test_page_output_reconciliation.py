@@ -13,6 +13,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.projects.stage_checkpoints import decoded_image_sha256  # noqa: E402
 from pipeline.stage_batched_processor import (  # noqa: E402
     StageBatchedProcessor,
     StagePageContext,
@@ -26,8 +27,13 @@ def _page(name: str, *, failed: str = "", with_image: bool = True) -> StagePageC
         source_lang="Japanese",
         target_lang="Korean",
     )
+    source_image = np.zeros((8, 8, 3), dtype=np.uint8)
+    ctx.source_decoded_sha256 = decoded_image_sha256(source_image)
+    ctx.source_image_shape = tuple(source_image.shape)
+    ctx.source_image_nbytes = int(source_image.nbytes)
+    ctx.source_pixel_count = int(source_image.shape[0] * source_image.shape[1])
     if with_image:
-        ctx.image = np.zeros((8, 8, 3), dtype=np.uint8)
+        ctx.image = source_image
     if failed:
         ctx.failed_stage = failed
         ctx.failed_reason = f"{failed} blew up"

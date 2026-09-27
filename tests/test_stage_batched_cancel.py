@@ -15,6 +15,7 @@ from app.projects.stage_checkpoints import (
     InpaintCheckpointResult,
     RenderCheckpointResult,
     TranslationCheckpointResult,
+    decoded_image_sha256,
 )
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
@@ -464,6 +465,8 @@ class StageBatchedCancellationTests(unittest.TestCase):
                 "normalized_ocr_mode": "best_local",
             },
             identity,
+            index_offset=0,
+            total_images=1,
         )
         processor._await_ocr_runtime.assert_not_called()
         processor._run_primary_ocr.assert_called_once()
@@ -556,6 +559,130 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._prepare_paddleocr_cache_plans.assert_not_called()
         processor._await_ocr_runtime.assert_not_called()
         processor._run_primary_ocr.assert_called_once()
+
+    def test_paddle_cache_plan_is_prepared_and_released_one_page_at_a_time(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            },
+            is_gpu_enabled=lambda: False,
+            get_tool_selection=lambda _tool: "PaddleOCR VL",
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+            load_image=lambda _path: np.zeros(
+                (12, 16, 3),
+                dtype=np.uint8,
+            ),
+        )
+        processor._project_checkpoint_store = None
+        processor._paddleocr_cache_identity = None
+        processor._paddleocr_cache_store = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        processor._prepare_project_ocr_hits = mock.Mock()
+        processor._await_ocr_runtime = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._log_ocr_quality = mock.Mock()
+        processor._persist_ocr_state = mock.Mock()
+        processor._record_project_ocr_result = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._raise_if_cancelled = mock.Mock()
+        processor._record_performance_workload = mock.Mock()
+        processor._run_primary_ocr = mock.Mock(
+            return_value={
+                "quality": {"non_empty": 1, "low_quality": False},
+                "metrics": {"ocr_non_empty_block_count": 1},
+                "cache_status": "hit",
+                "attempt_count": 1,
+                "page_profile": {},
+                "engine_name": "PaddleOCRVLEngine",
+            }
+        )
+        source_image = np.zeros((12, 16, 3), dtype=np.uint8)
+        source_sha = decoded_image_sha256(source_image)
+        page_count = 32
+        pages = [
+            StagePageContext(
+                image_path=f"page-{index}.png",
+                image_name=f"page-{index}.png",
+                source_lang="Japanese",
+                target_lang="Korean",
+                source_decoded_sha256=source_sha,
+                source_image_shape=tuple(source_image.shape),
+                source_image_nbytes=int(source_image.nbytes),
+                source_pixel_count=12 * 16,
+                blk_list=[SimpleNamespace(source_lang="")],
+            )
+            for index in range(page_count)
+        ]
+        identity = {"runtime_fingerprint": "runtime"}
+        planned: list[str] = []
+        peak_prepared_bytes = 0
+
+        def prepare(current_pages, _policy, _identity, **_kwargs):
+            nonlocal peak_prepared_bytes
+            self.assertEqual(len(current_pages), 1)
+            ctx = current_pages[0]
+            resident_pages = [page for page in pages if page.image is not None]
+            self.assertEqual(resident_pages, [ctx])
+            for previous in pages[: len(planned)]:
+                self.assertIsNone(previous.image)
+                self.assertIsNone(previous.paddleocr_cache_plan)
+            self.assertIsNotNone(ctx.image)
+            planned.append(ctx.image_name)
+            ctx.paddleocr_cache_plan = SimpleNamespace(
+                jobs=[
+                    {
+                        "prepared_crop": np.zeros((4, 4, 3), dtype=np.uint8),
+                        "prepared_image_bytes": b"x" * 64,
+                    }
+                ]
+            )
+            peak_prepared_bytes = max(
+                peak_prepared_bytes,
+                sum(
+                    sum(processor._paddleocr_prepared_cache_bytes(page.paddleocr_cache_plan))
+                    for page in pages
+                ),
+            )
+            return False
+
+        processor._prepare_paddleocr_cache_plans = mock.Mock(
+            side_effect=prepare
+        )
+        policy = {
+            "primary_ocr_engine": "PaddleOCR VL",
+            "normalized_ocr_mode": "best_local",
+        }
+        with mock.patch.object(
+            runtime_manager,
+            "get_ocr_cache_identity",
+            return_value=identity,
+        ):
+            processor._ocr_all(pages, policy)
+
+        self.assertEqual(
+            planned,
+            [f"page-{index}.png" for index in range(page_count)],
+        )
+        self.assertEqual(peak_prepared_bytes, 4 * 4 * 3 + 64)
+        self.assertTrue(all(page.image is None for page in pages))
+        self.assertTrue(
+            all(page.paddleocr_cache_plan is None for page in pages)
+        )
+        processor._run_primary_ocr.assert_has_calls(
+            [mock.call(page, policy) for page in pages]
+        )
 
     def test_disabled_persistent_caches_skip_runtime_identity_probe(self) -> None:
         processor = self._processor(cancelled=False)
@@ -703,7 +830,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
         processor._persist_detect_state.assert_called_once()
 
-    def test_disabled_project_checkpoint_skips_full_image_hash(self) -> None:
+    def test_disabled_project_checkpoint_keeps_source_hash_for_reloads(self) -> None:
         processor = self._processor(cancelled=False)
         detector = SimpleNamespace(
             detect=mock.Mock(
@@ -760,17 +887,23 @@ class StageBatchedCancellationTests(unittest.TestCase):
             target_lang="Korean",
         )
 
+        source_image = processor.main_page.image_ctrl.load_image.return_value
         with mock.patch(
             "pipeline.stage_batched_processor.decoded_image_sha256",
+            return_value="source-sha",
         ) as decoded_hash, mock.patch(
             "pipeline.stage_batched_processor.build_detection_identity",
         ) as build_identity:
             processor._detect_all([page])
 
-        decoded_hash.assert_not_called()
+        decoded_hash.assert_called_once_with(source_image)
         build_identity.assert_not_called()
         detector.detect.assert_called_once()
         self.assertEqual(page.detection_checkpoint_status, "disabled")
+        self.assertEqual(page.source_decoded_sha256, "source-sha")
+        self.assertEqual(page.source_image_shape, (20, 20, 3))
+        self.assertEqual(page.source_image_nbytes, source_image.nbytes)
+        self.assertIsNone(page.image)
 
     def test_paddle_cache_hit_applies_current_dictionary_once(self) -> None:
         processor = self._processor(cancelled=False)
@@ -2007,6 +2140,97 @@ class StageBatchedCancellationTests(unittest.TestCase):
             page.project_translation_checkpoint_status,
             "hit",
         )
+
+    def test_text_only_gemma_does_not_reload_source_rgb_for_translation(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.settings_page = SimpleNamespace(
+            get_llm_settings=lambda: {"extra_context": ""},
+            get_tool_selection=lambda _tool: "Custom Local Server(Gemma)",
+            get_translation_result_dictionary_rules=lambda: [],
+        )
+        source_loader = mock.Mock(
+            side_effect=AssertionError("text-only Gemma must not reload RGB")
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+            load_image=source_loader,
+        )
+        processor.main_page.lang_mapping = {
+            "Japanese": "Japanese",
+            "Korean": "Korean",
+        }
+        processor.local_translation_runtime_manager = None
+        processor._project_checkpoint_store = None
+        processor._inpainter_release_gate = {
+            "required": False,
+            "observed": True,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor._build_project_translation_identity = mock.Mock(
+            return_value=None
+        )
+        processor._translation_benchmark_metrics = mock.Mock(
+            return_value={}
+        )
+        processor._record_performance_detail = mock.Mock()
+        processor._raise_if_cancelled = mock.Mock()
+        processor.cache_manager = object()
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="source",
+            text_class="text_bubble",
+            block_id="text-only",
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            blk_list=[block],
+            source_decoded_sha256="a" * 64,
+        )
+        translated_images: list[object] = []
+
+        class _TextOnlyGemma:
+            uses_persistent_translation_memory = True
+            translator_key = "Custom Local Server(Gemma)"
+
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.engine = SimpleNamespace(
+                    img_as_llm_input=False,
+                    last_benchmark_stats={},
+                )
+
+            @staticmethod
+            def prepare_translation(_blocks, _context) -> bool:
+                return False
+
+            @staticmethod
+            def translate_with_cache_manager(blocks, image, _context, _cache):
+                translated_images.append(image)
+                blocks[0].translation = "translated"
+                return blocks, "persistent"
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            _TextOnlyGemma,
+        ), mock.patch(
+            "pipeline.stage_batched_processor.apply_translation_result_dictionary",
+        ):
+            processor._translate_all([page])
+
+        source_loader.assert_not_called()
+        self.assertEqual(translated_images, [None])
+        self.assertIsNone(page.image)
 
     def test_preserve_only_page_skips_translator_and_gemma(self) -> None:
         processor = self._processor(cancelled=False)

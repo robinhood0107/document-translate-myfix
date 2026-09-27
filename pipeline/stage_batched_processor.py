@@ -163,6 +163,9 @@ class StagePageContext:
     export_token: str = ""
     export_root: str = ""
     image: Any | None = None
+    source_image_shape: tuple[int, ...] = ()
+    source_image_nbytes: int = 0
+    source_pixel_count: int = 0
     blk_list: list[Any] = field(default_factory=list)
     precomputed_mask_details: dict[str, Any] | None = None
     detector_key: str = ""
@@ -249,16 +252,26 @@ class StagePageContext:
             "mask",
             "project_ocr_hit",
             "precomputed_mask_details",
+            "paddleocr_cache_plan",
         ):
             value = getattr(self, name, None)
             released += _approximate_buffer_bytes(value)
             setattr(self, name, None)
+        self.paddleocr_cache_engine = None
         released += _approximate_buffer_bytes(self.patches)
         self.patches = []
         # `mask_details` 는 raw/final 마스크를 그대로 다시 참조한다. 비우지 않으면
         # 위에서 놓아준 배열이 그대로 살아남는다.
         released += _approximate_buffer_bytes(self.mask_details)
         self.mask_details = {}
+        self.released_buffer_bytes += released
+        return released
+
+    def release_source_image(self) -> int:
+        """Drop only the source RGB while retaining page and checkpoint metadata."""
+
+        released = _approximate_buffer_bytes(self.image)
+        self.image = None
         self.released_buffer_bytes += released
         return released
 
@@ -309,6 +322,7 @@ class _PendingRenderJob:
     file_on_display: bool
     output_root: str
     started_monotonic: float
+    buffer_bytes: int = 0
 
 
 class StageBatchedProcessor(BatchProcessor):
@@ -466,6 +480,10 @@ class StageBatchedProcessor(BatchProcessor):
         self._render_cancel_event = threading.Event()
         self._pending_render_jobs: list[_PendingRenderJob] = []
         self._released_page_buffer_bytes = 0
+        self._render_pending_count_high_water = 0
+        self._render_pending_buffer_bytes_high_water = 0
+        self._ocr_prepared_crop_bytes_high_water = 0
+        self._ocr_prepared_encoded_bytes_high_water = 0
         self._render_context_cache: tuple[Any, str] | None = None
 
     def _stage_tr(self, text: str) -> str:
@@ -1841,19 +1859,26 @@ class StageBatchedProcessor(BatchProcessor):
                     ensure_path_materialized(ctx.image_path)
                     ctx.image = imk.read_image(ctx.image_path)
 
+            ctx.source_image_shape = tuple(
+                int(value) for value in ctx.image.shape
+            )
+            ctx.source_image_nbytes = int(ctx.image.nbytes)
+            ctx.source_pixel_count = int(ctx.image.shape[0]) * int(
+                ctx.image.shape[1]
+            )
+            with self._measure_performance(
+                stage="detect",
+                operation="decoded_hash",
+                workload={"page_pixel_count": ctx.source_pixel_count},
+            ):
+                # Keep a source identity even when project checkpoints are disabled:
+                # later OCR/inpaint reloads must be the same pixels detected here.
+                ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
+
             source_lang_english = self._source_lang_english(ctx.source_lang)
             detection_hit = None
             detection_identity = None
             if checkpoint_store is not None:
-                with self._measure_performance(
-                    stage="detect",
-                    operation="decoded_hash",
-                    workload={
-                        "page_pixel_count": int(ctx.image.shape[0])
-                        * int(ctx.image.shape[1]),
-                    },
-                ):
-                    ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
                 ctx.project_checkpoint_page_key = project_checkpoint_page_key(
                     self.main_page,
                     ctx.image_path,
@@ -1997,6 +2022,7 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings=export_settings,
                     preferred_path=detector_overlay_path,
                 )
+                self._release_source_image(ctx)
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -2046,6 +2072,7 @@ class StageBatchedProcessor(BatchProcessor):
                 **ctx.page_ocr_metrics,
             )
             self._raise_if_cancelled()
+            self._release_source_image(ctx)
 
     def _run_primary_ocr(self, ctx: StagePageContext, policy: dict[str, Any]) -> dict[str, Any]:
         settings_page = self.main_page.settings_page
@@ -2055,6 +2082,7 @@ class StageBatchedProcessor(BatchProcessor):
             blk.source_lang = source_lang_code
         device = resolve_device(settings_page.is_gpu_enabled())
         engine_key = str(policy["primary_ocr_engine"])
+        project_checkpoint_hit = ctx.project_ocr_hit
         cache_key = (
             self.cache_manager._get_ocr_cache_key(
                 ctx.image,
@@ -2064,6 +2092,8 @@ class StageBatchedProcessor(BatchProcessor):
             )
             if engine_key
             not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
+            and project_checkpoint_hit is None
+            and ctx.image is not None
             else None
         )
         cache_status = "miss"
@@ -2072,8 +2102,6 @@ class StageBatchedProcessor(BatchProcessor):
         engine_name = engine_key
         records = []
         raw_results: dict[str, dict[str, Any]] = {}
-        project_checkpoint_hit = ctx.project_ocr_hit
-
         def snapshot_raw_results() -> None:
             nonlocal raw_results
             raw_results = {
@@ -2230,7 +2258,15 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(page_profile or {})
             page_profile["rejected_empty_dropped_block_count"] = len(rejected_empty_blocks)
 
-        ctx.blk_list, embedded_ui_blocks = drop_embedded_ui_ocr_blocks(ctx.blk_list, ctx.image.shape)
+        source_shape = ctx.source_image_shape or (
+            tuple(int(value) for value in ctx.image.shape)
+            if ctx.image is not None
+            else ()
+        )
+        ctx.blk_list, embedded_ui_blocks = drop_embedded_ui_ocr_blocks(
+            ctx.blk_list,
+            source_shape,
+        )
         if embedded_ui_blocks:
             logger.info(
                 "Dropped %d embedded UI OCR block(s) before stage-batched inpaint for %s.",
@@ -2468,18 +2504,13 @@ class StageBatchedProcessor(BatchProcessor):
             )
 
         requires_runtime = has_project_miss()
-        if (
-            persistent_cache_requested
-            and runtime_identity is not None
-            and requires_runtime
-        ):
-            requires_runtime = self._prepare_paddleocr_cache_plans(
-                pages,
-                policy,
-                runtime_identity,
-            )
-        if requires_runtime:
+        runtime_started = False
+        defer_runtime_until_cache_miss = bool(
+            persistent_cache_requested and runtime_identity is not None
+        )
+        if requires_runtime and not defer_runtime_until_cache_miss:
             self._await_ocr_runtime(policy)
+            runtime_started = True
         if (
             cache_identity_required
             and engine_key
@@ -2498,12 +2529,6 @@ class StageBatchedProcessor(BatchProcessor):
                     policy,
                     runtime_identity,
                 )
-                if persistent_cache_requested and has_project_miss():
-                    self._prepare_paddleocr_cache_plans(
-                        pages,
-                        policy,
-                        runtime_identity,
-                    )
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -2539,6 +2564,63 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
             )
             try:
+                if ctx.project_ocr_hit is None:
+                    self._ensure_source_image(ctx)
+                    if (
+                        persistent_cache_requested
+                        and runtime_identity is not None
+                        and ctx.blk_list
+                    ):
+                        page_requires_runtime = (
+                            self._prepare_paddleocr_cache_plans(
+                                [ctx],
+                                policy,
+                                runtime_identity,
+                                index_offset=index,
+                                total_images=total_images,
+                            )
+                        )
+                        if ctx.failed_stage:
+                            continue
+                        if page_requires_runtime and not runtime_started:
+                            self._await_ocr_runtime(policy)
+                            runtime_started = True
+                        prepared_crop_bytes, prepared_encoded_bytes = (
+                            self._paddleocr_prepared_cache_bytes(
+                                ctx.paddleocr_cache_plan
+                            )
+                        )
+                        self._ocr_prepared_crop_bytes_high_water = max(
+                            int(
+                                getattr(
+                                    self,
+                                    "_ocr_prepared_crop_bytes_high_water",
+                                    0,
+                                )
+                            ),
+                            prepared_crop_bytes,
+                        )
+                        self._ocr_prepared_encoded_bytes_high_water = max(
+                            int(
+                                getattr(
+                                    self,
+                                    "_ocr_prepared_encoded_bytes_high_water",
+                                    0,
+                                )
+                            ),
+                            prepared_encoded_bytes,
+                        )
+                        self._record_performance_workload(
+                            "ocr",
+                            prepared_crop_bytes_current=prepared_crop_bytes,
+                            prepared_encoded_bytes_current=prepared_encoded_bytes,
+                            prepared_crop_bytes_high_water=(
+                                self._ocr_prepared_crop_bytes_high_water
+                            ),
+                            prepared_encoded_bytes_high_water=(
+                                self._ocr_prepared_encoded_bytes_high_water
+                            ),
+                        )
                 result = self._run_primary_ocr(ctx, policy)
                 self._raise_if_cancelled()
                 quality = result["quality"]
@@ -2620,6 +2702,10 @@ class StageBatchedProcessor(BatchProcessor):
                     reason=str(exc),
                     extra=dict(ctx.page_ocr_metrics or {}),
                 )
+            finally:
+                ctx.paddleocr_cache_plan = None
+                ctx.paddleocr_cache_engine = None
+                self._release_source_image(ctx)
 
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
             self._shutdown_runtime_with_retry(
@@ -2632,11 +2718,33 @@ class StageBatchedProcessor(BatchProcessor):
             )
         self._raise_if_cancelled()
 
+    @staticmethod
+    def _paddleocr_prepared_cache_bytes(plan: Any | None) -> tuple[int, int]:
+        """Count only the crop arrays and encoded payload retained by a plan."""
+
+        crop_bytes = 0
+        encoded_bytes = 0
+        for job in list(getattr(plan, "jobs", []) or []):
+            crop = job.get("prepared_crop") if isinstance(job, dict) else None
+            encoded = (
+                job.get("prepared_image_bytes")
+                if isinstance(job, dict)
+                else None
+            )
+            if isinstance(crop, np.ndarray):
+                crop_bytes += int(crop.nbytes)
+            if isinstance(encoded, (bytes, bytearray, memoryview)):
+                encoded_bytes += len(encoded)
+        return crop_bytes, encoded_bytes
+
     def _prepare_paddleocr_cache_plans(
         self,
         pages: list[StagePageContext],
         policy: dict[str, Any],
         runtime_identity: dict[str, Any],
+        *,
+        index_offset: int = 0,
+        total_images: int | None = None,
     ) -> bool:
         settings_page = self.main_page.settings_page
         store = self._get_paddleocr_cache_store()
@@ -2644,8 +2752,9 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_identity = dict(runtime_identity)
 
         requires_runtime = False
-        total_images = len(pages)
-        for index, ctx in enumerate(pages):
+        total_images = len(pages) if total_images is None else total_images
+        for local_index, ctx in enumerate(pages):
+            index = index_offset + local_index
             self._raise_if_cancelled()
             if (
                 ctx.failed_stage
@@ -2956,66 +3065,84 @@ class StageBatchedProcessor(BatchProcessor):
             self._drain_render_futures(block=False)
             if ctx.failed_stage:
                 continue
+            self._wait_for_render_capacity(
+                max(0, int(ctx.source_image_nbytes)) * 4
+            )
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 3, 10, False, stage_name='inpaint-all')
             if ctx.no_text_detected:
-                ctx.inpaint_input_img = ctx.image
-                ctx.patches = []
-                ctx.project_inpaint_checkpoint_status = "skipped"
-                if (
-                    checkpoint_store is not None
-                    and ctx.source_decoded_sha256
-                    and ctx.detection_fingerprint
-                ):
-                    ctx.project_translation_fingerprint = (
-                        build_skipped_stage_fingerprint(
-                            stage="translation",
-                            source_sha256=ctx.source_decoded_sha256,
-                            detection_fingerprint=ctx.detection_fingerprint,
-                            reason="no_text_detected",
+                try:
+                    self._ensure_source_image(ctx)
+                    ctx.inpaint_input_img = ctx.image
+                    ctx.patches = []
+                    ctx.project_inpaint_checkpoint_status = "skipped"
+                    if (
+                        checkpoint_store is not None
+                        and ctx.source_decoded_sha256
+                        and ctx.detection_fingerprint
+                    ):
+                        ctx.project_translation_fingerprint = (
+                            build_skipped_stage_fingerprint(
+                                stage="translation",
+                                source_sha256=ctx.source_decoded_sha256,
+                                detection_fingerprint=ctx.detection_fingerprint,
+                                reason="no_text_detected",
+                            )
                         )
-                    )
-                    ctx.project_translation_checkpoint_status = "skipped"
-                    ctx.project_inpaint_fingerprint = (
-                        build_skipped_stage_fingerprint(
-                            stage="inpaint",
-                            source_sha256=ctx.source_decoded_sha256,
-                            detection_fingerprint=ctx.detection_fingerprint,
-                            reason="no_text_detected",
+                        ctx.project_translation_checkpoint_status = "skipped"
+                        ctx.project_inpaint_fingerprint = (
+                            build_skipped_stage_fingerprint(
+                                stage="inpaint",
+                                source_sha256=ctx.source_decoded_sha256,
+                                detection_fingerprint=ctx.detection_fingerprint,
+                                reason="no_text_detected",
+                            )
                         )
+                        ctx.project_inpaint_artifact_sha256 = (
+                            decoded_image_sha256(ctx.image)
+                        )
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        ctx.image_path,
+                        "inpaint",
+                        "skipped",
+                        reason="no_text_detected",
+                        patch_count=0,
                     )
-                    ctx.project_inpaint_artifact_sha256 = (
-                        decoded_image_sha256(ctx.image)
+                    self._emit_benchmark_event(
+                        "inpaint_end",
+                        image_path=ctx.image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        block_count=0,
+                        patch_count=0,
+                        skip_reason="no_text_detected",
+                        project_checkpoint_status="skipped",
                     )
-                self.main_page.image_ctrl.mark_processing_stage(
-                    ctx.image_path,
-                    "inpaint",
-                    "skipped",
-                    reason="no_text_detected",
-                    patch_count=0,
-                )
-                self._emit_benchmark_event(
-                    "inpaint_end",
-                    image_path=ctx.image_path,
-                    image_index=index,
-                    total_images=total_images,
-                    block_count=0,
-                    patch_count=0,
-                    skip_reason="no_text_detected",
-                    project_checkpoint_status="skipped",
-                )
-                # 인페인팅은 건너뛰어도 **출력은 반드시 나가야 한다.** 이 분기가
-                # 렌더 제출 없이 넘어가는 바람에, 텍스트가 없다고 판정된 페이지는
-                # 정상 경로로 파일을 남기지 못했다. 실측 366장에서 15장이 여기로
-                # 빠져 배치 끝 폴백이 대신 저장했고, 실패가 아닌데도 실패 경로로
-                # 처리됐다. 글자가 없으면 렌더할 텍스트가 없을 뿐, 페이지 자체는
-                # 그대로 내보내면 된다.
-                self._submit_or_inline_render(
-                    ctx,
-                    index=index,
-                    total_images=total_images,
-                    export_settings=export_settings,
-                )
+                    # 인페인팅은 건너뛰어도 **출력은 반드시 나가야 한다.** 이 분기가
+                    # 렌더 제출 없이 넘어가는 바람에, 텍스트가 없다고 판정된 페이지는
+                    # 정상 경로로 파일을 남기지 못했다. 실측 366장에서 15장이 여기로
+                    # 빠져 배치 끝 폴백이 대신 저장했고, 실패가 아닌데도 실패 경로로
+                    # 처리됐다. 글자가 없으면 렌더할 텍스트가 없을 뿐, 페이지 자체는
+                    # 그대로 내보내면 된다.
+                    self._submit_or_inline_render(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        export_settings=export_settings,
+                    )
+                except OperationCancelledError:
+                    raise
+                except Exception as exc:
+                    self._mark_page_failed(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        stage="inpaint",
+                        reason=str(exc),
+                    )
+                finally:
+                    ctx.precomputed_mask_details = None
+                    self._release_source_image(ctx)
                 continue
             self._emit_benchmark_event(
                 "inpaint_start",
@@ -3025,6 +3152,7 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
             )
             try:
+                self._ensure_source_image(ctx)
                 inpaint_blocks, protected_blocks = (
                     split_inpaint_protected_ocr_blocks(ctx.blk_list)
                 )
@@ -3292,6 +3420,9 @@ class StageBatchedProcessor(BatchProcessor):
                         **ctx.page_translation_metrics,
                     },
                 )
+            finally:
+                ctx.precomputed_mask_details = None
+                self._release_source_image(ctx)
 
         runtime_loaded = False
         if pending:
@@ -3340,6 +3471,10 @@ class StageBatchedProcessor(BatchProcessor):
                 continue
             try:
                 self._raise_if_cancelled()
+                self._wait_for_render_capacity(
+                    max(0, int(ctx.source_image_nbytes)) * 4
+                )
+                self._ensure_source_image(ctx)
                 self._drain_render_futures(block=False)
                 with self._measure_performance(
                     stage="inpaint",
@@ -3505,6 +3640,8 @@ class StageBatchedProcessor(BatchProcessor):
                         **ctx.page_translation_metrics,
                     },
                 )
+            finally:
+                self._release_source_image(ctx)
         return runtime_loaded
 
     def _release_gemma_before_inpainter(self) -> None:
@@ -4005,7 +4142,22 @@ class StageBatchedProcessor(BatchProcessor):
                     self._start_gemma_prewarm()
                     self._await_gemma_runtime()
                     gemma_runtime_started = True
+            translator_needs_image = bool(
+                getattr(translator.engine, "img_as_llm_input", False)
+            )
+            if (
+                self.cache_manager is not None
+                and not translator.uses_persistent_translation_memory
+            ):
+                # The legacy result-cache key samples source pixels even for
+                # text-only engines, so preserve that cache contract per page.
+                translator_needs_image = True
             try:
+                source_image = (
+                    self._ensure_source_image(ctx)
+                    if translator_needs_image
+                    else None
+                )
                 with self._measure_performance(
                     stage="translate",
                     operation="inference_and_cache",
@@ -4015,7 +4167,7 @@ class StageBatchedProcessor(BatchProcessor):
                 ):
                     _, translation_cache_status = translator.translate_with_cache_manager(
                         ctx.translation_blocks,
-                        ctx.image,
+                        source_image,
                         extra_context,
                         self.cache_manager,
                     )
@@ -4104,6 +4256,8 @@ class StageBatchedProcessor(BatchProcessor):
                     reason=str(exc),
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
+            finally:
+                self._release_source_image(ctx)
 
         if (
             gemma_runtime_started
@@ -4263,6 +4417,7 @@ class StageBatchedProcessor(BatchProcessor):
         if ctx.failed_stage:
             return
         self._raise_if_cancelled()
+        self._ensure_source_image(ctx)
         render_settings, trg_lng_cd = self._lazy_render_context(ctx)
         self._set_current_image(ctx.image_path)
         self._write_json_exports(
@@ -4355,6 +4510,8 @@ class StageBatchedProcessor(BatchProcessor):
                 submitted_monotonic=time.monotonic(),
             )
             self._raise_if_cancelled()
+            render_buffer_bytes = _approximate_buffer_bytes(job)
+            self._wait_for_render_capacity(render_buffer_bytes)
             future = self._ensure_render_executor().submit(run_render_job, job)
             self._pending_render_jobs.append(
                 _PendingRenderJob(
@@ -4365,8 +4522,10 @@ class StageBatchedProcessor(BatchProcessor):
                     file_on_display=file_on_display,
                     output_root=output_root,
                     started_monotonic=time.monotonic(),
+                    buffer_bytes=render_buffer_bytes,
                 )
             )
+            self._record_render_pending_telemetry()
         except OperationCancelledError:
             raise
         except Exception as exc:
@@ -4422,6 +4581,7 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
         self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
+        self._release_page_buffers(ctx)
         self._raise_if_cancelled()
 
     def _finish_render_page_bookkeeping(
@@ -4553,15 +4713,54 @@ class StageBatchedProcessor(BatchProcessor):
         """끝난 페이지의 전체 해상도 배열을 놓아주고 그 사실을 기록한다."""
 
         released = ctx.release_page_buffers()
+        self._record_released_page_buffer_bytes(ctx, released)
+
+    def _release_source_image(self, ctx: StagePageContext) -> None:
+        """Release a detected page's RGB without clearing its stage metadata."""
+
+        released = ctx.release_source_image()
+        self._record_released_page_buffer_bytes(ctx, released)
+
+    def _record_released_page_buffer_bytes(
+        self,
+        ctx: StagePageContext,
+        released: int,
+    ) -> None:
         if released <= 0:
             return
-        self._released_page_buffer_bytes += released
+        self._released_page_buffer_bytes = int(
+            getattr(self, "_released_page_buffer_bytes", 0)
+        ) + released
         logger.debug(
             "Released %.1f MiB of page buffers for %s (run total %.1f MiB).",
             released / (1024 * 1024),
             ctx.image_name,
             self._released_page_buffer_bytes / (1024 * 1024),
         )
+
+    def _ensure_source_image(self, ctx: StagePageContext):
+        """Load one page for a later stage and reject source changes since detect."""
+
+        if ctx.image is not None:
+            return ctx.image
+        if not ctx.source_decoded_sha256:
+            raise RuntimeError("source_identity_missing_after_detect")
+
+        try:
+            image = self.main_page.image_ctrl.load_image(ctx.image_path)
+            if image is None:
+                ensure_path_materialized(ctx.image_path)
+                image = imk.read_image(ctx.image_path)
+        except Exception as exc:
+            raise RuntimeError("source_reload_failed") from exc
+        if image is None:
+            raise RuntimeError("source_reload_failed")
+
+        observed_sha256 = decoded_image_sha256(image)
+        if observed_sha256 != ctx.source_decoded_sha256:
+            raise RuntimeError("source_changed_after_detect")
+        ctx.image = image
+        return image
 
     def _record_stage_memory_telemetry(
         self,
@@ -4619,6 +4818,86 @@ class StageBatchedProcessor(BatchProcessor):
             return
         self._finish_render_page_bookkeeping(pending, result=result, exc=None)
 
+    def _pending_render_buffer_bytes(self) -> int:
+        return sum(
+            int(
+                getattr(pending, "buffer_bytes", 0)
+                or _approximate_buffer_bytes(getattr(pending, "ctx", None))
+            )
+            for pending in list(getattr(self, "_pending_render_jobs", []) or [])
+        )
+
+    def _record_render_pending_telemetry(self, *, stage: str = "inpaint") -> None:
+        pending_count = len(getattr(self, "_pending_render_jobs", []) or [])
+        pending_bytes = self._pending_render_buffer_bytes()
+        self._render_pending_count_high_water = max(
+            int(getattr(self, "_render_pending_count_high_water", 0)),
+            pending_count,
+        )
+        self._render_pending_buffer_bytes_high_water = max(
+            int(getattr(self, "_render_pending_buffer_bytes_high_water", 0)),
+            pending_bytes,
+        )
+        try:
+            available_ram = max(0, int(psutil.virtual_memory().available))
+        except Exception:
+            available_ram = 0
+        self._record_performance_workload(
+            stage,
+            render_pending_count=pending_count,
+            render_pending_buffer_bytes=pending_bytes,
+            render_pending_count_high_water=(
+                self._render_pending_count_high_water
+            ),
+            render_pending_buffer_bytes_high_water=(
+                self._render_pending_buffer_bytes_high_water
+            ),
+            available_ram_bytes=available_ram,
+        )
+
+    def _settle_one_render_future(self) -> None:
+        pending_jobs = list(getattr(self, "_pending_render_jobs", []) or [])
+        if not pending_jobs:
+            return
+        pending_by_future = {pending.future: pending for pending in pending_jobs}
+        remaining = set(pending_by_future)
+        while remaining:
+            self._raise_if_cancelled()
+            done, remaining = wait(
+                remaining,
+                timeout=0.2,
+                return_when=FIRST_COMPLETED,
+            )
+            for future in done:
+                pending = pending_by_future[future]
+                if pending in self._pending_render_jobs:
+                    self._pending_render_jobs.remove(pending)
+                    self._resolve_render_future(pending)
+            if done:
+                self._record_render_pending_telemetry()
+                return
+
+    def _wait_for_render_capacity(self, incoming_buffer_bytes: int = 0) -> None:
+        """Keep at most two render jobs and reserve half of current free RAM."""
+
+        incoming_buffer_bytes = max(0, int(incoming_buffer_bytes))
+        while getattr(self, "_pending_render_jobs", None):
+            pending_jobs = list(self._pending_render_jobs)
+            pending_bytes = self._pending_render_buffer_bytes()
+            try:
+                available_ram = max(0, int(psutil.virtual_memory().available))
+            except Exception:
+                available_ram = 0
+            within_count_limit = len(pending_jobs) < 2
+            within_ram_budget = (
+                pending_bytes + incoming_buffer_bytes <= available_ram // 2
+            )
+            if within_count_limit and within_ram_budget:
+                break
+            self._settle_one_render_future()
+            self._drain_render_futures(block=False)
+        self._record_render_pending_telemetry()
+
     def _drain_render_futures(self, *, block: bool) -> None:
         """제출된 렌더 작업 중 끝난 것을 후처리한다.
 
@@ -4637,6 +4916,7 @@ class StageBatchedProcessor(BatchProcessor):
                 pending = pending_by_future[future]
                 self._pending_render_jobs.remove(pending)
                 self._resolve_render_future(pending)
+            self._record_render_pending_telemetry()
             return
 
         remaining = set(pending_by_future)
@@ -4647,6 +4927,7 @@ class StageBatchedProcessor(BatchProcessor):
                 pending = pending_by_future[future]
                 self._pending_render_jobs.remove(pending)
                 self._resolve_render_future(pending)
+                self._record_render_pending_telemetry()
         self._raise_if_cancelled()
 
     def _fallback_page_image(self, ctx: StagePageContext):
@@ -4665,12 +4946,10 @@ class StageBatchedProcessor(BatchProcessor):
             if candidate is not None:
                 return candidate, kind
         try:
-            reloaded = self.main_page.image_ctrl.load_image(ctx.image_path)
-            if reloaded is None:
-                reloaded = imk.read_image(ctx.image_path)
+            reloaded = self._ensure_source_image(ctx)
         except Exception:
             logger.warning(
-                "Could not reload %s for the fallback export.",
+                "Could not reload the verified source for fallback export %s.",
                 ctx.image_name,
                 exc_info=True,
             )
@@ -4980,6 +5259,7 @@ class StageBatchedProcessor(BatchProcessor):
         # 마지막 한두 페이지분이지만, 렌더가 인페인팅보다 느려지면 큐가 쌓여
         # 이 값이 커진다. 그때는 인페인팅을 더 줄여도 전체 시간이 줄지 않는다.
         pending = len(getattr(self, "_pending_render_jobs", []) or [])
+        pending_buffer_bytes = self._pending_render_buffer_bytes()
         started_at = time.monotonic()
         try:
             self._drain_render_futures(block=True)
@@ -4989,7 +5269,10 @@ class StageBatchedProcessor(BatchProcessor):
                 stage="render",
                 operation="tail_drain",
                 elapsed_ms=elapsed * 1000.0,
-                workload={"pending_at_drain": pending},
+                workload={
+                    "pending_at_drain": pending,
+                    "pending_buffer_bytes_at_drain": pending_buffer_bytes,
+                },
             )
             if elapsed > 1.0:
                 logger.info(
@@ -5015,6 +5298,10 @@ class StageBatchedProcessor(BatchProcessor):
         self._progress_image_path = None
         self._recent_page_durations.clear()
         self._released_page_buffer_bytes = 0
+        self._render_pending_count_high_water = 0
+        self._render_pending_buffer_bytes_high_water = 0
+        self._ocr_prepared_crop_bytes_high_water = 0
+        self._ocr_prepared_encoded_bytes_high_water = 0
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         self._render_context_cache = None
@@ -5125,16 +5412,10 @@ class StageBatchedProcessor(BatchProcessor):
                 service="detector",
             ):
                 self._detect_all(pages, policy)
-            source_pixels = 0
-            for ctx in pages:
-                image = getattr(ctx, "image", None)
-                if image is None:
-                    continue
-                image_array = np.asarray(image)
-                if image_array.ndim >= 2:
-                    source_pixels += int(image_array.shape[0]) * int(
-                        image_array.shape[1]
-                    )
+            source_pixels = sum(
+                max(0, int(getattr(ctx, "source_pixel_count", 0) or 0))
+                for ctx in pages
+            )
             detected_blocks = sum(
                 len(getattr(ctx, "blk_list", []) or []) for ctx in pages
             )
@@ -5359,6 +5640,8 @@ class StageBatchedProcessor(BatchProcessor):
             self._persist_stage_rates()
             self._shutdown_page_cache_executor()
             self._shutdown_render_executor()
+            for ctx in pages:
+                self._release_page_buffers(ctx)
             try:
                 project_ctrl = getattr(self.main_page, "project_ctrl", None)
                 if project_ctrl is not None:
