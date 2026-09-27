@@ -127,6 +127,7 @@ from modules.utils.inpaint_composite import (
 from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, language_codes
 from modules.utils.ocr_debug import (
+    OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
     OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
     all_empty_blocks_are_rejected,
     drop_embedded_ui_ocr_blocks,
@@ -2281,6 +2282,11 @@ class StageBatchedProcessor(BatchProcessor):
                 if empty_reason == PaddleOCRVLEngine.TRUNCATED_OCR_REASON
                 else "ocr_empty"
             )
+            block_class = str(getattr(block, "text_class", "") or "")
+            review_only_preserve = (
+                block_class == "text_free"
+                and empty_reason == OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+            )
             assign_ocr_processing_contract(
                 block,
                 semantic_role=(
@@ -2297,6 +2303,8 @@ class StageBatchedProcessor(BatchProcessor):
                     "stage": "ocr",
                     "cause": cause,
                     "reason": empty_reason or "ocr_result_empty",
+                    "block_class": block_class,
+                    "page_blocking": not review_only_preserve,
                     "review_required": True,
                 }
             )
@@ -2369,6 +2377,14 @@ class StageBatchedProcessor(BatchProcessor):
         )
         metrics["ocr_empty_block_count"] = sum(
             failure["cause"] == "ocr_empty"
+            for failure in block_failures
+        )
+        metrics["ocr_blocking_failure_count"] = sum(
+            bool(failure.get("page_blocking", True))
+            for failure in block_failures
+        )
+        metrics["ocr_review_only_block_count"] = sum(
+            not bool(failure.get("page_blocking", True))
             for failure in block_failures
         )
         retained_ids = {
@@ -2693,18 +2709,40 @@ class StageBatchedProcessor(BatchProcessor):
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
                 ctx.page_ocr_metrics = dict(result["metrics"] or {})
                 block_failures = list(result.get("block_failures") or [])
-                if block_failures:
+                blocking_failures = [
+                    item
+                    for item in block_failures
+                    if bool(item.get("page_blocking", True))
+                ]
+                review_only_failures = [
+                    item
+                    for item in block_failures
+                    if not bool(item.get("page_blocking", True))
+                ]
+                if review_only_failures:
+                    review_detail = "; ".join(
+                        f"block_id={item['block_id']} cause={item['cause']}"
+                        for item in review_only_failures
+                    )
+                    self.main_page.image_skipped.emit(
+                        ctx.image_path,
+                        "ocr",
+                        "review_required: text_free OCR block kept unchanged "
+                        "and excluded from translation/inpaint; "
+                        + review_detail,
+                    )
+                if blocking_failures:
                     failure_detail = "; ".join(
                         f"block_id={item['block_id']} cause={item['cause']}"
-                        for item in block_failures[:2]
+                        for item in blocking_failures[:2]
                     )
-                    if len(block_failures) > 2:
+                    if len(blocking_failures) > 2:
                         failure_detail += (
-                            f"; +{len(block_failures) - 2} more block(s)"
+                            f"; +{len(blocking_failures) - 2} more block(s)"
                         )
                     reason = (
                         "review_required: OCR returned no complete text for "
-                        f"{len(block_failures)} block(s); {failure_detail}; "
+                        f"{len(blocking_failures)} block(s); {failure_detail}; "
                         "page will not be translated or inpainted."
                     )
                     self._mark_page_failed(
@@ -2728,7 +2766,7 @@ class StageBatchedProcessor(BatchProcessor):
                         project_checkpoint_status=(
                             ctx.project_ocr_checkpoint_status
                         ),
-                        block_failures=block_failures,
+                        block_failures=blocking_failures,
                         **ctx.page_ocr_metrics,
                     )
                     continue
@@ -2793,6 +2831,7 @@ class StageBatchedProcessor(BatchProcessor):
                     cache_status=result["cache_status"],
                     attempt_count=int(result["attempt_count"]),
                     ocr_page_profile=result["page_profile"],
+                    block_failures=block_failures,
                     project_checkpoint_status=(
                         ctx.project_ocr_checkpoint_status
                     ),
