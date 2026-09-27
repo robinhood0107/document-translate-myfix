@@ -17,6 +17,7 @@ from modules.translation.llm.custom_local_gemma import (
     CustomLocalGemmaTranslation,
     GemmaLocalServerContextCapacityError,
     GemmaLocalServerResponseError,
+    GemmaLocalServerTruncatedError,
 )
 from modules.utils.exceptions import LocalServiceConnectionError
 from modules.utils.textblock import TextBlock
@@ -1518,6 +1519,113 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                     engine.last_benchmark_stats["gemma_tm_cache_disabled_count"],
                     0,
                 )
+
+
+class GemmaConfirmedBoundarySplitTests(unittest.TestCase):
+    def _engine(self) -> CustomLocalGemmaTranslation:
+        engine = CustomLocalGemmaTranslation()
+        engine.source_lang = "English"
+        engine.target_lang = "Korean"
+        engine.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
+        engine.contextual_merge_input = True
+        engine.max_tokens = 512
+        engine._current_benchmark_stats = engine._new_benchmark_stats()
+        return engine
+
+    @staticmethod
+    def _block(text: str, *, status: str = "ok") -> TextBlock:
+        return TextBlock(
+            text_bbox=np.array([0, 0, 100, 100]),
+            text=text,
+            block_id="required-block-1",
+            ocr_status=status,
+        )
+
+    def test_actual_truncation_splits_at_ocr_blank_paragraph_boundaries(self) -> None:
+        engine = self._engine()
+        block = self._block(
+            "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+        )
+        calls: list[tuple[str, str]] = []
+
+        def translate(blocks, _context, *, prompt_profile):
+            item = blocks[0]
+            calls.append((item.block_id, prompt_profile))
+            if item.block_id == "required-block-1":
+                raise GemmaLocalServerTruncatedError(
+                    "truncated",
+                    strict_retryable=True,
+                )
+            item.translation = f"ko:{item.text}"
+            return 1
+
+        with mock.patch.object(
+            engine,
+            "_translate_contextual_single_blocks",
+            side_effect=translate,
+        ):
+            count = engine._translate_chunk_with_retry([block], "")
+
+        self.assertEqual(count, 1)
+        self.assertEqual(block.block_id, "required-block-1")
+        self.assertEqual(
+            block.translation,
+            "ko:First paragraph.\n\nko:Second paragraph.\n\nko:Third paragraph.",
+        )
+        self.assertEqual(engine._current_benchmark_stats["gemma_boundary_split_count"], 1)
+        self.assertEqual(engine._current_benchmark_stats["gemma_boundary_fragment_count"], 3)
+        self.assertEqual(sum(item[0] == "required-block-1" for item in calls), 2)
+        self.assertEqual(
+            [item[0] for item in calls if ":gemma-fragment:" in item[0]],
+            [
+                "required-block-1:gemma-fragment:1",
+                "required-block-1:gemma-fragment:2",
+                "required-block-1:gemma-fragment:3",
+            ],
+        )
+
+    def test_truncated_single_line_fails_with_original_block_id(self) -> None:
+        engine = self._engine()
+        block = self._block("A single long OCR line without a confirmed split boundary.")
+        calls = []
+
+        def truncated(*_args, **_kwargs):
+            calls.append(1)
+            raise GemmaLocalServerTruncatedError(
+                "truncated",
+                strict_retryable=True,
+            )
+
+        with mock.patch.object(
+            engine,
+            "_translate_contextual_single_blocks",
+            side_effect=truncated,
+        ), self.assertRaises(GemmaLocalServerTruncatedError) as raised:
+            engine._translate_chunk_with_retry([block], "")
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(raised.exception.block_ids, ["required-block-1"])
+        self.assertEqual(block.translation, "")
+
+    def test_unread_ocr_block_is_not_split_after_translation_truncation(self) -> None:
+        engine = self._engine()
+        block = self._block(
+            "First paragraph.\n\nSecond paragraph.",
+            status="empty_after_retry",
+        )
+
+        with mock.patch.object(
+            engine,
+            "_translate_contextual_single_blocks",
+            side_effect=GemmaLocalServerTruncatedError(
+                "truncated",
+                strict_retryable=True,
+            ),
+        ), self.assertRaises(GemmaLocalServerTruncatedError) as raised:
+            engine._translate_chunk_with_retry([block], "")
+
+        self.assertEqual(raised.exception.block_ids, ["required-block-1"])
+        self.assertEqual(engine._current_benchmark_stats["gemma_boundary_split_count"], 0)
 
 
 if __name__ == "__main__":

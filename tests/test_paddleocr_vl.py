@@ -16,11 +16,19 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from app.ui.settings.settings_page import SettingsPage
 from modules.ocr.factory import OCRFactory
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
-from modules.ocr.persistent_cache import OCRPersistentResultCache
+from modules.ocr.persistent_cache import (
+    OCRPersistentResultCache,
+    OCRResultCacheRecord,
+    canonical_json,
+    snapshot_raw_ocr_result,
+)
+from modules.ocr.paddle_crop.transport import PaddleDirectOcrTruncatedError
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.ocr_debug import (
     OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
     OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
+    OCR_STATUS_EMPTY_AFTER_RETRY,
+    set_block_ocr_diagnostics,
     drop_layout_schema_only_ocr_blocks,
     drop_rejected_empty_ocr_blocks,
 )
@@ -343,6 +351,190 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertEqual(block.text, "")
         self.assertEqual(outcome["text"], "テスト")
         self.assertEqual(outcome["raw_text"], "テスト")
+
+    def test_truncated_crop_subcrops_preserve_reading_order_and_overlap(self) -> None:
+        engine = PaddleOCRVLEngine()
+        horizontal = TextBlock(
+            text_bbox=np.array([0, 0, 3000, 1200], dtype=np.int32),
+            direction="horizontal",
+        )
+        horizontal_boxes, horizontal_order = engine._truncation_subcrop_boxes(
+            np.zeros((1200, 3000, 3), dtype=np.uint8),
+            horizontal,
+        )
+        self.assertEqual(horizontal_order, "top_to_bottom")
+        self.assertEqual(
+            horizontal_boxes,
+            [(0, 0, 3000, 664), (0, 536, 3000, 1200)],
+        )
+
+        vertical = TextBlock(
+            text_bbox=np.array([0, 0, 1200, 3000], dtype=np.int32),
+            direction="vertical",
+        )
+        vertical_boxes, vertical_order = engine._truncation_subcrop_boxes(
+            np.zeros((3000, 1200, 3), dtype=np.uint8),
+            vertical,
+        )
+        self.assertEqual(vertical_order, "right_to_left")
+        self.assertEqual(
+            vertical_boxes,
+            [(536, 0, 1200, 3000), (0, 0, 664, 3000)],
+        )
+
+    def test_general_worker_recovers_only_truncated_crop_and_deduplicates_overlap(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        image = np.zeros((1200, 3000, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([0, 0, 3000, 1200], dtype=np.int32),
+            text_class="text_bubble",
+            direction="horizontal",
+            block_id="required-block-1",
+        )
+        truncated = PaddleDirectOcrTruncatedError(
+            "cut",
+            service_name="PaddleOCR VL",
+            settings_page_name="PaddleOCR VL Settings",
+        )
+        with mock.patch.object(
+            engine,
+            "_request_ocr_text",
+            side_effect=[truncated, "first line\nshared line", "shared line\nlast line"],
+        ) as request:
+            engine.process_image(image, [block])
+
+        request.assert_has_calls(
+            [
+                mock.call(mock.ANY),
+                mock.call(mock.ANY),
+                mock.call(mock.ANY),
+            ]
+        )
+        self.assertEqual(block.block_id, "required-block-1")
+        self.assertEqual(block.text, "first line\nshared line\nlast line")
+        self.assertEqual(block.ocr_status, "ok_after_retry")
+        record = engine.last_page_profile["request_records"][0]
+        recovery = record["truncation_subcrop_recovery"]
+        self.assertEqual(record["block_id"], "required-block-1")
+        self.assertEqual(recovery["reading_order"], "top_to_bottom")
+        self.assertEqual(recovery["deduplicated_line_count"], 1)
+        self.assertEqual(recovery["missing_segment_ids"], [])
+        self.assertEqual(
+            [item["segment_id"] for item in recovery["segments"]],
+            [
+                "required-block-1:ocr-fragment:1",
+                "required-block-1:ocr-fragment:2",
+            ],
+        )
+        self.assertTrue(all(item["status"] == "ok" for item in recovery["segments"]))
+
+    def test_persistent_worker_does_not_cache_unresolved_truncation(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        image = np.zeros((1200, 3000, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([0, 0, 3000, 1200], dtype=np.int32),
+            text_class="text_bubble",
+            direction="horizontal",
+            block_id="required-block-2",
+        )
+        truncated = PaddleDirectOcrTruncatedError(
+            "cut",
+            service_name="PaddleOCR VL",
+            settings_page_name="PaddleOCR VL Settings",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(Path(temp_dir) / "ocr.sqlite3") as store:
+                plan = engine.prepare_persistent_cache(
+                    image,
+                    [block],
+                    store,
+                    {"runtime_fingerprint": "runtime-test"},
+                    lookup=False,
+                )
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    side_effect=[truncated, truncated],
+                ) as request:
+                    engine.process_persistent_cache_plan(plan)
+
+                request.assert_has_calls([mock.call(mock.ANY), mock.call(mock.ANY)])
+                self.assertEqual(block.ocr_status, "empty_after_retry")
+                self.assertIn("unresolved_subcrop_ids", block.ocr_reject_reason)
+                self.assertEqual(engine.build_persistent_cache_records(plan), [])
+                self.assertEqual(store.stats()["item_count"], 0)
+
+    def test_legacy_cached_truncation_is_retried_instead_of_hit(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        image = np.zeros((1200, 3000, 3), dtype=np.uint8)
+        runtime_identity = {"runtime_fingerprint": "runtime-test"}
+        block = TextBlock(
+            text_bbox=np.array([0, 0, 3000, 1200], dtype=np.int32),
+            text_class="text_bubble",
+            direction="horizontal",
+            block_id="required-block-3",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(Path(temp_dir) / "ocr.sqlite3") as store:
+                identity_plan = engine.prepare_persistent_cache(
+                    image,
+                    [block],
+                    store,
+                    runtime_identity,
+                    lookup=False,
+                )
+                cached_failure = block.deep_copy()
+                set_block_ocr_diagnostics(
+                    cached_failure,
+                    text="",
+                    confidence=0.0,
+                    status=OCR_STATUS_EMPTY_AFTER_RETRY,
+                    empty_reason=PaddleOCRVLEngine.TRUNCATED_OCR_REASON,
+                    attempt_count=2,
+                    raw_text="",
+                    sanitized_text="",
+                )
+                job = identity_plan.jobs[0]
+                self.assertTrue(
+                    store.store_records(
+                        [
+                            OCRResultCacheRecord(
+                                cache_key=job["cache_key"],
+                                identity_json=job["cache_identity_json"],
+                                result_json=canonical_json(
+                                    snapshot_raw_ocr_result(cached_failure)
+                                ),
+                            )
+                        ]
+                    )
+                )
+
+                retry_plan = engine.prepare_persistent_cache(
+                    image.copy(),
+                    [block.deep_copy()],
+                    store,
+                    runtime_identity,
+                    lookup=True,
+                )
+                self.assertFalse(retry_plan.all_hit)
+                self.assertTrue(retry_plan.requires_runtime)
+                self.assertEqual(
+                    retry_plan.jobs[0]["request_record"]["cache_lookup"],
+                    "cached_ocr_failure_retry",
+                )
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    return_value="complete OCR text",
+                ) as request:
+                    engine.process_persistent_cache_plan(retry_plan)
+
+                request.assert_called_once()
+                self.assertEqual(retry_plan.blocks[0].text, "complete OCR text")
 
     def test_prepared_page_results_commit_only_after_all_workers_succeed(self) -> None:
         engine = PaddleOCRVLEngine()

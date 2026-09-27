@@ -4,6 +4,7 @@ import base64
 import copy
 import hashlib
 import logging
+import math
 import os
 import re
 import threading
@@ -29,12 +30,14 @@ from modules.utils.ocr_debug import (
     OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
     OCR_EMPTY_REASON_LAYOUT_SCHEMA_LABELS,
     OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
+    OCR_STATUS_EMPTY_AFTER_RETRY,
     OCR_STATUS_EMPTY_INITIAL,
+    OCR_STATUS_OK_AFTER_RETRY,
     OCR_STATUS_OK,
     ensure_three_channel,
     set_block_ocr_diagnostics,
 )
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, ensure_text_block_id
 
 from ..base import OCREngine
 from ..persistent_cache import (
@@ -117,6 +120,9 @@ class PaddleOCRVLEngine(OCREngine):
     TRUNCATION_RETRY_MAX_TOKENS = 4096
     # 재시도까지 잘린 블록에 남기는 사유. 페이지는 계속 진행한다.
     TRUNCATED_OCR_REASON = "ocr_response_truncated"
+    TRUNCATION_SUBCROP_MAX_EXTENT = 768
+    TRUNCATION_SUBCROP_OVERLAP_PX = 128
+    TRUNCATION_SUBCROP_MAX_COUNT = 8
     REQUEST_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
     TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
     TEXT_EXPANSION_RATIO = 0.03
@@ -244,6 +250,7 @@ class PaddleOCRVLEngine(OCREngine):
             crop_area_ratio = crop_area_px / float(page_area)
             request_record = {
                 "job_index": int(job_index),
+                "block_id": ensure_text_block_id(blk),
                 "bbox": [int(x1), int(y1), int(x2), int(y2)],
                 "crop_source": str(
                     getattr(blk, "ocr_crop_source", "") or ""
@@ -400,6 +407,7 @@ class PaddleOCRVLEngine(OCREngine):
             crop_area_ratio = crop_area_px / float(page_area)
             record = {
                 "job_index": int(job_index),
+                "block_id": ensure_text_block_id(blk),
                 "bbox": [int(x1), int(y1), int(x2), int(y2)],
                 "crop_source": str(
                     getattr(blk, "ocr_crop_source", "") or ""
@@ -544,7 +552,35 @@ class PaddleOCRVLEngine(OCREngine):
             if result is not None and result.disabled:
                 plan.lookup_disabled = True
             if result is not None and result.hit:
-                job["prepared_outcome"] = dict(result.result or {})
+                cached_outcome = dict(result.result or {})
+                cached_empty_reason = str(
+                    cached_outcome.get("empty_reason") or ""
+                )
+                cached_status = str(cached_outcome.get("status") or "")
+                cached_failure = (
+                    cached_empty_reason == self.TRUNCATED_OCR_REASON
+                    or str(cached_outcome.get("reject_reason") or "")
+                    == self.TRUNCATED_OCR_REASON
+                    or (
+                        cached_status
+                        in {
+                            OCR_STATUS_EMPTY_INITIAL,
+                            OCR_STATUS_EMPTY_AFTER_RETRY,
+                        }
+                        and cached_empty_reason
+                        != self.TEXT_FREE_NO_VISUAL_EVIDENCE_REASON
+                    )
+                )
+                if cached_failure:
+                    # Older versions stored failed empty OCR as a hit. Retry it
+                    # so a corrected crop can replace the cache row.
+                    record["cache_lookup"] = "cached_ocr_failure_retry"
+                    record["status"] = "cached_ocr_failure_retry"
+                    plan.miss_count += 1
+                    job["cache_lookup_miss"] = True
+                    plan.runtime_jobs.append(job)
+                    continue
+                job["prepared_outcome"] = cached_outcome
                 record["cache_lookup"] = "hit"
                 record["status"] = "cache_hit"
                 plan.hit_count += 1
@@ -692,7 +728,19 @@ class PaddleOCRVLEngine(OCREngine):
             if not job.get("cache_lookup_miss") or not job.get("cache_key"):
                 continue
             status = str(job.get("request_record", {}).get("status", "") or "")
-            if not status or status == "pending" or status.startswith("error:"):
+            if (
+                not status
+                or status
+                in {
+                    "pending",
+                    "empty",
+                    "schema_only",
+                    "rejected_non_text_response",
+                    "truncated_after_retry",
+                    "truncation_subcrop_failed",
+                }
+                or status.startswith("error:")
+            ):
                 continue
             records.append(
                 OCRResultCacheRecord(
@@ -705,6 +753,305 @@ class PaddleOCRVLEngine(OCREngine):
             )
         return records
 
+    def _truncation_subcrop_boxes(
+        self,
+        crop: np.ndarray,
+        block: TextBlock,
+    ) -> tuple[list[tuple[int, int, int, int]], str]:
+        """Tile a long detector crop in reading order with a fixed overlap.
+
+        The split uses the existing block direction and crop area only. It never
+        fabricates text-line coordinates when none are present.
+        """
+
+        if not isinstance(crop, np.ndarray) or crop.ndim < 2:
+            return [], "invalid_crop_area"
+        height, width = int(crop.shape[0]), int(crop.shape[1])
+        if height <= 0 or width <= 0:
+            return [], "invalid_crop_area"
+
+        direction = str(getattr(block, "direction", "") or "").strip().lower()
+        if direction.startswith("ver") or direction == "vertical":
+            vertical_text = True
+        elif direction.startswith("hor") or direction == "horizontal":
+            vertical_text = False
+        elif width > height * 1.2:
+            vertical_text = False
+        elif height > width * 1.2:
+            vertical_text = True
+        else:
+            return [], "ambiguous_area_orientation"
+
+        # Split between horizontal text lines (y axis) or vertical text
+        # columns (x axis), preserving the page's existing reading direction.
+        # If only a single long line/column exceeds the limit, use an area-only
+        # fallback along the text direction and record that fallback.
+        axis = 0 if vertical_text else 1
+        reading_order = "right_to_left" if vertical_text else "top_to_bottom"
+        extents = [width, height]
+        if extents[axis] <= self.TRUNCATION_SUBCROP_MAX_EXTENT:
+            other_axis = 1 - axis
+            if extents[other_axis] <= self.TRUNCATION_SUBCROP_MAX_EXTENT:
+                return [], "crop_area_not_splittable"
+            axis = other_axis
+            if vertical_text:
+                reading_order = "top_to_bottom"
+            else:
+                reading_order = (
+                    "right_to_left"
+                    if direction.endswith("rtl")
+                    else "left_to_right"
+                )
+
+        length = extents[axis]
+        max_extent = int(self.TRUNCATION_SUBCROP_MAX_EXTENT)
+        overlap = int(self.TRUNCATION_SUBCROP_OVERLAP_PX)
+        step_coverage = max(1, max_extent - overlap)
+        segment_count = int(math.ceil(length / float(step_coverage)))
+        if (
+            segment_count < 2
+            or segment_count > self.TRUNCATION_SUBCROP_MAX_COUNT
+        ):
+            return [], "crop_area_exceeds_subcrop_limit"
+
+        segment_extent = int(
+            math.ceil(
+                (length + overlap * (segment_count - 1))
+                / float(segment_count)
+            )
+        )
+        if segment_extent > max_extent or segment_extent <= overlap:
+            return [], "crop_area_exceeds_subcrop_limit"
+        starts = [
+            int(round(index * (length - segment_extent) / (segment_count - 1)))
+            for index in range(segment_count)
+        ]
+        boxes: list[tuple[int, int, int, int]] = []
+        for start in starts:
+            end = min(length, start + segment_extent)
+            if axis == 0:
+                boxes.append((start, 0, end, height))
+            else:
+                boxes.append((0, start, width, end))
+
+        if reading_order == "right_to_left":
+            boxes.reverse()
+        return boxes, reading_order
+
+    @staticmethod
+    def _merge_truncated_subcrop_texts(
+        fragments: list[str],
+    ) -> tuple[str, int]:
+        merged_lines: list[str] = []
+        deduplicated_line_count = 0
+        for fragment in fragments:
+            lines = str(fragment or "").replace("\r\n", "\n").split("\n")
+            if not any(line.strip() for line in lines):
+                return "", deduplicated_line_count
+
+            previous_content_indices = [
+                index
+                for index, line in enumerate(merged_lines)
+                if line.strip()
+            ][-8:]
+            current_content_indices = [
+                index for index, line in enumerate(lines) if line.strip()
+            ][:8]
+            max_overlap = min(
+                len(previous_content_indices),
+                len(current_content_indices),
+            )
+            matched_overlap = 0
+            for count in range(max_overlap, 0, -1):
+                previous = [
+                    " ".join(merged_lines[index].split()).casefold()
+                    for index in previous_content_indices[-count:]
+                ]
+                current = [
+                    " ".join(lines[index].split()).casefold()
+                    for index in current_content_indices[:count]
+                ]
+                if previous == current:
+                    matched_overlap = count
+                    break
+
+            if matched_overlap:
+                cut_at = current_content_indices[matched_overlap - 1] + 1
+                lines = lines[cut_at:]
+                while lines and not lines[0].strip():
+                    lines.pop(0)
+                deduplicated_line_count += matched_overlap
+
+            merged_lines.extend(lines)
+
+        return "\n".join(merged_lines).strip(), deduplicated_line_count
+
+    def _truncation_review_reason(self, record: dict[str, Any]) -> str:
+        recovery = record.get("truncation_subcrop_recovery")
+        if not isinstance(recovery, dict):
+            return self.TRUNCATED_OCR_REASON
+        if str(recovery.get("status", "") or "") == "unavailable":
+            return (
+                f"{self.TRUNCATED_OCR_REASON}; subcrop_unavailable="
+                f"{recovery.get('reason', 'unknown_geometry')}"
+            )
+        missing = [
+            str(value)
+            for value in list(recovery.get("missing_segment_ids", []) or [])
+            if str(value)
+        ]
+        if missing:
+            return (
+                f"{self.TRUNCATED_OCR_REASON}; unresolved_subcrop_ids="
+                + ",".join(missing)
+            )
+        failure_reason = str(recovery.get("reason", "") or "")
+        if failure_reason:
+            return (
+                f"{self.TRUNCATED_OCR_REASON}; subcrop_recovery="
+                f"{failure_reason}"
+            )
+        return self.TRUNCATED_OCR_REASON
+
+    def _mark_truncated_empty(
+        self,
+        block: TextBlock,
+        record: dict[str, Any],
+    ) -> None:
+        recovery = record.get("truncation_subcrop_recovery")
+        segments = recovery.get("segments", []) if isinstance(recovery, dict) else []
+        attempt_count = 1 + len(segments) if isinstance(segments, list) else 1
+        set_block_ocr_diagnostics(
+            block,
+            text="",
+            confidence=0.0,
+            status=OCR_STATUS_EMPTY_AFTER_RETRY,
+            empty_reason=self.TRUNCATED_OCR_REASON,
+            attempt_count=attempt_count,
+            raw_text="",
+            sanitized_text="",
+        )
+        block.ocr_reject_reason = self._truncation_review_reason(record)
+
+    def _recover_truncated_ocr_text(
+        self,
+        crop: np.ndarray,
+        block: TextBlock,
+        record: dict[str, Any],
+        request_text: Callable[[np.ndarray], str],
+    ) -> str | None:
+        boxes, reading_order = self._truncation_subcrop_boxes(crop, block)
+        block_id = ensure_text_block_id(block)
+        if not boxes:
+            record["truncation_subcrop_recovery"] = {
+                "status": "unavailable",
+                "block_id": block_id,
+                "reason": reading_order,
+                "segment_ids": [],
+                "missing_segment_ids": [],
+            }
+            return None
+
+        fragments: list[str] = []
+        segment_records: list[dict[str, Any]] = []
+        segment_ids = [
+            f"{block_id}:ocr-fragment:{index + 1}"
+            for index in range(len(boxes))
+        ]
+        for index, bbox in enumerate(boxes):
+            segment_id = segment_ids[index]
+            segment_record: dict[str, Any] = {
+                "segment_id": segment_id,
+                "reading_order": index,
+                "bbox_crop_xyxy": [int(value) for value in bbox],
+            }
+            subcrop = self._crop_image(crop, bbox)
+            if subcrop is None:
+                segment_record["status"] = "invalid_crop"
+                segment_records.append(segment_record)
+                record["truncation_subcrop_recovery"] = {
+                    "status": "failed",
+                    "block_id": block_id,
+                    "geometry_source": "detector_crop_area",
+                    "reading_order": reading_order,
+                    "segments": segment_records,
+                    "missing_segment_ids": segment_ids[index:],
+                    "reason": "invalid_subcrop",
+                }
+                return None
+
+            self._raise_if_cancelled()
+            try:
+                raw_text = request_text(subcrop)
+            except PaddleDirectOcrTruncatedError:
+                segment_record["status"] = "truncated_after_retry"
+                segment_records.append(segment_record)
+                record["truncation_subcrop_recovery"] = {
+                    "status": "failed",
+                    "block_id": block_id,
+                    "geometry_source": "detector_crop_area",
+                    "reading_order": reading_order,
+                    "segments": segment_records,
+                    "missing_segment_ids": segment_ids[index:],
+                    "reason": "subcrop_still_truncated",
+                }
+                return None
+            cleaned = self._normalize_output_text(raw_text)
+            if not cleaned:
+                segment_record["status"] = "empty"
+                segment_records.append(segment_record)
+                record["truncation_subcrop_recovery"] = {
+                    "status": "failed",
+                    "block_id": block_id,
+                    "geometry_source": "detector_crop_area",
+                    "reading_order": reading_order,
+                    "segments": segment_records,
+                    "missing_segment_ids": segment_ids[index:],
+                    "reason": "empty_subcrop_response",
+                }
+                return None
+
+            fragments.append(cleaned)
+            segment_record.update(
+                {
+                    "status": "ok",
+                    "text_char_count": len(cleaned),
+                    "text_sha256": hashlib.sha256(
+                        cleaned.encode("utf-8")
+                    ).hexdigest(),
+                }
+            )
+            segment_records.append(segment_record)
+
+        merged_text, deduplicated_line_count = (
+            self._merge_truncated_subcrop_texts(fragments)
+        )
+        if not merged_text:
+            record["truncation_subcrop_recovery"] = {
+                "status": "failed",
+                "block_id": block_id,
+                "geometry_source": "detector_crop_area",
+                "reading_order": reading_order,
+                "segments": segment_records,
+                "missing_segment_ids": [],
+                "reason": "empty_merged_text",
+            }
+            return None
+        record["truncation_subcrop_recovery"] = {
+            "status": "recovered",
+            "block_id": block_id,
+            "geometry_source": "detector_crop_area",
+            "reading_order": reading_order,
+            "segments": segment_records,
+            "deduplicated_line_count": deduplicated_line_count,
+            "missing_segment_ids": [],
+            "merged_text_char_count": len(merged_text),
+            "merged_text_sha256": hashlib.sha256(
+                merged_text.encode("utf-8")
+            ).hexdigest(),
+        }
+        return merged_text
+
     def _process_prepared_job(self, job: dict[str, Any]) -> dict[str, Any]:
         record = job["request_record"]
         started_at_perf = time.perf_counter()
@@ -716,9 +1063,11 @@ class PaddleOCRVLEngine(OCREngine):
         )
         record["start_ts"] = time.time()
         blk = job["block"]
+        block_id = ensure_text_block_id(blk)
         outcome_block = copy.copy(blk)
         crop = job.get("prepared_crop")
         image_bytes = job.get("prepared_image_bytes")
+        recovered_from_subcrops = False
         try:
             self._raise_if_cancelled()
             if not isinstance(crop, np.ndarray) or not isinstance(
@@ -733,19 +1082,25 @@ class PaddleOCRVLEngine(OCREngine):
             try:
                 raw_text = self._request_ocr_text_from_encoded(bytes(image_bytes))
             except PaddleDirectOcrTruncatedError:
-                # 한도를 올린 재시도까지 잘렸다. 이 말풍선만 비우고 페이지는
-                # 계속 간다. 영구 캐시 경로도 일반 sweep 과 똑같이 동작해야 한다.
-                # 실측: 366장 배치에서 4장이 이 경로로만 실패해 원본 그대로
-                # 나갔다. 같은 잘림이 sweep 경로에서는 이미 격리되고 있었다.
-                self._mark_empty(outcome_block, self.TRUNCATED_OCR_REASON)
-                outcome_block.ocr_reject_reason = self.TRUNCATED_OCR_REASON
-                record["status"] = "truncated_after_retry"
-                logger.warning(
-                    "Leaving one cached-path block empty because its OCR "
-                    "response stayed truncated: bbox=%s",
-                    job.get("bbox"),
+                raw_text = self._recover_truncated_ocr_text(
+                    crop,
+                    outcome_block,
+                    record,
+                    lambda subcrop: self._request_ocr_text_from_encoded(
+                        self._encode_image(subcrop)
+                    ),
                 )
-                return snapshot_raw_ocr_result(outcome_block)
+                if raw_text is None:
+                    self._mark_truncated_empty(outcome_block, record)
+                    record["status"] = "truncated_after_retry"
+                    logger.warning(
+                        "Cached-path OCR still needs review after truncated "
+                        "subcrops: block_id=%s bbox=%s",
+                        block_id,
+                        job.get("bbox"),
+                    )
+                    return snapshot_raw_ocr_result(outcome_block)
+                recovered_from_subcrops = True
             finally:
                 self._request_telemetry_context.record = None
             self._raise_if_cancelled()
@@ -782,13 +1137,25 @@ class PaddleOCRVLEngine(OCREngine):
                     outcome_block,
                     text=cleaned,
                     confidence=0.0,
-                    status=OCR_STATUS_OK,
+                    status=(
+                        OCR_STATUS_OK_AFTER_RETRY
+                        if recovered_from_subcrops
+                        else OCR_STATUS_OK
+                    ),
                     empty_reason="",
-                    attempt_count=1,
+                    attempt_count=(
+                        1 + len(record["truncation_subcrop_recovery"]["segments"])
+                        if recovered_from_subcrops
+                        else 1
+                    ),
                     raw_text=raw_text,
                     sanitized_text=cleaned,
                 )
-                record["status"] = "ok"
+                record["status"] = (
+                    "recovered_truncated_subcrops"
+                    if recovered_from_subcrops
+                    else "ok"
+                )
             else:
                 self._mark_empty(
                     outcome_block,
@@ -822,6 +1189,8 @@ class PaddleOCRVLEngine(OCREngine):
         record["start_ts"] = time.time()
         bbox = job["bbox"]
         blk = job["block"]
+        block_id = ensure_text_block_id(blk)
+        recovered_from_subcrops = False
         try:
             self._raise_if_cancelled()
             crop_started_at = time.perf_counter()
@@ -854,18 +1223,23 @@ class PaddleOCRVLEngine(OCREngine):
             try:
                 raw_text = self._request_ocr_text(crop)
             except PaddleDirectOcrTruncatedError:
-                # 한도를 올린 재시도까지 잘렸다. 이 말풍선만 비우고 페이지는
-                # 계속 간다. 예전에는 이 예외가 위로 올라가 페이지 전체가
-                # 실패로 표시되고 출력에서 사라졌다.
-                self._mark_empty(blk, self.TRUNCATED_OCR_REASON)
-                blk.ocr_reject_reason = self.TRUNCATED_OCR_REASON
-                record["status"] = "truncated_after_retry"
-                logger.warning(
-                    "Leaving one block empty because its OCR response stayed "
-                    "truncated: bbox=%s",
-                    bbox,
+                raw_text = self._recover_truncated_ocr_text(
+                    crop,
+                    blk,
+                    record,
+                    self._request_ocr_text,
                 )
-                return
+                if raw_text is None:
+                    self._mark_truncated_empty(blk, record)
+                    record["status"] = "truncated_after_retry"
+                    logger.warning(
+                        "OCR block requires review after the 4096-token retry: "
+                        "block_id=%s bbox=%s",
+                        block_id,
+                        bbox,
+                    )
+                    return
+                recovered_from_subcrops = True
             finally:
                 self._request_telemetry_context.record = None
             self._raise_if_cancelled()
@@ -890,13 +1264,25 @@ class PaddleOCRVLEngine(OCREngine):
                     blk,
                     text=cleaned,
                     confidence=0.0,
-                    status=OCR_STATUS_OK,
+                    status=(
+                        OCR_STATUS_OK_AFTER_RETRY
+                        if recovered_from_subcrops
+                        else OCR_STATUS_OK
+                    ),
                     empty_reason="",
-                    attempt_count=1,
+                    attempt_count=(
+                        1 + len(record["truncation_subcrop_recovery"]["segments"])
+                        if recovered_from_subcrops
+                        else 1
+                    ),
                     raw_text=raw_text,
                     sanitized_text=cleaned,
                 )
-                record["status"] = "ok"
+                record["status"] = (
+                    "recovered_truncated_subcrops"
+                    if recovered_from_subcrops
+                    else "ok"
+                )
             else:
                 self._mark_empty(blk, "PaddleOCR VL returned no usable text.", raw_text=raw_text)
                 record["status"] = "empty"

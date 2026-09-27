@@ -142,6 +142,23 @@ class BatchReportRuntimeTests(unittest.TestCase):
         self.assertIn("Webtoon translation chunk failed", entry["reasons"][0])
         self.assertNotIn("Page processing failed", entry["reasons"][0])
 
+    def test_review_required_batch_detail_keeps_failed_block_id(self) -> None:
+        ctrl = BatchReportController(_FakeMain())
+        ctrl.start_batch_report(["/tmp/page-001.png"], run_type="batch")
+
+        ctrl.register_batch_skip(
+            "/tmp/page-001.png",
+            "translation",
+            "review_required: translation_truncated; block_id=required-block-1; translation incomplete.",
+        )
+        finalized = ctrl.finalize_batch_report(False)
+
+        self.assertIsNotNone(finalized)
+        reason = finalized["skipped_entries"][0]["reasons"][0]
+        self.assertIn("Translation failed", reason)
+        self.assertIn("translation_truncated", reason)
+        self.assertIn("block_id=required-block-1", reason)
+
     def test_legacy_translation_skip_reason_message_is_not_generic(self) -> None:
         ctrl = object.__new__(ImageStateController)
 
