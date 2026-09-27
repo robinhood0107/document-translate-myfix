@@ -1483,7 +1483,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
         processor.main_page.reset_automatic_output_reservations = mock.Mock()
         processor._recent_page_durations = []
-        pages = [object()]
+        pages = [
+            StagePageContext(
+                image_path="page.png",
+                image_name="page.png",
+                source_lang="Japanese",
+                target_lang="Korean",
+            )
+        ]
         processor._emit_benchmark_event = mock.Mock()
         processor._reset_prewarm_lifecycle = mock.Mock()
         processor._load_page_contexts = mock.Mock(return_value=pages)
