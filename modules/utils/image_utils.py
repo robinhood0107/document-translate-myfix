@@ -16,6 +16,10 @@ from modules.masking import (
 )
 from modules.masking.protect_mask import ProtectMaskSettings
 from modules.masking.ctd_positive_claim import CTDPositiveClaimProvider
+from modules.ocr.common.result_contract import (
+    OCR_STRATEGY_PADDLE_SPOTTING,
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
+)
 from modules.utils.bubble_silhouette import extract_bubble_interior_cap_crop
 from modules.utils.inpaint_composite import normalize_edit_mask
 from modules.utils.inpainting_runtime import normalized_mask_refiner_settings
@@ -25,7 +29,7 @@ from modules.utils.mask_inpaint_mode import (
 )
 from modules.utils.mask_roi import resolve_block_ctd_roi, resolve_inpaint_text_xyxy
 
-MASK_POLICY_VERSION = "ctd_lama_mask_policy_v4"
+MASK_POLICY_VERSION = "ctd_lama_mask_policy_v5_spotting_source_glyph"
 MASK_DECISION_ACCEPTED = "accepted"
 MASK_DECISION_REVIEW = "review"
 MASK_CANDIDATE_SOURCE_CTD_REFINED = "ctd_refined"
@@ -553,6 +557,7 @@ def _ctd_details(
         "mask_policy_bubble_clamp_applied_count": 0,
         "mask_policy_removed_pixel_count": 0,
         "mask_policy_outside_bubble_removed_pixel_count": 0,
+        "mask_policy_protected_pixel_removed_count": 0,
         "legacy_bbox_role": "window_only",
         "legacy_bbox_direct_erase_disabled": True,
         "ctd_legacy_rectangle_rescue_disabled": True,
@@ -567,6 +572,307 @@ def _ctd_details(
         details["hard_box_rescue_mask_pixel_count"] = int(legacy_details.get("hard_box_rescue_mask_pixel_count", 0) or 0)
     return details
 
+
+def apply_spotting_source_glyph_extension(
+    img: np.ndarray,
+    blk_list,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    # Only native Spotting quadrilaterals can authorize this narrow addition.
+    summary: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "disabled",
+        "geometry_source": "paddle_spotting_normalized_quad",
+        "blocks_seen": 0,
+        "blocks_extended": 0,
+        "lines_seen": 0,
+        "lines_extended": 0,
+        "lines_rejected": 0,
+        "added_pixels": 0,
+        "inside_line_added_pixels": 0,
+        "protected_candidate_pixels": 0,
+        "line_diagnostics": [],
+    }
+    if (
+        str(details.get("mask_refiner", "") or "") != "ctd"
+        or img is None
+        or not isinstance(img, np.ndarray)
+        or img.ndim < 2
+    ):
+        details["source_glyph_extension"] = summary
+        return summary
+
+    base_mask = normalize_edit_mask(details.get("final_mask"), img.shape)
+    if not np.any(base_mask):
+        summary["status"] = "missing_base_mask"
+        details["source_glyph_extension"] = summary
+        return summary
+    protect = normalize_edit_mask(details.get("protect_mask"), img.shape)
+    protected_corner = normalize_edit_mask(
+        details.get("protected_corner_mask"), img.shape
+    )
+    protected = np.where(
+        (protect > 0) | (protected_corner > 0), 255, 0
+    ).astype(np.uint8)
+    bubble_cap = normalize_edit_mask(
+        details.get("bubble_interior_cap_mask"), img.shape
+    )
+    source = np.asarray(img[:, :, :3] if img.ndim == 3 else img)
+    if source.ndim == 2:
+        source = np.repeat(source[:, :, None], 3, axis=2)
+    if source.dtype != np.uint8:
+        source = np.clip(source, 0, 255).astype(np.uint8)
+    height, width = source.shape[:2]
+    selected = np.zeros((height, width), dtype=np.uint8)
+    allowed_source_bands = np.zeros((height, width), dtype=np.uint8)
+    line_diagnostics: list[dict[str, Any]] = []
+
+    for block in list(blk_list or []):
+        if (
+            str(getattr(block, "ocr_strategy", "") or "")
+            != OCR_STRATEGY_PADDLE_SPOTTING
+            or str(getattr(block, "processing_action", "") or "")
+            != PROCESSING_ACTION_TRANSLATE_INPAINT
+        ):
+            continue
+        provenance = dict(getattr(block, "ocr_geometry_provenance", {}) or {})
+        if provenance.get("source") != "paddle_spotting_normalized_quad":
+            continue
+        regions = list(getattr(block, "ocr_regions", []) or [])
+        if not regions:
+            continue
+        block_id = str(getattr(block, "block_id", "") or "")
+        is_bubble = str(getattr(block, "text_class", "") or "").lower() == "text_bubble"
+        if is_bubble and not np.any(bubble_cap):
+            for region in regions:
+                summary["lines_seen"] += 1
+                summary["lines_rejected"] += 1
+                line_diagnostics.append({
+                    "block_id": block_id,
+                    "source_line": region.get("source_line"),
+                    "status": "verified_bubble_interior_unavailable",
+                    "added_pixels": 0,
+                })
+            continue
+        summary["blocks_seen"] += 1
+        block_added_before = int(np.count_nonzero(selected))
+
+        for region in regions:
+            summary["lines_seen"] += 1
+            line_no = region.get("source_line")
+            bbox = region.get("bbox_xyxy")
+            points = region.get("points")
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                summary["lines_rejected"] += 1
+                line_diagnostics.append({"block_id": block_id, "source_line": line_no, "status": "invalid_bbox", "added_pixels": 0})
+                continue
+            x1, y1, x2, y2 = [int(round(float(v))) for v in bbox]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(width, x2), min(height, y2)
+            if x2 <= x1 or y2 <= y1:
+                summary["lines_rejected"] += 1
+                line_diagnostics.append({"block_id": block_id, "source_line": line_no, "status": "empty_bbox", "added_pixels": 0})
+                continue
+
+            orientation = ""
+            if isinstance(points, (list, tuple)) and len(points) >= 4:
+                try:
+                    quad = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+                    vectors = [quad[(i + 1) % len(quad)] - quad[i] for i in range(len(quad))]
+                    major = max(vectors, key=lambda v: float(np.linalg.norm(v)))
+                    angle = float(np.degrees(np.arctan2(abs(float(major[1])), max(abs(float(major[0])), 1e-6))))
+                    if angle <= 15.0:
+                        orientation = "horizontal"
+                    elif angle >= 75.0:
+                        orientation = "vertical"
+                    else:
+                        summary["lines_rejected"] += 1
+                        line_diagnostics.append({"block_id": block_id, "source_line": line_no, "status": "oblique_geometry_review", "angle_degrees": round(angle, 3), "added_pixels": 0})
+                        continue
+                except (TypeError, ValueError):
+                    orientation = ""
+            if not orientation:
+                direction = str(getattr(block, "direction", "") or "").lower()
+                if direction.startswith("vertical"):
+                    orientation = "vertical"
+                elif direction.startswith(("horizontal", "ltr", "rtl")):
+                    orientation = "horizontal"
+                else:
+                    summary["lines_rejected"] += 1
+                    line_diagnostics.append({"block_id": block_id, "source_line": line_no, "status": "missing_axis_geometry", "added_pixels": 0})
+                    continue
+
+            cross_extent = (y2 - y1) if orientation == "horizontal" else (x2 - x1)
+            cap = min(64, max(24, int(round(0.75 * cross_extent))))
+            if orientation == "horizontal":
+                ylo, yhi = max(0, y1 - 2), min(height, y2 + 2)
+                xlo, xhi = max(0, x1 - cap), min(width, x2 + cap)
+                left_width, right_start = x1 - xlo, x2 - xlo
+                side = np.zeros((yhi - ylo, xhi - xlo), dtype=bool)
+                if left_width > 0:
+                    side[:, :left_width] = True
+                if right_start < side.shape[1]:
+                    side[:, right_start:] = True
+            else:
+                xlo, xhi = max(0, x1 - 2), min(width, x2 + 2)
+                ylo, yhi = max(0, y1 - cap), min(height, y2 + cap)
+                top_height, bottom_start = y1 - ylo, y2 - ylo
+                side = np.zeros((yhi - ylo, xhi - xlo), dtype=bool)
+                if top_height > 0:
+                    side[:top_height, :] = True
+                if bottom_start < side.shape[0]:
+                    side[bottom_start:, :] = True
+
+            roi_source = source[ylo:yhi, xlo:xhi]
+            roi_base = base_mask[ylo:yhi, xlo:xhi] > 0
+            roi_protect = protected[ylo:yhi, xlo:xhi] > 0
+            roi_allowed = side.copy()
+            if is_bubble:
+                roi_allowed &= bubble_cap[ylo:yhi, xlo:xhi] > 0
+            sample_mask = roi_allowed & ~roi_base & ~roi_protect
+            samples = roi_source[sample_mask].astype(np.float32)
+            if samples.shape[0] < 100:
+                summary["lines_rejected"] += 1
+                line_diagnostics.append({"block_id": block_id, "source_line": line_no, "status": "insufficient_background_samples", "sample_pixels": int(samples.shape[0]), "added_pixels": 0})
+                continue
+            background = np.median(samples, axis=0)
+            contrast = np.max(np.abs(roi_source.astype(np.float32) - background[None, None, :]), axis=2)
+            selected_band = np.zeros_like(side, dtype=bool)
+            extents: dict[str, int] = {}
+            if orientation == "horizontal":
+                if left_width > 0:
+                    left_fg = contrast[:, :left_width] >= 16
+                    extent = left_width - int(np.where(left_fg)[1].min()) if np.any(left_fg) else 0
+                    selected_width = min(left_width, cap, extent + 2) if extent else 0
+                    extents["left"] = extent
+                    if selected_width:
+                        selected_band[:, left_width - selected_width:left_width] = True
+                if right_start < contrast.shape[1]:
+                    right_fg = contrast[:, right_start:] >= 16
+                    extent = int(np.where(right_fg)[1].max() + 1) if np.any(right_fg) else 0
+                    selected_width = min(contrast.shape[1] - right_start, cap, extent + 2) if extent else 0
+                    extents["right"] = extent
+                    if selected_width:
+                        selected_band[:, right_start:right_start + selected_width] = True
+            else:
+                if top_height > 0:
+                    top_fg = contrast[:top_height, :] >= 16
+                    extent = top_height - int(np.where(top_fg)[0].min()) if np.any(top_fg) else 0
+                    selected_height = min(top_height, cap, extent + 2) if extent else 0
+                    extents["top"] = extent
+                    if selected_height:
+                        selected_band[top_height - selected_height:top_height, :] = True
+                if bottom_start < contrast.shape[0]:
+                    bottom_fg = contrast[bottom_start:, :] >= 16
+                    extent = int(np.where(bottom_fg)[0].max() + 1) if np.any(bottom_fg) else 0
+                    selected_height = min(contrast.shape[0] - bottom_start, cap, extent + 2) if extent else 0
+                    extents["bottom"] = extent
+                    if selected_height:
+                        selected_band[bottom_start:bottom_start + selected_height, :] = True
+
+            before_protect = selected_band & side & ~roi_base & roi_allowed
+            potential_protect = int(np.count_nonzero(before_protect & roi_protect))
+            summary["protected_candidate_pixels"] += potential_protect
+            near_mask = before_protect & ~roi_protect
+            near_pixels = roi_source[near_mask].astype(np.float32)
+            near_ratio = float(np.mean(np.max(np.abs(near_pixels - background[None, :]), axis=1) <= 8)) if near_pixels.shape[0] else 1.0
+            if near_ratio < 0.55:
+                summary["lines_rejected"] += 1
+                line_diagnostics.append({"block_id": block_id, "source_line": line_no, "status": "source_background_not_separable", "near_background_ratio": round(near_ratio, 6), "added_pixels": 0})
+                continue
+            local_foreground = (contrast >= 8) & near_mask
+            side_added = int(np.count_nonzero(local_foreground))
+
+            # A native OCR quad can include real source glyph pixels that a broader
+            # detector mask missed. Recover only foreground at the line's two ends,
+            # inside the quad, near the base mask, and outside every protect mask.
+            # The previous path inspected only pixels outside the quad and left such
+            # clipped edge glyphs untouched while reporting the line as complete.
+            inside_endpoint = np.zeros_like(side, dtype=bool)
+            native_quad_valid = False
+            if isinstance(points, (list, tuple)) and len(points) >= 4:
+                try:
+                    quad = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+                    if len(quad) >= 4 and np.all(np.isfinite(quad)):
+                        quad_roi = np.rint(quad - np.asarray([xlo, ylo])).astype(np.int32)
+                        polygon = np.zeros(side.shape, dtype=np.uint8)
+                        cv2.fillPoly(polygon, [quad_roi], 255)
+                        native_quad_valid = bool(np.any(polygon))
+                        if native_quad_valid:
+                            if orientation == "horizontal":
+                                left_edge = x1 - xlo
+                                right_edge = x2 - xlo
+                                inner_width = min(cap, max(1, x2 - x1))
+                                inside_endpoint[:, left_edge:min(side.shape[1], left_edge + inner_width)] = True
+                                inside_endpoint[:, max(0, right_edge - inner_width):right_edge] = True
+                            else:
+                                top_edge = y1 - ylo
+                                bottom_edge = y2 - ylo
+                                inner_height = min(cap, max(1, y2 - y1))
+                                inside_endpoint[top_edge:min(side.shape[0], top_edge + inner_height), :] = True
+                                inside_endpoint[max(0, bottom_edge - inner_height):bottom_edge, :] = True
+                            inside_endpoint &= polygon > 0
+                except (TypeError, ValueError):
+                    native_quad_valid = False
+
+            if is_bubble:
+                inside_endpoint &= bubble_cap[ylo:yhi, xlo:xhi] > 0
+            inside_candidates = (
+                (contrast >= 16)
+                & inside_endpoint
+                & ~roi_base
+                & ~roi_protect
+            ) if native_quad_valid else np.zeros_like(side, dtype=bool)
+            inside_added = int(np.count_nonzero(inside_candidates))
+            added = side_added + inside_added
+            if added:
+                selected_roi = selected[ylo:yhi, xlo:xhi]
+                selected_roi[:] = np.maximum(
+                    selected_roi,
+                    np.where(local_foreground | inside_candidates, 255, 0).astype(np.uint8),
+                )
+                allowed_roi = allowed_source_bands[ylo:yhi, xlo:xhi]
+                allowed_roi[:] = np.maximum(
+                    allowed_roi,
+                    np.where(before_protect | inside_endpoint, 255, 0).astype(np.uint8),
+                )
+                summary["lines_extended"] += 1
+            line_diagnostics.append({
+                "block_id": block_id,
+                "source_line": line_no,
+                "orientation": orientation,
+                "bbox_xyxy": [x1, y1, x2, y2],
+                "search_cap_px": cap,
+                "foreground_extents_px": extents,
+                "near_background_ratio": round(near_ratio, 6),
+                "source_foreground_pixels": added,
+                "outside_quad_source_foreground_pixels": side_added,
+                "inside_quad_endpoint_source_foreground_pixels": inside_added,
+                "status": "extended" if added else "no_unmasked_source_foreground",
+                "added_pixels": added,
+            })
+            summary["inside_line_added_pixels"] += inside_added
+        if int(np.count_nonzero(selected)) > block_added_before:
+            summary["blocks_extended"] += 1
+
+    dilated = cv2.dilate(selected, np.ones((3, 3), np.uint8), iterations=1) > 0
+    addition = dilated & (allowed_source_bands > 0) & (base_mask == 0) & (protected == 0)
+    added_count = int(np.count_nonzero(addition))
+    if added_count:
+        final_mask = np.where((base_mask > 0) | addition, 255, 0).astype(np.uint8)
+        details["final_mask"] = final_mask
+        details["final_mask_post_expand"] = final_mask.copy()
+        details["final_mask_pixel_count"] = int(np.count_nonzero(final_mask))
+        existing_source = str(details.get("mask_candidate_source", "") or "ctd_refined")
+        details["mask_candidate_source"] = existing_source + "+spotting_source_glyph"
+        summary["status"] = "completed"
+    elif summary["lines_rejected"]:
+        summary["status"] = "review_required"
+    else:
+        summary["status"] = "no_source_supported_additions"
+    summary["added_pixels"] = added_count
+    details["source_glyph_extension"] = summary
+    return summary
 
 def generate_mask(
     img: np.ndarray,
@@ -755,6 +1061,35 @@ def generate_mask(
                     details[
                         "mask_policy_verified_bubble_dilate_reduced_pixel_count"
                     ] = removed_by_narrower_dilation
+    if str(details.get("mask_refiner", "") or "") == "ctd":
+        current_mask = normalize_edit_mask(details.get("final_mask"), img.shape)
+        protected_mask = normalize_edit_mask(details.get("protect_mask"), img.shape)
+        reintroduced_protected_pixels = int(
+            np.count_nonzero((current_mask > 0) & (protected_mask > 0))
+        )
+        if reintroduced_protected_pixels:
+            current_mask[protected_mask > 0] = 0
+            details["final_mask"] = current_mask
+            details["final_mask_pixel_count"] = int(
+                np.count_nonzero(current_mask)
+            )
+            details["mask_policy_protected_pixel_removed_count"] = (
+                reintroduced_protected_pixels
+            )
+            if (
+                not np.any(current_mask)
+                and int(details.get("ctd_or_mask_pixel_count", 0) or 0) > 0
+            ):
+                details["mask_candidate_source"] = MASK_CANDIDATE_SOURCE_NONE
+                details["mask_decision"] = MASK_DECISION_REVIEW
+                details["mask_reject_reason"] = "ctd_claim_fully_protected"
+        details["final_mask_post_expand"] = current_mask.copy()
+    details["source_glyph_extension"] = apply_spotting_source_glyph_extension(
+        img,
+        blk_list,
+        details,
+    )
+    details["mask_policy_version"] = MASK_POLICY_VERSION
     details["final_mask_dilate_size"] = final_dilate_size
     annotate_block_mask_attribution(
         blk_list,

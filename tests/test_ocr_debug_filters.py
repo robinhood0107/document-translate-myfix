@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import cv2
+import numpy as np
+
 import modules.utils.ocr_debug as ocr_debug_module
 from modules.utils.ocr_debug import (
+    apply_source_structure_review_candidates,
     drop_embedded_ui_ocr_blocks,
     group_bubble_panel_text_candidates,
     is_bubble_panel_text_candidate,
     is_embedded_ui_panel_layout_review_candidate,
+    split_inpaint_protected_ocr_blocks,
 )
 
 
@@ -23,6 +28,58 @@ def _block(
         text_class=text_class,
         bubble_xyxy=list(bubble_xyxy) if bubble_xyxy is not None else None,
     )
+
+
+def test_source_structure_review_preserves_lace_like_block_and_routes_review() -> None:
+    image = np.full((180, 180, 3), 190, dtype=np.uint8)
+    for offset in range(24, 150, 16):
+        cv2.line(image, (30, offset), (150, min(170, offset + 20)), (42, 42, 42), 2)
+        cv2.line(image, (30, min(170, offset + 20)), (150, offset), (42, 42, 42), 2)
+    block = _block("noisy OCR fragment", (30, 24, 150, 170), "text_free")
+
+    reviewed = apply_source_structure_review_candidates([block], image)
+
+    assert [item["block_id"] for item in reviewed] == [block.block_id]
+    assert block.processing_action == "review"
+    assert block.semantic_role == "ambiguous"
+    assert block.processing_decision_source == "source_structure_review"
+    assert block.mask_decision == "review"
+    assert block.source_structure_diagnostics["review_candidate"] is True
+    assert block.source_structure_diagnostics["ocr_confidence_used"] is False
+    assert block.source_structure_diagnostics["ocr_text_length_used"] is False
+    inpaint_blocks, protected_blocks = split_inpaint_protected_ocr_blocks([block])
+    assert inpaint_blocks == []
+    assert protected_blocks == [block]
+
+
+def test_source_structure_review_keeps_dialogue_like_controls() -> None:
+    image = np.full((180, 180, 3), 245, dtype=np.uint8)
+    cv2.putText(image, "TEST TEXT", (24, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (10, 10, 10), 2)
+    free_text = _block("ordinary overlay text", (20, 35, 160, 120), "text_free")
+    bubble_text = _block("ordinary bubble text", (30, 30, 150, 150), "text_bubble")
+
+    reviewed = apply_source_structure_review_candidates(
+        [free_text, bubble_text], image
+    )
+
+    assert reviewed == []
+    assert free_text.source_structure_diagnostics["review_candidate"] is False
+    assert not hasattr(bubble_text, "source_structure_diagnostics")
+
+
+def test_source_structure_review_does_not_override_explicit_block_action() -> None:
+    image = np.full((180, 180, 3), 190, dtype=np.uint8)
+    for offset in range(24, 150, 16):
+        cv2.line(image, (30, offset), (150, min(170, offset + 20)), (42, 42, 42), 2)
+        cv2.line(image, (30, min(170, offset + 20)), (150, offset), (42, 42, 42), 2)
+    block = _block("explicitly classified", (30, 24, 150, 170), "text_free")
+    block.processing_action = "translate_inpaint"
+    block.processing_decision_source = "explicit_user_decision"
+
+    reviewed = apply_source_structure_review_candidates([block], image)
+
+    assert reviewed == []
+    assert block.processing_action == "translate_inpaint"
 
 
 def test_embedded_ui_cluster_drops_dense_small_ui_labels_before_inpaint() -> None:

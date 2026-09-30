@@ -114,15 +114,16 @@ class PaddleOCRVLEngine(OCREngine):
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_TIMEOUT_SECONDS = 60
     REQUEST_RETRY_TOTAL_ATTEMPTS = 3
-    # 응답이 잘렸을 때 한 번만 올려서 다시 물어볼 토큰 한도 배수와 그 상한.
-    # 상한을 두는 이유는 한 말풍선이 컨텍스트를 통째로 먹는 것을 막기 위해서다.
-    TRUNCATION_RETRY_MULTIPLIER = 3
+    # 잘린 OCR 응답은 모델이 허용하는 재시도 상한까지 한 번 더 요청한다.
     TRUNCATION_RETRY_MAX_TOKENS = 4096
     # 재시도까지 잘린 블록에 남기는 사유. 페이지는 계속 진행한다.
     TRUNCATED_OCR_REASON = "ocr_response_truncated"
     TRUNCATION_SUBCROP_MAX_EXTENT = 768
     TRUNCATION_SUBCROP_OVERLAP_PX = 128
     TRUNCATION_SUBCROP_MAX_COUNT = 8
+    REPETITIVE_OCR_MIN_CHAR_COUNT = 256
+    REPETITIVE_OCR_MAX_PATTERN_LENGTH = 8
+    REPETITIVE_OCR_MIN_MATCH_RATIO = 0.98
     REQUEST_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
     TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
     TEXT_EXPANSION_RATIO = 0.03
@@ -784,15 +785,54 @@ class PaddleOCRVLEngine(OCREngine):
 
         # Split between horizontal text lines (y axis) or vertical text
         # columns (x axis), preserving the page's existing reading direction.
-        # If only a single long line/column exceeds the limit, use an area-only
-        # fallback along the text direction and record that fallback.
+        # If both sides fit under the large-crop limit, a confirmed truncated
+        # response can still need smaller pieces. Use only a clearly elongated
+        # detector crop, split its longer side into two overlapping pieces, and
+        # derive order from the existing direction and area geometry.
         axis = 0 if vertical_text else 1
         reading_order = "right_to_left" if vertical_text else "top_to_bottom"
         extents = [width, height]
+        if max(extents) <= self.TRUNCATION_SUBCROP_MAX_EXTENT:
+            if max(extents) < min(extents) * 2:
+                return [], "crop_area_not_splittable"
+            axis = 0 if width > height else 1
+            if vertical_text:
+                reading_order = (
+                    "right_to_left" if axis == 0 else "top_to_bottom"
+                )
+            else:
+                reading_order = (
+                    "top_to_bottom"
+                    if axis == 1
+                    else (
+                        "right_to_left"
+                        if direction.endswith("rtl")
+                        else "left_to_right"
+                    )
+                )
+
+            length = extents[axis]
+            overlap = min(
+                int(self.TRUNCATION_SUBCROP_OVERLAP_PX),
+                max(1, length // 4),
+            )
+            segment_extent = int(math.ceil((length + overlap) / 2.0))
+            if segment_extent <= overlap or segment_extent >= length:
+                return [], "crop_area_not_splittable"
+            starts = [0, length - segment_extent]
+            boxes = []
+            for start in starts:
+                end = min(length, start + segment_extent)
+                if axis == 0:
+                    boxes.append((start, 0, end, height))
+                else:
+                    boxes.append((0, start, width, end))
+            if reading_order == "right_to_left":
+                boxes.reverse()
+            return boxes, reading_order
+
         if extents[axis] <= self.TRUNCATION_SUBCROP_MAX_EXTENT:
             other_axis = 1 - axis
-            if extents[other_axis] <= self.TRUNCATION_SUBCROP_MAX_EXTENT:
-                return [], "crop_area_not_splittable"
             axis = other_axis
             if vertical_text:
                 reading_order = "top_to_bottom"
@@ -1638,10 +1678,7 @@ class PaddleOCRVLEngine(OCREngine):
         # 잘림은 토큰 한도라는 원인이 분명하므로, 한도를 올려 한 번만 다시
         # 물어본다. 글자가 유난히 많은 말풍선 하나 때문에 페이지 전체를 버릴
         # 이유는 없다.
-        retry_budget = min(
-            int(self.max_new_tokens * self.TRUNCATION_RETRY_MULTIPLIER),
-            self.TRUNCATION_RETRY_MAX_TOKENS,
-        )
+        retry_budget = int(self.TRUNCATION_RETRY_MAX_TOKENS)
         if retry_budget > budgets[0]:
             budgets.append(retry_budget)
 
@@ -2071,6 +2108,8 @@ class PaddleOCRVLEngine(OCREngine):
     def _classify_non_text_response(self, blk: TextBlock, text: str, crop: np.ndarray) -> str:
         if self._looks_like_non_text_response(text):
             return "model_non_text_response"
+        if self._looks_like_pathological_repetition(text):
+            return "pathological_repeated_ocr_output"
         if not self._is_text_free_without_bubble(blk):
             return ""
         non_target_reason = self._classify_non_target_text_free_response(blk, text, crop)
@@ -2079,6 +2118,30 @@ class PaddleOCRVLEngine(OCREngine):
         if self._looks_like_low_signal_text_free_hallucination(text, crop):
             return "low_signal_text_free_hallucination"
         return ""
+
+    @classmethod
+    def _looks_like_pathological_repetition(cls, text: str) -> bool:
+        compact = "".join(str(text or "").split())
+        if len(compact) < int(cls.REPETITIVE_OCR_MIN_CHAR_COUNT):
+            return False
+        max_pattern_length = min(
+            int(cls.REPETITIVE_OCR_MAX_PATTERN_LENGTH),
+            len(compact) // 2,
+        )
+        for pattern_length in range(1, max_pattern_length + 1):
+            comparable_count = len(compact) - pattern_length
+            match_count = sum(
+                1
+                for index in range(pattern_length, len(compact))
+                if compact[index] == compact[index - pattern_length]
+            )
+            if (
+                comparable_count > 0
+                and match_count / float(comparable_count)
+                >= float(cls.REPETITIVE_OCR_MIN_MATCH_RATIO)
+            ):
+                return True
+        return False
 
     @classmethod
     def _looks_like_non_text_response(cls, text: str) -> bool:

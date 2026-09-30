@@ -451,3 +451,46 @@ def test_handler_losslessly_restores_every_pixel_outside_edit_mask() -> None:
         == 0
     )
     assert handler.last_inpaint_diagnostics["cpu_fallback_used"] is False
+
+
+def test_handler_excludes_protected_border_from_rebuilt_blockwise_edit_mask() -> None:
+    handler = InpaintingHandler(SimpleNamespace(settings_page=object()))
+    handler.cached_inpainter_key = "lama_large_512px"
+    handler.inpainter_cache = SimpleNamespace(
+        runtime_device="cuda",
+        precision="fp32",
+        inpaint_size=2048,
+    )
+    handler._ensure_inpainter = lambda: handler.inpainter_cache
+    image = np.full((8, 8, 3), 10, dtype=np.uint8)
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    mask[2:5, 2:5] = 255
+    protect = np.zeros_like(mask)
+    protect[3, 3] = 255
+    unsafe_edit_mask = mask.copy()
+    unsafe_result = np.full_like(image, 200)
+
+    with mock.patch(
+        "pipeline.inpainting.source_lama_blockwise_inpaint_result",
+        return_value=SourceLamaBlockwiseResult(
+            image=unsafe_result,
+            edit_mask=unsafe_edit_mask,
+            diagnostics=[],
+        ),
+    ) as run_lama:
+        result = handler.inpaint_with_blocks(
+            image,
+            mask,
+            [],
+            config=object(),
+            protect_mask=protect,
+        )
+
+    passed_mask = run_lama.call_args.args[1]
+    assert int(passed_mask[3, 3]) == 0
+    assert int(handler.last_inpaint_edit_mask[3, 3]) == 0
+    np.testing.assert_array_equal(result[3, 3], image[3, 3])
+    np.testing.assert_array_equal(result[2, 2], unsafe_result[2, 2])
+    assert handler.last_inpaint_diagnostics["protected_input_mask_pixels_removed"] == 1
+    assert handler.last_inpaint_diagnostics["protected_edit_mask_pixels_removed"] == 1
+    assert handler.last_inpaint_diagnostics["outside_mask_changed_pixel_count"] == 0

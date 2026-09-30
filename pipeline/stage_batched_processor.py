@@ -116,6 +116,7 @@ from modules.utils.gpu_handoff import (
 )
 from modules.utils.gpu_metrics import query_cuda_handoff_metrics
 from modules.utils.image_utils import (
+    MASK_POLICY_VERSION,
     generate_mask,
     release_protected_mask_for_explicit_additions,
 )
@@ -130,6 +131,7 @@ from modules.utils.ocr_debug import (
     OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
     OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
     all_empty_blocks_are_rejected,
+    apply_source_structure_review_candidates,
     drop_embedded_ui_ocr_blocks,
     drop_rejected_empty_ocr_blocks,
     is_block_ocr_empty,
@@ -2343,6 +2345,34 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(page_profile or {})
             page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
+        source_structure_reviews = apply_source_structure_review_candidates(
+            ctx.blk_list,
+            ctx.image,
+        )
+        if source_structure_reviews:
+            source_structure_failures = [
+                {
+                    "block_id": item["block_id"],
+                    "stage": "ocr",
+                    "cause": item["cause"],
+                    "reason": item["reason"],
+                    "block_class": "text_free",
+                    "page_blocking": False,
+                    "review_required": True,
+                    "source_structure_diagnostics": item[
+                        "source_structure_diagnostics"
+                    ],
+                }
+                for item in source_structure_reviews
+            ]
+            block_failures.extend(source_structure_failures)
+            ctx.block_failure_ledger.extend(source_structure_failures)
+            page_profile = dict(page_profile or {})
+            page_profile["source_structure_review_blocks"] = list(
+                source_structure_reviews
+            )
+            page_profile["block_failures"] = list(block_failures)
+
         routed_blocks = [
             *ctx.blk_list,
             *embedded_ui_blocks,
@@ -2386,6 +2416,9 @@ class StageBatchedProcessor(BatchProcessor):
         metrics["ocr_review_only_block_count"] = sum(
             not bool(failure.get("page_blocking", True))
             for failure in block_failures
+        )
+        metrics["ocr_source_structure_review_block_count"] = len(
+            source_structure_reviews
         )
         retained_ids = {
             str(getattr(block, "block_id", "") or "")
@@ -3201,7 +3234,10 @@ class StageBatchedProcessor(BatchProcessor):
             str(runtime.get("key", "") or ""),
             str(runtime.get("backend", "") or ""),
         )
-        mask_settings = settings_page.get_mask_refiner_settings()
+        mask_settings = dict(settings_page.get_mask_refiner_settings())
+        # Inpaint checkpoints must miss when a generic source-geometry mask
+        # policy changes, even though the user-facing mask settings did not.
+        mask_settings["mask_policy_version"] = MASK_POLICY_VERSION
         config = get_config(settings_page)
         checkpoint_store = getattr(self, "_project_checkpoint_store", None)
         pending: list[tuple[int, StagePageContext, list[Any]]] = []
@@ -3498,6 +3534,46 @@ class StageBatchedProcessor(BatchProcessor):
                         return_details=True,
                         precomputed_mask_details=ctx.precomputed_mask_details,
                     )
+                extension = dict(
+                    ctx.mask_details.get("source_glyph_extension", {}) or {}
+                )
+                rejected_extension_blocks = {
+                    str(item.get("block_id") or "")
+                    for item in list(extension.get("line_diagnostics") or [])
+                    if str(item.get("status") or "")
+                    not in {"extended", "no_unmasked_source_foreground"}
+                    and str(item.get("block_id") or "")
+                }
+                if rejected_extension_blocks:
+                    review_failures = []
+                    for block in ctx.blk_list:
+                        block_id = ensure_text_block_id(block)
+                        if block_id not in rejected_extension_blocks:
+                            continue
+                        block.mask_decision = "review"
+                        block.mask_reject_reason = (
+                            "source_glyph_extension_unresolved"
+                        )
+                        review_failures.append(
+                            {
+                                "block_id": block_id,
+                                "stage": "inpaint",
+                                "cause": "source_glyph_extension_unresolved",
+                                "reason": "native Spotting line edge extension failed its source/protection guard",
+                                "block_class": str(
+                                    getattr(block, "text_class", "") or ""
+                                ),
+                                "page_blocking": False,
+                                "review_required": True,
+                            }
+                        )
+                    ctx.block_failure_ledger.extend(review_failures)
+                    ctx.mask_details[
+                        "source_glyph_extension_review_block_ids"
+                    ] = sorted(rejected_extension_blocks)
+                    ctx.mask_details[
+                        "source_glyph_extension_review_block_count"
+                    ] = len(rejected_extension_blocks)
                 if protected_blocks:
                     ctx.mask_details["inpaint_protected_block_count"] = len(
                         protected_blocks
@@ -3536,12 +3612,24 @@ class StageBatchedProcessor(BatchProcessor):
                             ctx.mask,
                             ctx.image.shape,
                         )
+                        (
+                            ctx.mask_details["protect_mask"],
+                            released_protected_border_pixels,
+                        ) = release_protected_mask_for_explicit_additions(
+                            ctx.mask_details.get("protect_mask"),
+                            automatic_mask,
+                            ctx.mask,
+                            ctx.image.shape,
+                        )
                         ctx.mask_details[
                             "project_brush_strokes_applied"
                         ] = True
                         ctx.mask_details[
                             "protected_corner_brush_override_pixel_count"
                         ] = int(released_protected_pixels)
+                        ctx.mask_details[
+                            "protected_border_brush_override_pixel_count"
+                        ] = int(released_protected_border_pixels)
 
                 ctx.project_inpaint_checkpoint_status = (
                     "miss" if checkpoint_store is not None else "disabled"
@@ -3643,6 +3731,7 @@ class StageBatchedProcessor(BatchProcessor):
                         protected_corner_mask=ctx.mask_details.get(
                             "protected_corner_mask"
                         ),
+                        protect_mask=ctx.mask_details.get("protect_mask"),
                     )
                 self._sample_performance_resources("inpainter_forward_end")
                 ctx.inpaint_diagnostics = dict(

@@ -46,7 +46,6 @@ class TruncationSignalTests(unittest.TestCase):
 class _StubEngine:
     """`_request_direct_ocr_text_from_encoded` 만 실제 구현으로 돌린다."""
 
-    TRUNCATION_RETRY_MULTIPLIER = PaddleOCRVLEngine.TRUNCATION_RETRY_MULTIPLIER
     TRUNCATION_RETRY_MAX_TOKENS = PaddleOCRVLEngine.TRUNCATION_RETRY_MAX_TOKENS
 
     _request_direct_ocr_text_from_encoded = (
@@ -87,14 +86,15 @@ class TruncationRetryTests(unittest.TestCase):
         finally:
             engine_module.encoded_product_jpeg_to_png = original
 
-    def test_a_truncated_first_attempt_retries_with_a_larger_budget(self) -> None:
+    def test_a_1024_token_request_retries_at_the_4096_token_cap(self) -> None:
         engine = self._run(
             [_response("cut off", "length"), _response("full text", "stop")]
         )
 
         self.assertEqual(engine.result, "full text")
-        self.assertEqual(engine.requested_max_tokens, [1024, 3072])
+        self.assertEqual(engine.requested_max_tokens, [1024, 4096])
         self.assertEqual(engine.record.get("truncation_retry_count"), 1)
+        self.assertEqual(engine.record.get("truncation_retry_max_tokens"), 4096)
 
     def test_a_complete_first_attempt_does_not_retry(self) -> None:
         engine = self._run([_response("all of it", "stop")])
@@ -118,8 +118,7 @@ class TruncationRetryTests(unittest.TestCase):
         finally:
             engine_module.encoded_product_jpeg_to_png = original
 
-        # 3배는 12288 이지만 상한이 4096 이다. 이미 상한이면 같은 한도로 다시
-        # 물어봐야 소용이 없으므로 재시도하지 않는다.
+        # 요청이 이미 상한이면 같은 한도로 다시 물어봐야 소용이 없다.
         self.assertEqual(engine.requested_max_tokens, [4096])
 
     def test_2048_token_limit_retries_once_at_4096(self) -> None:

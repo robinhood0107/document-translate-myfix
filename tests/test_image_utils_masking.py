@@ -10,11 +10,35 @@ import numpy as np
 from modules.utils.image_utils import (
     _build_block_bubble_seed_crop,
     _build_candidate_window_mask,
+    apply_spotting_source_glyph_extension,
     generate_mask,
     restore_original_for_block_masks,
     release_protected_mask_for_explicit_additions,
 )
 from modules.utils.textblock import TextBlock
+
+
+def _spotting_line_block(*, text_class: str = "text_free") -> TextBlock:
+    block = TextBlock(
+        text_bbox=np.asarray([100, 70, 142, 102], dtype=np.int32),
+        text_class=text_class,
+        text="TEST",
+        block_id="spotting-line-test",
+        processing_action="translate_inpaint",
+        ocr_strategy="paddle_spotting_full_page",
+        ocr_geometry_provenance={
+            "source": "paddle_spotting_normalized_quad",
+            "detector_geometry_authoritative": True,
+        },
+        ocr_regions=[
+            {
+                "source_line": 1,
+                "bbox_xyxy": [100, 70, 142, 102],
+                "points": [[100, 70], [142, 70], [142, 102], [100, 102]],
+            }
+        ],
+    )
+    return block
 
 
 class ImageUtilsMaskingTests(unittest.TestCase):
@@ -206,6 +230,92 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertEqual(details["refiner_device"], "cuda")
         self.assertGreater(int(np.count_nonzero(details["protect_mask"])), 0)
         self.assertEqual(int(np.count_nonzero(details["final_mask"])), int(np.count_nonzero(base_mask)) - 4)
+
+    def test_final_dilation_cannot_reintroduce_protected_bubble_border_pixels(self) -> None:
+        image = np.zeros((24, 24, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([8, 8, 16, 16]),
+            text_class="text_bubble",
+        )
+        base_mask = np.zeros((24, 24), dtype=np.uint8)
+        base_mask[10, 10] = 255
+        protect_mask = np.zeros_like(base_mask)
+        protect_mask[10, 11] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=protect_mask,
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": True,
+                    "final_mask_dilate_size": 2,
+                },
+                return_details=True,
+            )
+
+        final_mask = np.asarray(details["final_mask"]) > 0
+        protected = np.asarray(details["protect_mask"]) > 0
+        self.assertEqual(int(np.count_nonzero(final_mask & protected)), 0)
+        self.assertEqual(
+            int(details["mask_policy_protected_pixel_removed_count"]),
+            1,
+        )
+
+    def test_fully_protected_ctd_claim_becomes_review_instead_of_edit_permission(self) -> None:
+        image = np.zeros((24, 24, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([8, 8, 16, 16]),
+            text_class="text_bubble",
+        )
+        base_mask = np.zeros((24, 24), dtype=np.uint8)
+        base_mask[10, 10] = 255
+        protect_mask = base_mask.copy()
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=protect_mask,
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": True,
+                    "final_mask_dilate_size": 0,
+                },
+                return_details=True,
+            )
+
+        self.assertEqual(int(np.count_nonzero(details["final_mask"])), 0)
+        self.assertEqual(details["mask_decision"], "review")
+        self.assertEqual(details["mask_candidate_source"], "none")
+        self.assertEqual(details["mask_reject_reason"], "ctd_claim_fully_protected")
 
     def test_generate_mask_ctd_path_keeps_legacy_hard_box_as_window_only(self) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
@@ -607,6 +717,107 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         )
         self.assertEqual(fallback["mask_policy_bubble_silhouette_fallback_count"], 1)
 
+    def test_mixed_page_uses_narrow_dilation_only_for_verified_bubble_cap(self) -> None:
+        image = np.zeros((100, 240, 3), dtype=np.uint8)
+        verified_block = TextBlock(
+            text_bbox=np.array([42, 39, 46, 43]),
+            bubble_bbox=np.array([10, 10, 100, 70]),
+            text_class="text_bubble",
+        )
+        fallback_block = TextBlock(
+            text_bbox=np.array([154, 39, 158, 43]),
+            bubble_bbox=np.array([120, 10, 210, 70]),
+            text_class="text_bubble",
+        )
+        base_mask = np.zeros((100, 240), dtype=np.uint8)
+        base_mask[39:43, 42:46] = 255
+        base_mask[39:43, 154:158] = 255
+        empty_mask = np.zeros_like(base_mask)
+        legacy_details = {
+            "legacy_base_mask": empty_mask.copy(),
+            "hard_box_rescue_mask": empty_mask.copy(),
+            "hard_box_applied_count": 0,
+            "hard_box_reason_totals": {},
+            "legacy_base_mask_pixel_count": 0,
+            "hard_box_rescue_mask_pixel_count": 0,
+        }
+        cap_crop = np.zeros((60, 90), dtype=np.uint8)
+        cv2.ellipse(cap_crop, (45, 30), (38, 24), 0, 0, 360, 255, -1)
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=empty_mask.copy(),
+            ),
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ),
+            mock.patch(
+                "modules.utils.image_utils.extract_bubble_interior_cap_crop",
+                side_effect=[cap_crop, None],
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [verified_block, fallback_block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 8,
+                },
+                return_details=True,
+            )
+
+        radius_four = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (9, 9),
+            (4, 4),
+        )
+        radius_eight = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (17, 17),
+            (8, 8),
+        )
+        dilated_four = cv2.dilate(base_mask, radius_four, iterations=1)
+        dilated_eight = cv2.dilate(base_mask, radius_eight, iterations=1)
+        cap_window = np.zeros_like(base_mask)
+        cap_window[10:70, 10:100] = cap_crop
+        fallback_window = np.zeros_like(base_mask)
+        fallback_window[10:70, 120:210] = 255
+        expected_verified = np.where(
+            (dilated_four > 0) & (cap_window > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        expected_fallback = np.where(
+            (dilated_eight > 0) & (fallback_window > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+
+        self.assertTrue(
+            np.array_equal(
+                details["final_mask"],
+                expected_verified | expected_fallback,
+            )
+        )
+        self.assertEqual(details["mask_policy_bubble_silhouette_applied_count"], 1)
+        self.assertEqual(details["mask_policy_bubble_silhouette_fallback_count"], 1)
+        self.assertEqual(
+            details["mask_policy_verified_bubble_dilate_reduction_applied_count"],
+            1,
+        )
+
     def test_overlapping_bubble_cap_is_not_marked_as_a_protected_corner(self) -> None:
         image = np.zeros((20, 20, 3), dtype=np.uint8)
         first = TextBlock(
@@ -888,6 +1099,221 @@ class ImageUtilsMaskingTests(unittest.TestCase):
 
         legacy_builder.assert_called_once()
         self.assertIs(details, legacy_details)
+
+    def test_spotting_source_glyph_extension_is_engine_gated_and_protected(self) -> None:
+        image = np.zeros((140, 240, 3), dtype=np.uint8)
+        cv2.putText(
+            image,
+            "TEST",
+            (80, 96),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        base = np.zeros(image.shape[:2], dtype=np.uint8)
+        base[70:102, 100:142] = 255
+        protect = np.zeros_like(base)
+        protect[75:98, 100:104] = 255
+        details = {
+            "mask_refiner": "ctd",
+            "mask_candidate_source": "ctd_refined",
+            "final_mask": base.copy(),
+            "protect_mask": protect,
+            "protected_corner_mask": np.zeros_like(base),
+            "bubble_interior_cap_mask": np.zeros_like(base),
+        }
+        block = _spotting_line_block()
+
+        result = apply_spotting_source_glyph_extension(image, [block], details)
+
+        final_mask = details["final_mask"]
+        addition = (final_mask > 0) & (base == 0)
+        self.assertGreater(int(np.count_nonzero(addition)), 0)
+        self.assertEqual(int(np.count_nonzero(addition & (protect > 0))), 0)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(int(np.count_nonzero(final_mask)), details["final_mask_pixel_count"])
+
+        crop_only = _spotting_line_block()
+        crop_only.ocr_strategy = "paddle_crop"
+        crop_details = {**details, "final_mask": base.copy()}
+        crop_result = apply_spotting_source_glyph_extension(
+            image, [crop_only], crop_details
+        )
+        self.assertTrue(np.array_equal(crop_details["final_mask"], base))
+        self.assertEqual(crop_result["status"], "no_source_supported_additions")
+
+    def test_spotting_source_glyph_extension_recovers_foreground_inside_native_line_edge(self) -> None:
+        image = np.zeros((140, 200, 3), dtype=np.uint8)
+        cv2.putText(
+            image,
+            "TEST",
+            (62, 82),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        base = np.zeros(image.shape[:2], dtype=np.uint8)
+        base[52:88, 84:132] = 255
+        block = _spotting_line_block()
+        block.text_bbox = np.asarray([84, 52, 132, 88], dtype=np.int32)
+        block.ocr_regions = [
+            {
+                "source_line": 1,
+                "bbox_xyxy": [60, 50, 132, 90],
+                "points": [[60, 50], [132, 50], [132, 90], [60, 90]],
+            }
+        ]
+        details = {
+            "mask_refiner": "ctd",
+            "mask_candidate_source": "ctd_refined",
+            "final_mask": base.copy(),
+            "protect_mask": np.zeros_like(base),
+            "protected_corner_mask": np.zeros_like(base),
+            "bubble_interior_cap_mask": np.zeros_like(base),
+        }
+
+        result = apply_spotting_source_glyph_extension(image, [block], details)
+
+        source_ink = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) >= 128
+        final_mask = details["final_mask"] > 0
+        line_roi = np.zeros(source_ink.shape, dtype=np.uint8)
+        cv2.fillPoly(line_roi, [np.asarray(block.ocr_regions[0]["points"], dtype=np.int32)], 1)
+        self.assertGreater(result["inside_line_added_pixels"], 0)
+        self.assertEqual(int(np.count_nonzero(source_ink & (line_roi > 0) & ~final_mask)), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask & (base == 0) & (details["protect_mask"] > 0))), 0)
+
+    def test_spotting_source_glyph_extension_stays_inside_verified_bubble_cap(self) -> None:
+        image = np.zeros((140, 240, 3), dtype=np.uint8)
+        cv2.putText(
+            image,
+            "TEST",
+            (80, 96),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        base = np.zeros(image.shape[:2], dtype=np.uint8)
+        base[70:102, 100:142] = 255
+        cap = np.zeros_like(base)
+        cap[60:110, 70:108] = 255
+        details = {
+            "mask_refiner": "ctd",
+            "mask_candidate_source": "ctd_refined",
+            "final_mask": base.copy(),
+            "protect_mask": np.zeros_like(base),
+            "protected_corner_mask": np.zeros_like(base),
+            "bubble_interior_cap_mask": cap,
+        }
+        block = _spotting_line_block(text_class="text_bubble")
+
+        result = apply_spotting_source_glyph_extension(image, [block], details)
+
+        addition = (details["final_mask"] > 0) & (base == 0)
+        self.assertEqual(int(np.count_nonzero(addition & (cap == 0))), 0)
+        self.assertEqual(result["status"], "completed")
+
+    def test_generate_mask_applies_source_extension_only_for_native_spotting(self) -> None:
+        image = np.zeros((140, 240, 3), dtype=np.uint8)
+        cv2.putText(
+            image,
+            "TEST",
+            (80, 96),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        base_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        base_mask[70:102, 100:142] = 255
+        block = _spotting_line_block()
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.CTDPositiveClaimProvider") as provider_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=np.zeros_like(base_mask),
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            provider_cls.return_value.infer.return_value = SimpleNamespace(
+                raw_mask=np.zeros_like(base_mask),
+                providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+                detect_size=1280,
+                model_sha256="model-sha",
+                model_opset=12,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 0,
+                },
+                return_details=True,
+            )
+
+        self.assertEqual(details["source_glyph_extension"]["status"], "completed")
+        self.assertGreater(details["source_glyph_extension"]["added_pixels"], 0)
+        self.assertEqual(
+            int(np.count_nonzero((details["final_mask"] > 0) & (details["protect_mask"] > 0))),
+            0,
+        )
+        block.ocr_strategy = "paddle_crop"
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.CTDPositiveClaimProvider") as provider_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=np.zeros_like(base_mask),
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            provider_cls.return_value.infer.return_value = SimpleNamespace(
+                raw_mask=np.zeros_like(base_mask),
+                providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+                detect_size=1280,
+                model_sha256="model-sha",
+                model_opset=12,
+            )
+            core_details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 0,
+                },
+                return_details=True,
+            )
+
+        self.assertEqual(
+            core_details["source_glyph_extension"]["status"],
+            "no_source_supported_additions",
+        )
+        self.assertTrue(np.array_equal(core_details["final_mask"], base_mask))
 
 
 if __name__ == "__main__":

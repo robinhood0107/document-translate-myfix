@@ -382,6 +382,48 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
             [(536, 0, 1200, 3000), (0, 0, 664, 3000)],
         )
 
+    def test_truncated_small_vertical_crop_splits_by_area_with_overlap(self) -> None:
+        engine = PaddleOCRVLEngine()
+        vertical = TextBlock(
+            text_bbox=np.array([0, 0, 172, 431], dtype=np.int32),
+            direction="vertical",
+        )
+        boxes, reading_order = engine._truncation_subcrop_boxes(
+            np.zeros((431, 172, 3), dtype=np.uint8),
+            vertical,
+        )
+
+        self.assertEqual(reading_order, "top_to_bottom")
+        self.assertEqual(boxes, [(0, 0, 172, 269), (0, 162, 172, 431)])
+
+    def test_truncated_small_horizontal_rtl_crop_preserves_column_order(self) -> None:
+        engine = PaddleOCRVLEngine()
+        horizontal_rtl = TextBlock(
+            text_bbox=np.array([0, 0, 431, 172], dtype=np.int32),
+            direction="horizontal_rtl",
+        )
+        boxes, reading_order = engine._truncation_subcrop_boxes(
+            np.zeros((172, 431, 3), dtype=np.uint8),
+            horizontal_rtl,
+        )
+
+        self.assertEqual(reading_order, "right_to_left")
+        self.assertEqual(boxes, [(162, 0, 431, 172), (0, 0, 269, 172)])
+
+    def test_small_near_square_truncated_crop_does_not_invent_split_geometry(self) -> None:
+        engine = PaddleOCRVLEngine()
+        unknown = TextBlock(
+            text_bbox=np.array([0, 0, 500, 300], dtype=np.int32),
+            direction="horizontal",
+        )
+        boxes, reason = engine._truncation_subcrop_boxes(
+            np.zeros((300, 500, 3), dtype=np.uint8),
+            unknown,
+        )
+
+        self.assertEqual(boxes, [])
+        self.assertEqual(reason, "crop_area_not_splittable")
+
     def test_general_worker_recovers_only_truncated_crop_and_deduplicates_overlap(self) -> None:
         engine = PaddleOCRVLEngine()
         engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
@@ -868,6 +910,60 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         kept, dropped = drop_rejected_empty_ocr_blocks([block])
         self.assertEqual(kept, [])
         self.assertEqual(dropped, [block])
+
+    def test_pathological_repetitive_bubble_ocr_is_reviewed_not_accepted(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        image = np.full((240, 320, 3), 220, dtype=np.uint8)
+        block = _make_block(40, 50, 220, 95)
+        repeated_output = "文字" * 1600
+
+        with mock.patch.object(
+            engine,
+            "_request_ocr_text",
+            return_value=repeated_output,
+        ):
+            engine.process_image(image, [block])
+
+        self.assertEqual(block.text, "")
+        self.assertEqual(block.ocr_status, "empty_initial")
+        self.assertEqual(block.ocr_empty_reason, OCR_EMPTY_REASON_NON_TEXT_RESPONSE)
+        record = engine.last_page_profile["request_records"][0]
+        self.assertEqual(record["status"], "rejected_non_text_response")
+        self.assertEqual(
+            record["non_text_reason"],
+            "pathological_repeated_ocr_output",
+        )
+
+    def test_persistent_cache_does_not_store_pathological_repetitive_ocr(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        image = np.full((240, 320, 3), 220, dtype=np.uint8)
+        block = _make_block(40, 50, 220, 95)
+        repeated_output = "文字" * 1600
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(Path(temp_dir) / "ocr.sqlite3") as store:
+                plan = engine.prepare_persistent_cache(
+                    image,
+                    [block],
+                    store,
+                    {"runtime_fingerprint": "runtime-test"},
+                    lookup=False,
+                )
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    return_value=repeated_output,
+                ):
+                    engine.process_persistent_cache_plan(plan)
+
+                self.assertEqual(block.text, "")
+                self.assertEqual(
+                    plan.page_profile["request_records"][0]["non_text_reason"],
+                    "pathological_repeated_ocr_output",
+                )
+                self.assertEqual(engine.build_persistent_cache_records(plan), [])
 
     def test_text_free_symbol_only_response_is_marked_empty_and_dropped(self) -> None:
         engine = PaddleOCRVLEngine()
