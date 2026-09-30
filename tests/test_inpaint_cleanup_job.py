@@ -128,6 +128,37 @@ class CleanupEquivalenceTests(unittest.TestCase):
         )
         self.assertGreater(int(np.count_nonzero(result.mask[30:60, 40:90])), 0)
 
+    def test_blockwise_edit_mask_cannot_reintroduce_protected_bubble_border(self) -> None:
+        image = np.zeros((64, 80, 3), dtype=np.uint8)
+        automatic_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        automatic_mask[20:30, 20:30] = 255
+        blockwise_edit_mask = automatic_mask.copy()
+        blockwise_edit_mask[20:30, 30:32] = 255
+        protect_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        protect_mask[20:30, 30:32] = 255
+        inpainted = image.copy()
+        inpainted[20:30, 20:32] = 200
+
+        result = run_inpaint_cleanup(
+            InpaintCleanupInput(
+                image=image,
+                inpaint_input_img=inpainted,
+                mask=automatic_mask,
+                mask_details={"protect_mask": protect_mask},
+                inpaint_blocks=[],
+                config=None,
+                page_label="1/1",
+                inpaint_edit_mask=blockwise_edit_mask,
+            )
+        )
+
+        self.assertEqual(int(np.count_nonzero(result.mask[protect_mask > 0])), 0)
+        np.testing.assert_array_equal(
+            result.inpaint_input_img[protect_mask > 0],
+            image[protect_mask > 0],
+        )
+        self.assertEqual(result.outside_after_restore, 0)
+
     def test_several_scenes_stay_equivalent(self) -> None:
         for seed in (1, 7, 4242):
             with self.subTest(seed=seed):

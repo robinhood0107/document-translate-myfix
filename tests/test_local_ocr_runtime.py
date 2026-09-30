@@ -944,6 +944,9 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         settings_page = _DummySettingsPage()
 
         with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=["mangalmm-local-server"]), \
+             mock.patch.object(manager, "_managed_container_names", return_value=["mangalmm-local-server"]), \
+             mock.patch.object(manager, "_managed_containers_match_contract", return_value=True), \
              mock.patch.object(manager, "_probe_health_state", return_value="loading"), \
              mock.patch.object(manager, "_wait_for_health", return_value=True) as wait_for_health, \
              mock.patch.object(manager, "_run_compose") as run_compose:

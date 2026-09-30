@@ -94,17 +94,33 @@ def run_inpaint_cleanup(job: InpaintCleanupInput) -> InpaintCleanupResult:
         job.mask_details,
         cleanup_stats,
     )
+    protect_mask = normalize_edit_mask(
+        job.mask_details.get("protect_mask"),
+        job.image.shape,
+    )
     protected_corner_mask = normalize_edit_mask(
         job.mask_details.get("protected_corner_mask"),
         job.image.shape,
     )
-    if np.any(protected_corner_mask):
+    protected_mask = np.where(
+        (protect_mask > 0) | (protected_corner_mask > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    if np.any(protected_mask):
+        protected_edit_pixels = int(
+            np.count_nonzero(
+                (normalize_edit_mask(mask, job.image.shape) > 0)
+                & (protected_mask > 0)
+            )
+        )
         mask = np.where(
             (normalize_edit_mask(mask, job.image.shape) > 0)
-            & (protected_corner_mask <= 0),
+            & (protected_mask <= 0),
             255,
             0,
         ).astype(np.uint8)
+        cleanup_stats["protected_edit_pixels_removed"] = protected_edit_pixels
 
     outside_before = count_changed_outside_edit_mask(job.image, inpainted, mask)
     inpainted = composite_with_edit_mask(job.image, inpainted, mask)

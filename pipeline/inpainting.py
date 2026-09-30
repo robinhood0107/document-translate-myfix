@@ -296,12 +296,39 @@ class InpaintingHandler:
         raw_source_mask: np.ndarray | None = None,
         positive_claim_raw_mask: np.ndarray | None = None,
         protected_corner_mask: np.ndarray | None = None,
+        protect_mask: np.ndarray | None = None,
     ):
         self.last_inpaint_edit_mask = None
         self.last_inpaint_evidence = ()
         self.last_inpaint_diagnostics = {}
         if image is None or mask is None:
             return None
+        protected_corner = normalize_edit_mask(
+            protected_corner_mask,
+            image.shape,
+        )
+        protected_border = normalize_edit_mask(protect_mask, image.shape)
+        combined_protect_mask = np.where(
+            (protected_corner > 0) | (protected_border > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        safe_mask = normalize_edit_mask(mask, image.shape)
+        safe_mask[combined_protect_mask > 0] = 0
+        safe_raw_source_mask = (
+            normalize_edit_mask(raw_source_mask, image.shape)
+            if raw_source_mask is not None
+            else None
+        )
+        if safe_raw_source_mask is not None:
+            safe_raw_source_mask[combined_protect_mask > 0] = 0
+        safe_positive_claim_raw_mask = (
+            normalize_edit_mask(positive_claim_raw_mask, image.shape)
+            if positive_claim_raw_mask is not None
+            else None
+        )
+        if safe_positive_claim_raw_mask is not None:
+            safe_positive_claim_raw_mask[combined_protect_mask > 0] = 0
         self._ensure_inpainter()
         if config is None:
             config = get_config(self.main_page.settings_page)
@@ -324,7 +351,16 @@ class InpaintingHandler:
                 device=device,
                 precision=precision,
             ),
-            **runtime_mask_diagnostics(mask, image.shape),
+            **runtime_mask_diagnostics(safe_mask, image.shape),
+            "protect_mask_pixel_count": int(
+                np.count_nonzero(combined_protect_mask)
+            ),
+            "protected_input_mask_pixels_removed": int(
+                np.count_nonzero(
+                    (normalize_edit_mask(mask, image.shape) > 0)
+                    & (combined_protect_mask > 0)
+                )
+            ),
             "inpaint_size": int(
                 getattr(self.inpainter_cache, "inpaint_size", 0) or 0
             ),
@@ -336,16 +372,16 @@ class InpaintingHandler:
         }
         try:
             blockwise_result = source_lama_blockwise_inpaint_result(
-                    image,
-                    mask,
-                    blocks,
-                    self.inpainter_cache,
-                    config,
-                    raw_source_mask=raw_source_mask,
-                    positive_claim_raw_mask=positive_claim_raw_mask,
-                    check_need_inpaint=True,
-                    protected_corner_mask=protected_corner_mask,
-                )
+                image,
+                safe_mask,
+                blocks,
+                self.inpainter_cache,
+                config,
+                raw_source_mask=safe_raw_source_mask,
+                positive_claim_raw_mask=safe_positive_claim_raw_mask,
+                check_need_inpaint=True,
+                protected_corner_mask=protected_corner,
+            )
             result = blockwise_result.image
             edit_mask = blockwise_result.edit_mask
             model_diagnostics = blockwise_result.diagnostics
@@ -373,7 +409,7 @@ class InpaintingHandler:
                 diagnostics["error_type"] = type(exc).__name__
                 self.last_inpaint_diagnostics = diagnostics
                 raise
-            retry_roi = bounded_retry_roi(mask, image.shape)
+            retry_roi = bounded_retry_roi(safe_mask, image.shape)
             diagnostics["oom_retry_count"] = 1
             diagnostics["oom_retry_roi"] = (
                 retry_roi.as_list() if retry_roi is not None else None
@@ -394,7 +430,7 @@ class InpaintingHandler:
                 retry_image = np.ascontiguousarray(
                     image[y1:y2, x1:x2]
                 )
-                retry_mask = np.ascontiguousarray(mask[y1:y2, x1:x2])
+                retry_mask = np.ascontiguousarray(safe_mask[y1:y2, x1:x2])
                 retry_result = self.inpainter_cache(
                     retry_image,
                     retry_mask,
@@ -414,11 +450,20 @@ class InpaintingHandler:
                 retry_result,
                 retry_mask,
             )
-            edit_mask = normalize_edit_mask(mask, image.shape)
+            edit_mask = safe_mask.copy()
             diagnostics["status"] = "completed_after_roi_retry"
         else:
             diagnostics["status"] = "completed"
+        edit_mask = normalize_edit_mask(edit_mask, image.shape)
+        protected_edit_pixels_removed = int(
+            np.count_nonzero((edit_mask > 0) & (combined_protect_mask > 0))
+        )
+        if protected_edit_pixels_removed:
+            edit_mask[combined_protect_mask > 0] = 0
         result = composite_with_edit_mask(image, result, edit_mask)
+        diagnostics["protected_edit_mask_pixels_removed"] = (
+            protected_edit_pixels_removed
+        )
         diagnostics["outside_mask_changed_pixel_count"] = (
             count_changed_outside_edit_mask(image, result, edit_mask)
         )

@@ -4,6 +4,7 @@ import json
 import os
 import re
 
+import cv2
 import imkit as imk
 import numpy as np
 from PIL import Image, ImageOps
@@ -22,6 +23,7 @@ from modules.utils.debug_artifacts import (
     atomic_debug_image,
     atomic_debug_json,
 )
+from modules.utils.textblock import ensure_text_block_id
 
 
 OCR_STATUS_OK = "ok"
@@ -45,6 +47,10 @@ UI_PANEL_MODE_BUBBLE_PANEL_TEXT = "bubble_panel_text_candidate"
 UI_PANEL_REVIEW_REASON_LAYOUT = "embedded_ui_panel_layout_review"
 UI_PANEL_REVIEW_REASON_CLUSTER = "embedded_device_ui_cluster"
 BUBBLE_PANEL_REVIEW_REASON = "bubble_panel_text_candidate"
+SOURCE_STRUCTURE_REVIEW_REASON = "source_structure_review_candidate"
+SOURCE_STRUCTURE_P90_MAX = 230.0
+SOURCE_STRUCTURE_EDGE_DENSITY_MIN_PER_1000 = 150.0
+SOURCE_STRUCTURE_COMPONENT_DENSITY_MAX_PER_1000 = 1.8
 DEFAULT_RETRY_CROP_X_RATIO = 0.06
 DEFAULT_RETRY_CROP_Y_RATIO = 0.10
 
@@ -652,6 +658,128 @@ def mark_ui_panel_review_candidate(block, *, reason: str, preview_path: str = ""
         )
 
 
+def source_structure_review_evidence(block, image: np.ndarray) -> dict | None:
+    """Measure a conservative source-only structure risk for an OCR block.
+
+    The rule intentionally combines local contrast, edge density, connected
+    source components, and the detector's free-text class. OCR confidence and
+    text length are diagnostics only and do not participate in the decision.
+    """
+    if _block_text_class(block) != "text_free" or not _block_text(block).strip():
+        return None
+    if image is None or not isinstance(image, np.ndarray) or image.ndim < 2:
+        return None
+    existing_action = str(getattr(block, "processing_action", "") or "").strip().lower()
+    existing_source = str(
+        getattr(block, "processing_decision_source", "") or ""
+    ).strip()
+    if existing_action in {PROCESSING_ACTION_PRESERVE, PROCESSING_ACTION_REVIEW}:
+        return None
+    if existing_source and existing_source != "ocr_processing_default":
+        return None
+    box = _block_xyxy(block)
+    if box is None:
+        return None
+    x1, y1, x2, y2 = _clip_bbox(*box, image.shape)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    source = image[y1:y2, x1:x2]
+    if source.ndim == 2:
+        gray = source.astype(np.uint8, copy=False)
+    elif source.ndim == 3 and source.shape[2] >= 3:
+        rgb = np.asarray(source[:, :, :3], dtype=np.uint8)
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    elif source.ndim == 3 and source.shape[2] == 1:
+        gray = np.asarray(source[:, :, 0], dtype=np.uint8)
+    else:
+        return None
+
+    minimum_extent = min(gray.shape[:2])
+    if minimum_extent < 7:
+        return None
+    kernel = max(7, int(round(minimum_extent * 0.20)))
+    if kernel % 2 == 0:
+        kernel += 1
+    kernel = min(31, kernel)
+    local_background = cv2.medianBlur(gray, kernel)
+    local_contrast = cv2.absdiff(gray, local_background)
+    contrast_p90 = float(np.percentile(local_contrast, 90))
+    foreground_threshold = max(12.0, 0.12 * contrast_p90)
+    source_foreground = local_contrast >= foreground_threshold
+    component_count, _labels, _stats, _centroids = cv2.connectedComponentsWithStats(
+        source_foreground.astype(np.uint8), connectivity=8
+    )
+    component_count = max(0, int(component_count) - 1)
+    area = max(1, int(gray.shape[0]) * int(gray.shape[1]))
+    component_density = 1000.0 * component_count / float(area)
+    edges = cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 70, 150)
+    edge_density = 1000.0 * float(np.count_nonzero(edges)) / float(area)
+    text_free = _block_text_class(block) == "text_free"
+    low_local_contrast = contrast_p90 < SOURCE_STRUCTURE_P90_MAX
+    dense_edges = edge_density > SOURCE_STRUCTURE_EDGE_DENSITY_MIN_PER_1000
+    sparse_components = (
+        component_density < SOURCE_STRUCTURE_COMPONENT_DENSITY_MAX_PER_1000
+    )
+    review_candidate = bool(
+        text_free and low_local_contrast and dense_edges and sparse_components
+    )
+    return {
+        "schema_version": 1,
+        "source": "original_block_crop",
+        "bbox_xyxy": [int(x1), int(y1), int(x2), int(y2)],
+        "local_median_kernel_px": int(kernel),
+        "local_contrast_p90": round(contrast_p90, 3),
+        "foreground_threshold": round(foreground_threshold, 3),
+        "foreground_component_count": int(component_count),
+        "foreground_component_density_per_1000_px": round(component_density, 4),
+        "edge_density_per_1000_px": round(edge_density, 3),
+        "signals": {
+            "text_free_class": bool(text_free),
+            "low_local_contrast": bool(low_local_contrast),
+            "dense_source_edges": bool(dense_edges),
+            "sparse_source_components": bool(sparse_components),
+        },
+        "review_candidate": review_candidate,
+        "ocr_confidence_used": False,
+        "ocr_text_length_used": False,
+    }
+
+
+def apply_source_structure_review_candidates(blocks, image: np.ndarray) -> list[dict]:
+    """Route only combined source-structure false-positive candidates to REVIEW."""
+    reviewed: list[dict] = []
+    for block in list(blocks or []):
+        evidence = source_structure_review_evidence(block, image)
+        if evidence is None:
+            continue
+        block.source_structure_diagnostics = evidence
+        if not bool(evidence.get("review_candidate")):
+            continue
+        assign_ocr_processing_contract(
+            block,
+            semantic_role=SEMANTIC_ROLE_AMBIGUOUS,
+            processing_action=PROCESSING_ACTION_REVIEW,
+            decision_source="source_structure_review",
+            reasons=(
+                "text_free_source_region",
+                "low_local_source_contrast",
+                "dense_source_edges",
+                "sparse_source_components",
+            ),
+        )
+        block.mask_decision = "review"
+        block.mask_reject_reason = SOURCE_STRUCTURE_REVIEW_REASON
+        reviewed.append(
+            {
+                "block_id": ensure_text_block_id(block),
+                "cause": SOURCE_STRUCTURE_REVIEW_REASON,
+                "reason": SOURCE_STRUCTURE_REVIEW_REASON,
+                "source_structure_diagnostics": evidence,
+            }
+        )
+    return reviewed
+
+
 def split_inpaint_protected_ocr_blocks(blocks) -> tuple[list, list]:
     """Keep review-worthy embedded UI panels out of LaMa masks without dropping them."""
     inpaint_blocks: list = []
@@ -902,6 +1030,10 @@ def build_ocr_debug_payload(
                 or [],
                 "processing_contract_diagnostics": getattr(
                     blk, "processing_contract_diagnostics", {}
+                )
+                or {},
+                "source_structure_diagnostics": getattr(
+                    blk, "source_structure_diagnostics", {}
                 )
                 or {},
                 "canonical_block_id": getattr(
