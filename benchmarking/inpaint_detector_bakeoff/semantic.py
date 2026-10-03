@@ -9,6 +9,20 @@ TRANSLATE = "translate_inpaint"
 PRESERVE = "preserve"
 REVIEW = "review"
 OCR_EVIDENCE_AVAILABLE = "ocr_evidence_available"
+PRESERVE_ROLES = frozenset(
+    {"sfx", "onomatopoeia", "decorative", "decoration"}
+)
+TRANSLATE_ROLES = frozenset(
+    {
+        "dialogue_bubble",
+        "dialogue_free",
+        "narration",
+        "caption",
+        "text_bubble",
+        "text_free",
+        "ui_or_sign",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +88,19 @@ def product_semantic_decision(region: Mapping[str, object]) -> SemanticDecision:
             role or "ambiguous",
             REVIEW,
             reason="explicit_review",
+        )
+    if (
+        explicit_role in PRESERVE_ROLES
+        and explicit_action != PRESERVE
+    ) or (
+        explicit_role in TRANSLATE_ROLES
+        and explicit_action == PRESERVE
+    ):
+        return SemanticDecision(
+            "ambiguous",
+            REVIEW,
+            available=False,
+            reason="explicit_role_action_conflict",
         )
     return SemanticDecision(role or "ambiguous", explicit_action)
 
