@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -36,11 +38,13 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
         *,
         family: str = "harness-test",
         category: str = "90-cross-cutting",
+        run_id: str | None = None,
         hash_limit_bytes: int = harness.DEFAULT_HASH_LIMIT_BYTES,
     ) -> harness.ManagedArtifactRun:
         return harness.ManagedArtifactRun.create(
             family=family,
             category=category,
+            run_id=run_id,
             hash_limit_bytes=hash_limit_bytes,
         )
 
@@ -75,6 +79,164 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
         self.assertEqual(record["hash_state"], "recorded-document")
         self.assertTrue(record["sha256"])
         self.assertEqual(run.verify(), [])
+
+        report = json.loads((run.artifact_root / harness.RUN_REPORT_JSON_NAME).read_text(encoding="utf-8"))
+        self.assertEqual([event["event"] for event in report["events"]], ["run_started", "run_ended"])
+        self.assertEqual(report["events"][-1]["status"], "completed")
+        self.assertIsNone(report["metrics"]["process_rss_bytes"]["value"])
+        self.assertEqual(report["metrics"]["process_rss_bytes"]["status"], "not_enabled")
+        self.assertEqual(report["metrics"]["process_rss_bytes"]["reason_code"], "collection_not_enabled")
+
+    def test_public_finalizers_record_metrics_and_keep_terminal_status_separate(self) -> None:
+        measured = {
+            "source_units": {
+                "value": 17,
+                "unit": "source_units",
+                "source": "test.counter",
+                "status": "measured",
+                "reason_code": None,
+            }
+        }
+        completed = self.create_run(run_id="metrics-completed")
+        completed.complete(metrics=measured)
+        completed_report = json.loads(
+            (completed.artifact_root / harness.RUN_REPORT_JSON_NAME).read_text(encoding="utf-8")
+        )
+        self.assertEqual(completed_report["status"], "completed")
+        self.assertEqual(completed_report["metrics"]["source_units"]["value"], 17)
+        self.assertEqual(completed.verify(), [])
+
+        failed = self.create_run(run_id="metrics-failed")
+        failed.fail(RuntimeError("expected failure"), metrics=measured)
+        failed_report = json.loads(
+            (failed.artifact_root / harness.RUN_REPORT_JSON_NAME).read_text(encoding="utf-8")
+        )
+        self.assertEqual(failed_report["status"], "failed")
+        self.assertEqual(failed.verify(), [])
+
+        cancelled = self.create_run(run_id="metrics-cancelled")
+        cancelled.cancel()
+        cancelled_report = json.loads(
+            (cancelled.artifact_root / harness.RUN_REPORT_JSON_NAME).read_text(encoding="utf-8")
+        )
+        self.assertEqual(cancelled_report["status"], "cancelled")
+        self.assertEqual(cancelled.verify(), [])
+
+    def test_metrics_reject_non_numeric_or_inconsistent_values(self) -> None:
+        invalid_measured_values = (True, float("nan"), float("inf"), "17", None)
+        for index, value in enumerate(invalid_measured_values):
+            with self.subTest(value=value):
+                run = self.create_run(run_id=f"invalid-measured-{index}")
+                metric = {
+                    "value": value,
+                    "unit": "source_units",
+                    "source": "test.counter",
+                    "status": "measured",
+                    "reason_code": None,
+                }
+                with self.assertRaises(harness.ArtifactHarnessError):
+                    run.complete(metrics={"source_units": metric})
+
+        inconsistent = {
+            "value": 17,
+            "unit": "source_units",
+            "source": "test.counter",
+            "status": "unavailable",
+            "reason_code": "collection_not_enabled",
+        }
+        run = self.create_run(run_id="invalid-non-measured-value")
+        with self.assertRaises(harness.ArtifactHarnessError):
+            run.complete(metrics={"source_units": inconsistent})
+
+        invalid_contracts = (
+            {"value": 17, "unit": 1},
+            {"value": 17, "source": ["test.counter"]},
+            {"value": 17, "status": []},
+            {"value": 17, "reason_code": "unexpected"},
+            {"value": None, "status": "unavailable", "reason_code": 1},
+        )
+        for index, overrides in enumerate(invalid_contracts):
+            with self.subTest(contract=overrides):
+                run = self.create_run(run_id=f"invalid-contract-{index}")
+                metric = {
+                    "value": 17,
+                    "unit": "source_units",
+                    "source": "test.counter",
+                    "status": "measured",
+                    "reason_code": None,
+                }
+                metric.update(overrides)
+                with self.assertRaises(harness.ArtifactHarnessError):
+                    run.complete(metrics={"source_units": metric})
+
+    def test_running_run_is_not_a_verified_completion(self) -> None:
+        run = self.create_run()
+
+        self.assertTrue(any("Run is not finalized" in error for error in run.verify()))
+
+        manifest = json.loads(run.manifest_path.read_text(encoding="utf-8"))
+        manifest["schema_version"] = 1
+        run.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertTrue(any("Run is not finalized" in error for error in run.verify()))
+
+    def test_schema_one_completed_manifest_remains_compatible(self) -> None:
+        run = self.create_run()
+        run.complete()
+
+        manifest = json.loads(run.manifest_path.read_text(encoding="utf-8"))
+        manifest["schema_version"] = 1
+        (run.artifact_root / harness.RUN_REPORT_JSON_NAME).unlink()
+        (run.artifact_root / harness.RUN_REPORT_MARKDOWN_NAME).unlink()
+        run.events_path.unlink()
+        manifest["entries"] = harness._collect_entries(
+            run.run_root,
+            hash_limit_bytes=manifest["hash_limit_bytes"],
+        )
+        run.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        self.assertEqual(run.verify(), [])
+
+    def test_report_failure_cannot_complete_a_run(self) -> None:
+        run = self.create_run()
+        with mock.patch.object(run, "_render_report", side_effect=OSError("disk unavailable")):
+            with self.assertRaises(harness.ArtifactHarnessError):
+                run.complete()
+
+        manifest = json.loads(run.manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["status"], "report_failed")
+        self.assertTrue(run.verify())
+
+    def test_cancelled_interrupted_and_timed_out_are_terminal_non_successes(self) -> None:
+        for run_id, method_name, expected in (
+            ("cancelled-case", "cancel", "cancelled"),
+            ("interrupted-case", "interrupt", "interrupted"),
+            ("timeout-case", "timeout", "timed_out"),
+        ):
+            with self.subTest(status=expected):
+                run = self.create_run(run_id=run_id)
+                getattr(run, method_name)()
+                manifest = json.loads(run.manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(manifest["status"], expected)
+                self.assertEqual(run.verify(), [])
+
+        publish_run = self.create_run(run_id="publish-failed-case")
+        publish_run.publish_failed(RuntimeError("publish denied"))
+        publish_manifest = json.loads(publish_run.manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(publish_manifest["status"], "publish_failed")
+        self.assertEqual(publish_run.verify(), [])
+
+    def test_fail_classifies_cancellation_timeout_and_interruption(self) -> None:
+        for run_id, error, expected in (
+            ("keyboard-case", KeyboardInterrupt(), "cancelled"),
+            ("interrupted-error-case", InterruptedError(), "interrupted"),
+            ("timeout-error-case", TimeoutError(), "timed_out"),
+            ("subprocess-timeout-case", harness.subprocess.TimeoutExpired(["command"], 1), "timed_out"),
+        ):
+            with self.subTest(status=expected):
+                run = self.create_run(run_id=run_id)
+                run.fail(error)
+                manifest = json.loads(run.manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(manifest["status"], expected)
 
     def test_verification_ignores_access_time_but_detects_content_tampering(self) -> None:
         run = self.create_run()
@@ -150,8 +312,8 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
                 external_directory,
                 target_is_directory=True,
             )
-        except OSError as exc:
-            self.skipTest(f"symbolic links are unavailable in this environment: {exc}")
+        except OSError:
+            self.skipTest("symbolic links are unavailable in this environment")
 
         with self.assertRaises(harness.ArtifactHarnessError):
             self.create_run()
@@ -169,7 +331,8 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
             command=[sys.executable, "-c", code],
         )
 
-        self.assertEqual(harness._run_command(arguments), 0)
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            self.assertEqual(harness._run_command(arguments), 0)
         run_root = self.archive_root / "managed-runs" / "90-cross-cutting" / "runner-test" / "runner-case"
         manifest = json.loads((run_root / harness.MANIFEST_FILE_NAME).read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "completed")
@@ -178,25 +341,58 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
         self.assertEqual(harness.verify_run(run_root), [])
 
     def test_cli_separator_is_not_executed_as_the_child_command(self) -> None:
-        result = harness.main(
-            [
-                "run",
-                "--family",
-                "cli-separator",
-                "--category",
-                "90-cross-cutting",
-                "--run-id",
-                "separator-case",
-                "--",
-                sys.executable,
-                "-c",
-                "pass",
-            ]
-        )
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            result = harness.main(
+                [
+                    "run",
+                    "--family",
+                    "cli-separator",
+                    "--category",
+                    "90-cross-cutting",
+                    "--run-id",
+                    "separator-case",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "pass",
+                ]
+            )
 
         self.assertEqual(result, 0)
         run_root = self.archive_root / "managed-runs" / "90-cross-cutting" / "cli-separator" / "separator-case"
         self.assertEqual(harness.verify_run(run_root), [])
+
+
+class FreshArchiveIgnoreTests(unittest.TestCase):
+    def test_nonexistent_directory_only_ignored_archive_can_be_created(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            (repository / ".gitignore").write_text(
+                "/banchmark_result_log/\n",
+                encoding="utf-8",
+            )
+            harness.subprocess.run(
+                ["git", "init", "-q"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+            )
+            archive_root = repository / "banchmark_result_log"
+            self.assertFalse(archive_root.exists())
+
+            with (
+                mock.patch.object(harness, "repository_root", return_value=repository),
+                mock.patch.object(harness, "default_archive_root", return_value=archive_root),
+            ):
+                run = harness.ManagedArtifactRun.create(
+                    family="fresh-archive-ignore",
+                    category="80-pr-governance",
+                    run_id="fresh-run",
+                    archive_root=archive_root,
+                )
+
+                run.complete()
+                self.assertEqual(run.verify(), [])
 
 
 if __name__ == "__main__":

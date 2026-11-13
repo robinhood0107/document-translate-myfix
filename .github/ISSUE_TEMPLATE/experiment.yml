@@ -1,0 +1,85 @@
+name: Experiment
+description: Record one bounded experiment, including inconclusive and failed outcomes.
+title: "experiment: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep an experiment separate from product changes. Do not attach source material, raw responses, local paths, model files, or generated media to a public issue.
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Duplicate fingerprint
+      description: Question, method, input class, and decision the result will inform.
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis and decision rule
+      description: State what would support, reject, or leave the hypothesis unjudged.
+    validations:
+      required: true
+  - type: textarea
+    id: denominator
+    attributes:
+      label: Measurement denominator
+      description: Define the eligible source units and denominator before running the experiment.
+    validations:
+      required: true
+  - type: textarea
+    id: states
+    attributes:
+      label: Failed, unjudged, and unmeasured
+      description: Give a count for each state, or N/A with a reason.
+      placeholder: |
+        failed: <count>
+        unjudged: <count>
+        unmeasured: <count>
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence_status
+    attributes:
+      label: Evidence status
+      options:
+        - Complete
+        - Partial
+        - Unavailable
+    validations:
+      required: true
+  - type: textarea
+    id: evidence_details
+    attributes:
+      label: Evidence status details
+      description: Summarize the evidence collected and its limitations.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Commands, result, and unrun work
+      description: List commands and preserve failed, inconclusive, and unrun outcomes.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Decision impact
+      description: State what decision changes for each possible result.
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback or cleanup
+      description: State resource cleanup and the rollback action, or explain why they do not apply.
+    validations:
+      required: true
+  - type: textarea
+    id: not_run
+    attributes:
+      label: Not run
+      description: Name checks or measurements not run and give a reason, or state that none were skipped.
+    validations:
+      required: true

@@ -36,6 +36,19 @@ def validate_pr_flow(head: str, base: str) -> list[str]:
         )
         return errors
 
+    if base == "benchmarking/lab":
+        is_work_branch = (
+            FEATURE_BRANCH_RE.match(head)
+            or FIX_BRANCH_RE.match(head)
+            or (CHORE_BRANCH_RE.match(head) and not MAIN_PROMOTION_BRANCH_RE.match(head))
+        )
+        if is_work_branch:
+            return []
+        errors.append(
+            "PRs targeting benchmarking/lab must come from a feature/*, fix/*, or chore/* work branch."
+        )
+        return errors
+
     if MAIN_PROMOTION_BRANCH_RE.match(head):
         if base != "main":
             errors.append(f"{head} must target main, not {base}.")

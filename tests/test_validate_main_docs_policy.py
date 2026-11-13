@@ -11,6 +11,7 @@ def test_main_docs_policy_allows_active_runtime_operations_docs() -> None:
         "docs/architecture/codebase-map-ko.md",
         "docs/runtime/managed-llamacpp-only-ko.md",
         "docs/runtime/obsolete-vllm-runtime-manifest.json",
+        "docs/repo/workflow-reporting-contract-ko.md",
         "mangalmm_docker_files/README.md",
         "paddleocr_vl_spotting_docker_files/README.md",
     )
@@ -25,3 +26,7 @@ def test_main_docs_policy_still_rejects_unlisted_root_markdown() -> None:
 
 def test_main_docs_policy_still_rejects_unlisted_runtime_docs() -> None:
     assert not is_allowed("docs/runtime/internal-experiment-ko.md")
+
+
+def test_main_docs_policy_keeps_development_status_document_off_main() -> None:
+    assert not is_allowed("docs/repo/current-state-and-delivery-plan-ko.md")

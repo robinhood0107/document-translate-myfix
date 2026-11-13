@@ -18,17 +18,20 @@ source; Codex relies on this `AGENTS.md` entrypoint.
 - Use `.venv-win` and `.venv-win-cuda13` for supported local workflows; do not
   rely on `.venv` as the repository workflow environment.
 - Keep setup and launch as separate Windows entrypoints. `setup.bat` /
-  `setup_cuda13.bat` provision the core tier (HunyuanOCR, PaddleOCR VL, Gemma)
-  and `setup_full.bat` / `setup_full_cuda13.bat` add MangaLMM and PaddleOCR VL
-  Spotting; all four are backed by the shared Windows PowerShell bootstrap,
-  which owns venv reconciliation, the complete default application-model seal,
-  and managed model volumes and never launches
+  `setup_cuda13.bat` provision the core tier (HunyuanOCR, PaddleOCR VL crop,
+  PaddleOCR VL Spotting geometry, Gemma) and `setup_full.bat` /
+  `setup_full_cuda13.bat` add MangaLMM and the full-only MIT 48px AR/CTC OCR
+  assets; all four are backed by the shared
+  Windows PowerShell bootstrap, which owns venv reconciliation, the complete
+  default application-model seal, and managed model volumes and never launches
   the application. `run_comic.bat` and `run_comic_cuda13.bat` stay separate
   CUDA12/CUDA13 launch entrypoints and must never create a venv, install a
   package, download a model, pull an image, create a volume, or run a
   `prepare_*` script. The application is read-only with respect to installation;
-  missing core state requires setup and missing optional state requires
-  setup_full before page work starts. Python 3.12 x64 (the pinned `mahotas` wheel has
+  missing core state requires setup, while MangaLMM or selected MIT 48px state
+  requires setup_full before page work starts. MIT 48px assets stay out of the
+  core/default OCR profile, and the app never downloads or substitutes them.
+  Python 3.12 x64 (the pinned `mahotas` wheel has
   no Windows build above cp312), WSL2, Docker Desktop, and an NVIDIA driver are
   prerequisites.
 - Windows launcher CI stays source-contract-only and must not perform a fresh
@@ -47,6 +50,27 @@ source; Codex relies on this `AGENTS.md` entrypoint.
   transport shape as private diagnostics. See the canonical quality rule in
   `rules.md`; do not replay completed raw responses merely to apply it.
 
+## Product-code subagent routing
+
+When the active Codex coordinator uses a Sol-family model, Sol remains the task
+owner and continues investigation, progress coordination, independent
+verification, full audit, user communication, and final reporting. Delegate
+product source code, implementation tests, and execution runs to a
+`gpt-6-luna` subagent at `max` or `ultra` reasoning effort. Sol independently
+audits the full resulting code, diff, and run evidence, then owns the final
+report.
+
+Long execution runs stay token-efficient without weakening evidence: batch
+jobs into one detached chain script that runs, post-audits, proves GPU
+release, and records an attempt ledger per job, stopping on the first failure;
+wait for its single completion instead of polling or tailing logs; read
+ledger/summary JSON rather than raw logs; pass a model-free dry audit of pins,
+readiness, inputs, and audit wiring before any paid or model run; and open a
+fresh implementation subagent per phase with a compact brief. Training and
+follow-up absence is observed twice, at least 300 seconds apart, once per chain
+start; each job still re-checks ownership, containers, and GPU state without
+that wait.
+
 ## Public documentation and private validation artifacts
 
 - Put public, sanitized operational and audit documentation in `docs/`.
@@ -63,6 +87,10 @@ source; Codex relies on this `AGENTS.md` entrypoint.
 - New debug or benchmark scripts that create a default output directory must use
   the managed private-artifact harness with an explicit category; its manifest
   contract is covered by the repository's fast unit test.
+- PR body evidence fields are checked by `scripts/validate_pr_report_contract.py` in the
+  required `validate-pr-metadata` workflow on open, reopen, synchronize, edit, and
+  ready-for-review events. CI reporting details and its app-report coverage limit are documented in
+  `docs/repo/workflow-reporting-contract-ko.md`.
 
 ## Instruction-harness synchronization
 

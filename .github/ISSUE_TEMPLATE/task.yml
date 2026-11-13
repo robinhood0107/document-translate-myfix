@@ -1,0 +1,85 @@
+name: Task
+description: Track one independently reviewable implementation or maintenance task.
+title: "task: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep this issue to one reviewable outcome. Search for a matching fingerprint before opening a duplicate; update an existing issue when the intended outcome is the same.
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Duplicate fingerprint
+      description: Component, entrypoint, intended outcome, and affected invariant.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome and acceptance criteria
+      description: Describe observable completion conditions.
+    validations:
+      required: true
+  - type: textarea
+    id: denominator
+    attributes:
+      label: Measurement denominator
+      description: State the confirmed eligible units and denominator, or explain why measurement does not apply.
+    validations:
+      required: true
+  - type: textarea
+    id: states
+    attributes:
+      label: Failed, unjudged, and unmeasured
+      description: Give a count for each state, or N/A with a reason.
+      placeholder: |
+        failed: <count>
+        unjudged: <count>
+        unmeasured: <count>
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence_status
+    attributes:
+      label: Evidence status
+      options:
+        - Complete
+        - Partial
+        - Unavailable
+    validations:
+      required: true
+  - type: textarea
+    id: evidence_details
+    attributes:
+      label: Evidence status details
+      description: Summarize what supports this task and what remains uncertain.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation commands and results
+      description: List commands and their results. Record checks that were not run.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: State the affected behavior, users, and data.
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback or recovery
+      description: State the recovery action, or explain why rollback does not apply.
+    validations:
+      required: true
+  - type: textarea
+    id: not_run
+    attributes:
+      label: Not run
+      description: Name unrun checks or experiments, or state that none were skipped.
+    validations:
+      required: true

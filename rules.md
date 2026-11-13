@@ -22,13 +22,23 @@ Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘�
 - 폰트 바이너리(`*.ttf`, `*.otf`, `*.woff`, `*.woff2`, `*.ttc`, `*.fon`)와 루트 `fonts/` 디렉터리는 Git에 올리지 않는다.
 - 테스트 원본, 실제 작품명, 사용자 로컬 절대경로, OCR/번역/인페인트/렌더 결과물, benchmark raw output은 파일 경로와 문서/테스트 내용 양쪽 모두에서 Git에 올리지 않는다.
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
-- 설치와 실행 진입점을 분리한다. `setup.bat`/`setup_cuda13.bat`은 기본 파이프라인 앱 모델 전체와 core tier(HunyuanOCR, PaddleOCR VL, Gemma)를 봉인하고, `setup_full.bat`/`setup_full_cuda13.bat`은 여기에 MangaLMM과 PaddleOCR VL Spotting을 더해 준비한다. 넷 다 공통 Windows PowerShell bootstrap을 사용하고 앱을 실행하지 않으며, bootstrap이 선택 venv, application-model seal, managed model volume의 설치·검증·재사용을 전부 관리한다.
-- `run_comic.bat`과 `run_comic_cuda13.bat`은 각각 CUDA12/CUDA13 전용 실행 진입점으로 유지한다. 이 둘과 앱은 venv/package/model/image/volume을 설치·다운로드·복구하거나 `prepare_*` script를 호출하지 않는다. core 봉인이 없거나 깨졌으면 setup, 선택 optional runtime 봉인이 없으면 setup_full을 페이지 처리 전에 안내하고 중단한다.
+- 설치와 실행 진입점을 분리한다. `setup.bat`/`setup_cuda13.bat`은 기본 파이프라인 앱 모델 전체와 core tier(HunyuanOCR, PaddleOCR VL crop·Spotting geometry, Gemma)를 봉인하고, `setup_full.bat`/`setup_full_cuda13.bat`은 여기에 MangaLMM과 MIT 48px AR/CTC OCR 모델·원본을 더해 준비한다. MIT 48px 자산은 core 및 기본 OCR 프로필에 포함하지 않는다. 넷 다 공통 Windows PowerShell bootstrap을 사용하고 앱을 실행하지 않으며, bootstrap이 선택 venv, application-model seal, managed model volume의 설치·검증·재사용을 전부 관리한다.
+- `run_comic.bat`과 `run_comic_cuda13.bat`은 각각 CUDA12/CUDA13 전용 실행 진입점으로 유지한다. 이 둘과 앱은 venv/package/model/image/volume을 설치·다운로드·복구하거나 `prepare_*` script를 호출하지 않는다. core 봉인이 없거나 깨졌으면 setup, MangaLMM 또는 선택한 MIT 48px AR/CTC 자산 봉인이 없으면 setup_full을 페이지 처리 전에 안내하고 중단한다. 앱은 MIT OCR 자산을 다운로드하거나 다른 OCR로 대체하지 않는다.
 - Python 3.12 x64, WSL2, Docker Desktop, NVIDIA driver는 준비물이다. pinned `mahotas` wheel이 Windows에서 cp312까지만 제공되므로 3.12 minor 고정은 선호가 아니라 요구 조건이다.
 - Windows launcher CI는 source contract, PowerShell parse, release dependency closure만 빠르게 검사한다. 깨끗한 Windows에서 package/model 전체를 다시 받는 bootstrap CI는 만들지 않으며, 공식 source ZIP은 bootstrap이 import하는 module과 README/quickstart의 필수 로컬 문서를 빠짐없이 포함해야 한다.
 - 현재 공식 Windows 개발 PC에서는 공통 Python 검사와 빠른 단위 테스트를 가능한 한 `.venv-win`, `.venv-win-cuda13` 양쪽에서 실행한다. CUDA 버전에 종속된 실행·패키징 검사는 해당 환경에서 따로 수행하고 결과를 구분해 기록한다.
 - 같은 checkout에서 두 Windows 환경의 Python 검사를 동시에 실행하지 않는다. `__pycache__` 파일 잠금 충돌을 피하도록 `.venv-win` 검사 후 `.venv-win-cuda13` 검사를 순차 실행하고, 필요하면 Python `-B` 옵션을 사용한다.
 - repository workflow, artifact handling, validation, branch, release, 또는 agent policy를 바꾸면 `AGENTS.md`, `CLAUDE.md`, `rules.md`를 같은 커밋과 PR에서 함께 갱신한다. 이 동기화는 local pre-commit hook과 PR CI가 검사한다. 기계적으로 강제할 수 있는 규칙이면 validator, hook, CI workflow, GitHub ruleset도 같은 PR에서 갱신한다.
+- PR은 독립적인 논리 변경 하나를 다루고 기존 fingerprint가 같은 issue를 새로 만들지 않는다. PR 본문은 `Refs #N` 또는 `Closes #N`, 측정 분모, 검증 명령과 결과, 실패·미판정·미측정 수, 근거 상태, 영향, 되돌리기, 미실행 내용을 적는다. 이 형식은 `scripts/validate_pr_report_contract.py`가 검사한다.
+- PR 본문 형식은 가벼운 `validate-pr-metadata` workflow가 `opened`, `reopened`, `synchronize`, `edited`, `ready_for_review`마다 재검사한다. 이 job은 PR merge checkout의 validator를 실행하고 `contents: read`만 허용하며 checkout credential을 저장하지 않는다. main/develop ruleset은 이 context를 필수 체크로 둔다.
+- CI는 `main`, `develop`, `benchmarking/lab` push와 이 세 branch를 base로 하는 PR에서 실행한다. 필수 job 결과는 허용 목록으로 정제한 JSON/Markdown, job summary, sanitized artifact로 남기고, report guard가 생성·검증 실패를 실패 상태로 반영한다. 전체 워크플로 취소·강제 종료는 완료가 아니며 GitHub native 상태를 따른다.
+- 기본 managed validation run은 시작·종료 event journal과 JSON/Markdown report를 private artifact harness로 기록한다. 종결 상태만 완료 검증을 통과하며 `running`은 거부한다. 새 manifest는 schema 2이고 기존 schema 1 완료 manifest는 다시 쓰지 않고 읽는다.
+
+## 1-1. Codex 제품 코드 서브에이전트 운영
+
+현재 Codex 조정 agent가 Sol 계열 모델이면 Sol이 작업 owner로 남아 조사, 진행 조율, 독립 검증, 전체 감사, 사용자 소통, 최종 보고를 맡는다. 제품 source code와 구현 테스트의 작성·수정, 실행은 `gpt-6-luna` 모델, `max` 또는 `ultra` reasoning effort의 서브에이전트에게 맡긴다. Sol은 결과 코드·diff·실행 근거 전체를 독립적으로 감사하고 최종 보고를 책임진다.
+
+장기 실행은 근거를 줄이지 않고 토큰을 아낀다. job들은 하나의 detached chain 스크립트로 묶고, 스크립트가 job마다 실행·사후 감사·GPU 해제 증명·attempt ledger 기록을 처리하며 첫 실패에서 멈춘다. 완료 알림을 한 번만 기다리고 폴링·로그 tail을 하지 않으며, 원문 로그 대신 ledger/summary JSON을 읽는다. 유료·모델 실행 전에는 핀·readiness·입력·감사 연결의 모델 없는 dry 감사를 통과시킨다. 단계마다 짧은 지시로 새 구현 서브에이전트를 연다. 학습·후속 작업 부재는 chain 시작마다 300초 이상 간격으로 두 번 관측하고, 각 job은 그 대기 없이 소유권·컨테이너·GPU 상태를 다시 확인한다.
 
 ## 2. 브랜치 모델
 
@@ -57,9 +67,10 @@ Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘�
 ### 병합 대상
 
 - 일반 기능/수정: `feature/*`, `fix/*`, `chore/*` -> `develop`
+- 벤치마크 harness 변경: `feature/*`, `fix/*`, `chore/*` 작업 브랜치 -> `benchmarking/lab`. 이 변경은 별도 승격 검토 없이 제품 branch에 섞지 않는다.
 - 긴급 수정: `hotfix/<slug>` -> `main`, 이후 `main` -> `develop` 백머지
 - 릴리스 발행: `main` 머지 후 버전 태그 생성 -> GitHub Release 작성
-- 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지
+- 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지하며 해당 branch를 제품 branch로 직접 PR하지 않는다.
 
 ## 2-1. 벤치마크 자산 규칙
 
@@ -144,7 +155,7 @@ Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘�
 - 진실명세서에는 현재 확정 사실, 불변 조건, 금지선, 검증 로그 위치, 후속 문서 링크를 적는다.
 - 감사, 계산, 구현 명세, PR별 설계 문서는 `01-...`, `02-...`처럼 번호 prefix를 붙여 정렬한다.
 - 서로 다른 주제는 같은 폴더에 합치지 않는다. 예를 들어 자동번역 성능개선과 Runtime/UI 버그 헌팅은 별도 project slug를 사용한다.
-- 이미지 결과물, OCR/번역 품질, inpaint/render/export 산출물이 바뀌는 성능개선은 테스트 이미지와 결과물을 repo 밖 validation log에 저장하고, 병합 전 사용자 검토를 요청한다.
+- 이미지 결과물, OCR/번역 품질, inpaint/render/export 산출물이 바뀌는 성능개선은 테스트 이미지와 결과물을 repo 밖 validation log에 저장한다. 검증된 develop 자동 병합은 품질·보존·실제 실행 검증을 대체하지 않으며, main 승격과 release는 해당 결과의 D2 사용자 검수가 끝나기 전에 진행하지 않는다.
 - benchmark raw output, preset, runner, chart asset은 여전히 `benchmarking/lab` 정책을 따른다.
 
 ## 3. 기능 작업 절차
@@ -333,6 +344,13 @@ CI는 필수다. 다음 항목이 통과해야 병합 가능하다.
 - 헤드리스 스모크 검사
 - 번역 자산 검사
 
+### CI evidence와 품질 검사
+
+- CI 추가 품질 검사 비용은 5분 이내를 목표로 한다. 실제 실행 시간을 측정하기 전에는 이 목표를 보장값으로 말하지 않는다.
+- Ruff는 `requirements-quality.txt`의 정확한 pin과 `ruff.toml`을 사용한다. 초기 E9/F lint는 변경된 Python 소스만 대상으로 하며 vendored/generated 경로는 제외한다. 저장소 전체 legacy 오류를 baseline으로 숨기거나 formatter 전체 적용으로 범위를 넓히지 않는다.
+- report guard는 collection/finalization 성공, JSON·Markdown 존재, 모든 선행 job 결과, job summary, sanitized artifact와 SHA를 검증한 뒤 성공한다. publisher는 실제 `workflow_run.conclusion` 및 현재 열린 PR head/base를 artifact와 대조하고 stale 또는 비성공 completed report를 게시하지 않는다. comment 게시가 필요한 경우 기본 브랜치의 신뢰된 `workflow_run` publisher를 사용하고 PR 코드와 artifact 스크립트를 실행하지 않는다. `pull_request_target`은 사용하지 않는다.
+- 정제된 report에는 Git SHA, event 종류, 고정 job ID와 결과, 생성 시각, 확인된 safe metric만 포함한다. argv, environment, raw output, 절대경로, 임의 텍스트를 복사하지 않는다. 측정 불가 값은 `null`과 상태·단위·source·reason으로 유지한다.
+
 public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 태그 보호를 담당한다.
 브랜치 이름 강제, 브랜치 계열별 base 브랜치 적합성, 금지된 tracked 경로, benchmark 전용 자산 분리, `main` 문서 승격 allowlist 검사는 로컬 훅과 CI 정책 스크립트가 계속 담당한다.
 실제 import용 ruleset JSON은 `.github/rulesets/` 아래 파일을 기준으로 관리한다.
@@ -371,7 +389,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
   - GitHub 운영: `.github/PULL_REQUEST_TEMPLATE.md`
   - 설치/운영: `docs/setup/quickstart*.md`
   - 제품 구조: `docs/architecture/codebase-map-ko.md`
-  - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/runtime/managed-llamacpp-only-ko.md`, `docs/runtime/obsolete-vllm-runtime-manifest.json`, `docs/repo/github-rulesets-public-free-ko.md`
+  - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/runtime/managed-llamacpp-only-ko.md`, `docs/runtime/obsolete-vllm-runtime-manifest.json`, `docs/repo/github-rulesets-public-free-ko.md`, `docs/repo/workflow-reporting-contract-ko.md`
   - 관리형 runtime: `hunyuanocr_docker_files/README.md`, `mangalmm_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`, `paddleocr_vl_spotting_docker_files/README.md`
 - `develop`에는 개발/감사/정책 문서를 허용한다.
 - `benchmarking/lab`에는 benchmark 전용 문서를 허용한다.
@@ -380,6 +398,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
   - `docs/i18n/*`
   - `docs/rendering/*`
   - `docs/repo/benchmark-branch-policy-ko.md`
+  - `docs/repo/current-state-and-delivery-plan-ko.md`
   - benchmark/manual-review/dev-note 성격의 markdown
 - 이 정책은 문서 설명만으로 두지 않고, `main` 대상 PR에서 changed markdown/doc path allowlist 검사로 강제한다.
 

@@ -50,20 +50,25 @@
    - `validate-pr-flow`
    - `validate-main-docs`
    - `validate`
+   - `report-guard`
 4. `Settings -> Rules -> Rulesets -> New ruleset -> Import a ruleset`에서 위 JSON 3개를 각각 import한다.
 5. import 후 아래를 확인한다.
    - `Protect main`: target `main`
    - `Protect develop`: target `develop`
    - `Protect version tags`: target `v*`
-6. `Protect main`의 required status checks는 아래 4개여야 한다.
+6. `Protect main`의 required status checks는 아래 6개여야 한다.
    - `branch-name`
    - `validate-pr-flow`
+   - `validate-commit-attribution`
    - `validate-main-docs`
    - `validate`
-7. `Protect develop`의 required status checks는 아래 3개여야 한다.
+   - `report-guard`
+7. `Protect develop`의 required status checks는 아래 5개여야 한다.
    - `branch-name`
    - `validate-pr-flow`
+   - `validate-commit-attribution`
    - `validate`
+   - `report-guard`
 
 ## 6. 브랜치 이름 정책
 

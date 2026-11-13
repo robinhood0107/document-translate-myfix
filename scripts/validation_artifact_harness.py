@@ -26,23 +26,39 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
 import re
 import subprocess
 import sys
+import time
 from typing import Any, Iterable, Mapping, Sequence
 import uuid
 
 
-ARTIFACT_SCHEMA_VERSION = 1
+ARTIFACT_SCHEMA_VERSION = 2
 ARCHIVE_DIRECTORY_NAME = "banchmark_result_log"
 MANAGED_RUNS_DIRECTORY_NAME = "managed-runs"
 ARTIFACT_DIRECTORY_NAME = "artifacts"
 LOG_DIRECTORY_NAME = "logs"
 MANIFEST_FILE_NAME = "artifact-manifest.json"
+EVENTS_FILE_NAME = "events.jsonl"
+RUN_REPORT_JSON_NAME = "run-report.json"
+RUN_REPORT_MARKDOWN_NAME = "run-report.md"
 DEFAULT_HASH_LIMIT_BYTES = 8 * 1024 * 1024
+FINAL_RUN_STATUSES = frozenset(
+    {
+        "completed",
+        "failed",
+        "cancelled",
+        "timed_out",
+        "interrupted",
+        "report_failed",
+        "publish_failed",
+    }
+)
 ALWAYS_HASH_EXTENSIONS = frozenset(
     {
         ".csv",
@@ -125,6 +141,8 @@ def _is_ignored_by_git(path: Path) -> bool:
         relative_path = path.resolve().relative_to(root).as_posix()
     except ValueError:
         return False
+    if not relative_path.endswith("/"):
+        relative_path += "/"
     try:
         completed = subprocess.run(
             ["git", "check-ignore", "-q", "--", relative_path],
@@ -168,6 +186,21 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     try:
         with open(temporary, "xb") as handle:
             handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    temporary = path.with_name(f".{path.name}.partial-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    try:
+        with open(temporary, "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
@@ -322,6 +355,7 @@ class ManagedArtifactRun:
     manifest_path: Path
     created_utc: str
     hash_limit_bytes: int = DEFAULT_HASH_LIMIT_BYTES
+    started_monotonic: float = field(default_factory=time.monotonic, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
     @classmethod
@@ -372,6 +406,11 @@ class ManagedArtifactRun:
             created_utc=_utc_now(),
             hash_limit_bytes=hash_limit_bytes,
         )
+        try:
+            run._append_event("run_started", status="running", metrics={})
+        except OSError as exc:
+            run._mark_report_failed(exc)
+            raise ArtifactHarnessError("Unable to record the validation run start event.") from exc
         run._write_manifest(status="running", metadata={})
         return run
 
@@ -406,27 +445,276 @@ class ManagedArtifactRun:
         )
         _atomic_write_json(self.manifest_path, payload)
 
-    def complete(self, *, metadata: Mapping[str, Any] | None = None) -> None:
+    @property
+    def events_path(self) -> Path:
+        return self.log_root / EVENTS_FILE_NAME
+
+    def _append_event(
+        self,
+        event: str,
+        *,
+        status: str,
+        metrics: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        record = {
+            "timestamp_utc": _utc_now(),
+            "event": event,
+            "status": status,
+            "metrics": {key: dict(value) for key, value in metrics.items()},
+        }
+        with self.events_path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _base_metrics(
+        self,
+        *,
+        exit_code: int | None = None,
+        metrics: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        measured_exit = exit_code is not None
+        result = {
+            "wall_time_seconds": {
+                "value": round(max(0.0, time.monotonic() - self.started_monotonic), 6),
+                "unit": "seconds",
+                "source": "python.time.monotonic",
+                "status": "measured",
+                "reason_code": None,
+            },
+            "exit_code": {
+                "value": exit_code,
+                "unit": "exit_code",
+                "source": "subprocess.returncode" if measured_exit else "not_observed",
+                "status": "measured" if measured_exit else "unavailable",
+                "reason_code": None if measured_exit else "process_exit_not_observed",
+            },
+            "cpu_time_seconds": {
+                "value": None,
+                "unit": "seconds",
+                "source": "not_collected_by_validation_artifact_harness",
+                "status": "not_enabled",
+                "reason_code": "collection_not_enabled",
+            },
+            "process_rss_bytes": {
+                "value": None,
+                "unit": "bytes",
+                "source": "not_collected_by_validation_artifact_harness",
+                "status": "not_enabled",
+                "reason_code": "collection_not_enabled",
+            },
+            "gpu_vram_bytes": {
+                "value": None,
+                "unit": "bytes",
+                "source": "not_collected_by_validation_artifact_harness",
+                "status": "not_enabled",
+                "reason_code": "collection_not_enabled",
+            },
+            "quality_required_units": {
+                "value": None,
+                "unit": "source_units",
+                "source": "not_applicable_to_generic_command",
+                "status": "not_applicable",
+                "reason_code": "generic_command_has_no_quality_scope",
+            },
+            "quality_failed_units": {
+                "value": None,
+                "unit": "source_units",
+                "source": "not_applicable_to_generic_command",
+                "status": "not_applicable",
+                "reason_code": "generic_command_has_no_quality_scope",
+            },
+            "quality_unjudged_units": {
+                "value": None,
+                "unit": "source_units",
+                "source": "not_applicable_to_generic_command",
+                "status": "not_applicable",
+                "reason_code": "generic_command_has_no_quality_scope",
+            },
+            "quality_unmeasured_units": {
+                "value": None,
+                "unit": "source_units",
+                "source": "not_applicable_to_generic_command",
+                "status": "not_applicable",
+                "reason_code": "generic_command_has_no_quality_scope",
+            },
+        }
+        if metrics:
+            for key, metric in metrics.items():
+                if not isinstance(metric, Mapping):
+                    raise ArtifactHarnessError(f"Invalid metric contract: {key}")
+                candidate = dict(metric)
+                if set(candidate) != {"value", "unit", "source", "status", "reason_code"}:
+                    raise ArtifactHarnessError(f"Invalid metric contract: {key}")
+                status = candidate["status"]
+                if not isinstance(status, str) or status not in {
+                    "measured",
+                    "unavailable",
+                    "not_enabled",
+                    "not_applicable",
+                    "failed",
+                }:
+                    raise ArtifactHarnessError(f"Invalid metric status: {key}")
+                if (
+                    not isinstance(candidate["unit"], str)
+                    or not candidate["unit"]
+                    or not isinstance(candidate["source"], str)
+                    or not candidate["source"]
+                ):
+                    raise ArtifactHarnessError(f"A metric requires a unit and source: {key}")
+                value = candidate["value"]
+                reason = candidate["reason_code"]
+                if status == "measured":
+                    if (
+                        type(value) not in (int, float)
+                        or (type(value) is float and not math.isfinite(value))
+                        or reason is not None
+                    ):
+                        raise ArtifactHarnessError(f"A measured metric requires a finite number: {key}")
+                elif value is not None or not isinstance(reason, str) or not reason.strip():
+                    raise ArtifactHarnessError(f"A non-measured metric requires null and a reason: {key}")
+                result[key] = candidate
+        return result
+
+    def _render_report(self, *, status: str, metrics: Mapping[str, Mapping[str, Any]]) -> None:
+        events: list[dict[str, Any]] = []
+        with self.events_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                events.append(json.loads(line))
+        report = {
+            "schema_version": 1,
+            "run_id": self.run_id,
+            "scope": {"category": self.category, "family": self.family},
+            "git_sha": _git_value("rev-parse", "HEAD") or None,
+            "git_ref": _git_value("branch", "--show-current") or None,
+            "status": status,
+            "started_utc": self.created_utc,
+            "finished_utc": events[-1]["timestamp_utc"],
+            "events": events,
+            "metrics": {key: dict(value) for key, value in metrics.items()},
+        }
+        _atomic_write_json(self.artifact_root / RUN_REPORT_JSON_NAME, report)
+        metric_lines = [
+            f"- `{name}`: {metric['value'] if metric['value'] is not None else 'null'} {metric['unit']} "
+            f"({metric['status']}; source: `{metric['source']}`; "
+            f"reason: `{metric['reason_code'] or 'none'}`)"
+            for name, metric in sorted(metrics.items())
+        ]
+        markdown = "\n".join(
+            [
+                "# Validation run report",
+                "",
+                f"- Status: `{status}`",
+                f"- Run: `{self.run_id}`",
+                f"- Scope: `{self.category}/{self.family}`",
+                f"- Git SHA: `{report['git_sha'] or 'unavailable'}`",
+                f"- Git ref: `{report['git_ref'] or 'unavailable'}`",
+                f"- Started: `{self.created_utc}`",
+                f"- Finished: `{report['finished_utc']}`",
+                "",
+                "## Metrics",
+                "",
+                *metric_lines,
+                "",
+            ]
+        )
+        _atomic_write_text(self.artifact_root / RUN_REPORT_MARKDOWN_NAME, markdown)
+
+    def _mark_report_failed(self, error: BaseException) -> None:
+        details = {"error_type": type(error).__name__}
+        try:
+            self._write_manifest(status="report_failed", metadata=details)
+        except OSError:
+            pass
+        self._closed = True
+
+    def _finalize(
+        self,
+        status: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        exit_code: int | None = None,
+        metrics: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
         if self._closed:
             return
-        self._write_manifest(status="completed", metadata=metadata or {})
+        if status not in FINAL_RUN_STATUSES:
+            raise ArtifactHarnessError(f"Invalid terminal run status: {status}")
+        try:
+            final_metrics = self._base_metrics(exit_code=exit_code, metrics=metrics)
+            self._append_event("run_ended", status=status, metrics=final_metrics)
+            self._render_report(status=status, metrics=final_metrics)
+            self._write_manifest(status=status, metadata=metadata or {})
+        except Exception as exc:
+            try:
+                self._append_event(
+                    "report_generation_failed",
+                    status="report_failed",
+                    metrics={},
+                )
+            except OSError:
+                pass
+            self._mark_report_failed(exc)
+            raise ArtifactHarnessError("Unable to finalize the validation run report.") from exc
         self._closed = True
+
+    def complete(
+        self,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        metrics: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
+        details = dict(metadata or {})
+        self._finalize(
+            "completed",
+            metadata=details,
+            exit_code=details.get("exit_code") if isinstance(details.get("exit_code"), int) else None,
+            metrics=metrics,
+        )
 
     def fail(
         self,
         error: BaseException | str,
         *,
         metadata: Mapping[str, Any] | None = None,
+        metrics: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
-        if self._closed:
-            return
         details = dict(metadata or {})
         details["error_type"] = type(error).__name__ if isinstance(error, BaseException) else "Error"
         details["error_message"] = str(error)[:4096]
-        self._write_manifest(status="failed", metadata=details)
-        self._closed = True
+        if isinstance(error, KeyboardInterrupt):
+            self._finalize("cancelled", metadata=details, metrics=metrics)
+            return
+        if isinstance(error, InterruptedError):
+            self._finalize("interrupted", metadata=details, metrics=metrics)
+            return
+        if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
+            self._finalize("timed_out", metadata=details, metrics=metrics)
+            return
+        self._finalize(
+            "failed",
+            metadata=details,
+            exit_code=details.get("exit_code") if isinstance(details.get("exit_code"), int) else None,
+            metrics=metrics,
+        )
+
+    def cancel(self, *, metadata: Mapping[str, Any] | None = None) -> None:
+        self._finalize("cancelled", metadata=metadata)
+
+    def timeout(self, *, metadata: Mapping[str, Any] | None = None) -> None:
+        self._finalize("timed_out", metadata=metadata)
+
+    def interrupt(self, *, metadata: Mapping[str, Any] | None = None) -> None:
+        self._finalize("interrupted", metadata=metadata)
+
+    def report_failed(self, error: BaseException) -> None:
+        self._finalize("report_failed", metadata={"error_type": type(error).__name__})
+
+    def publish_failed(self, error: BaseException) -> None:
+        self._finalize("publish_failed", metadata={"error_type": type(error).__name__})
 
     def verify(self) -> list[str]:
+        """아카이브 무결성만 검증하며 성공 여부는 manifest status로 확인한다."""
         return verify_run(self.run_root)
 
 
@@ -513,7 +801,7 @@ def _assert_managed_run_root(run_root: Path, archive_root: Path) -> tuple[str, s
 
 
 def verify_run(run_root: Path) -> list[str]:
-    """Return manifest mismatches; an empty list means the archived run is intact."""
+    """아카이브 무결성 오류를 반환하며 빈 목록은 작업 성공을 뜻하지 않는다."""
 
     root = run_root.resolve()
     try:
@@ -527,6 +815,13 @@ def verify_run(run_root: Path) -> list[str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return [f"Unreadable manifest: {exc}"]
+
+    schema_version = manifest.get("schema_version", 1)
+    status = manifest.get("status")
+    if status not in FINAL_RUN_STATUSES:
+        return [f"Run is not finalized: {status or 'missing status'}"]
+    if schema_version not in {1, ARTIFACT_SCHEMA_VERSION}:
+        return [f"Unsupported manifest schema version: {schema_version}"]
 
     limit = int(manifest.get("hash_limit_bytes", DEFAULT_HASH_LIMIT_BYTES))
     expected = {
@@ -546,6 +841,26 @@ def verify_run(run_root: Path) -> list[str]:
     for path in sorted(expected.keys() & actual.keys()):
         if _entry_comparable(expected[path]) != _entry_comparable(actual[path]):
             errors.append(f"Metadata mismatch: {path}")
+    if schema_version >= 2:
+        report_json = root / ARTIFACT_DIRECTORY_NAME / RUN_REPORT_JSON_NAME
+        report_markdown = root / ARTIFACT_DIRECTORY_NAME / RUN_REPORT_MARKDOWN_NAME
+        events_path = root / LOG_DIRECTORY_NAME / EVENTS_FILE_NAME
+        if not report_json.is_file() or not report_markdown.is_file() or not events_path.is_file():
+            errors.append("Run report or event journal is missing.")
+        else:
+            try:
+                report = json.loads(report_json.read_text(encoding="utf-8"))
+                events = [
+                    json.loads(line)
+                    for line in events_path.read_text(encoding="utf-8").splitlines()
+                ]
+            except (OSError, json.JSONDecodeError):
+                errors.append("Run report or event journal is unreadable.")
+            else:
+                if report.get("status") != status or not events:
+                    errors.append("Run report status does not match the manifest.")
+                if events[-1].get("event") != "run_ended" or events[-1].get("status") != status:
+                    errors.append("Event journal has no matching terminal event.")
     return errors
 
 
@@ -587,7 +902,14 @@ def _run_command(args: argparse.Namespace) -> int:
                 text=True,
             )
     except BaseException as exc:
-        run.fail(exc, metadata={"command_name": Path(command[0]).name})
+        if isinstance(exc, KeyboardInterrupt):
+            run.cancel(metadata={"command_name": Path(command[0]).name})
+        elif isinstance(exc, InterruptedError):
+            run.interrupt(metadata={"command_name": Path(command[0]).name})
+        elif isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)):
+            run.timeout(metadata={"command_name": Path(command[0]).name})
+        else:
+            run.fail(exc, metadata={"command_name": Path(command[0]).name})
         raise
 
     metadata = {
@@ -599,7 +921,10 @@ def _run_command(args: argparse.Namespace) -> int:
         run.complete(metadata=metadata)
         print(run.run_root)
         return 0
-    run.fail(f"command exited with {completed.returncode}", metadata=metadata)
+    if completed.returncode < 0:
+        run.interrupt(metadata=metadata)
+    else:
+        run.fail(f"command exited with {completed.returncode}", metadata=metadata)
     print(run.run_root, file=sys.stderr)
     return completed.returncode
 
