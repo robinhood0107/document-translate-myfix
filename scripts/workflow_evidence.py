@@ -260,7 +260,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         f"- Status: `{report['status']}`",
         f"- Event: `{report['event']}`",
-        f"- Git SHA: `{report['git_sha']}`",
+        f"- Source Git SHA: `{report['git_sha']}`",
         f"- Generated: `{report['generated_at']}`",
         "",
         "### Jobs",
@@ -289,7 +289,8 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def collect_from_environment() -> Path:
     event = os.environ.get("GITHUB_EVENT_NAME", "")
-    sha = os.environ.get("GITHUB_SHA", "")
+    runner_sha = os.environ.get("GITHUB_SHA", "")
+    sha = os.environ.get("WORKFLOW_SOURCE_SHA", "") or runner_sha
     needs_json = os.environ.get("WORKFLOW_NEEDS_JSON", "")
     base_ref = os.environ.get("GITHUB_BASE_REF", "")
     run_id = os.environ.get("GITHUB_RUN_ID", "")
@@ -305,7 +306,13 @@ def collect_from_environment() -> Path:
     try:
         report = build_report(event=event, git_sha=sha, needs_json=needs_json, base_ref=base_ref)
         _write_report(managed_run.artifact_root, report)
-        managed_run.complete(metadata={"event": event, "report_schema_version": 1})
+        managed_run.complete(
+            metadata={
+                "event": event,
+                "report_schema_version": 1,
+                "runner_git_sha": runner_sha,
+            }
+        )
     except Exception as exc:
         managed_run.report_failed(exc)
         raise WorkflowEvidenceError("Unable to create the sanitized workflow report.") from exc

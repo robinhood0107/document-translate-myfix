@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from scripts import workflow_evidence as evidence
 
@@ -95,6 +96,48 @@ class WorkflowEvidenceTests(unittest.TestCase):
         self.assertNotIn("validate-main-docs", evidence.required_job_ids("pull_request", "benchmarking/lab"))
         self.assertEqual(main["status"], "completed")
         self.assertEqual(lab["status"], "completed")
+
+    def test_collect_binds_source_sha_and_preserves_runner_sha(self) -> None:
+        class FakeManagedRun:
+            def __init__(self, artifact_root: Path) -> None:
+                self.artifact_root = artifact_root
+                self.metadata = None
+
+            def complete(self, *, metadata):
+                self.metadata = metadata
+
+            def report_failed(self, error):
+                raise AssertionError("Collection unexpectedly failed.") from error
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            managed_run = FakeManagedRun(Path(temporary_directory))
+            environment = {
+                "GITHUB_EVENT_NAME": "push",
+                "GITHUB_SHA": "c" * 40,
+                "WORKFLOW_SOURCE_SHA": "d" * 40,
+                "GITHUB_BASE_REF": "",
+                "GITHUB_RUN_ID": "123",
+                "GITHUB_RUN_ATTEMPT": "1",
+                "WORKFLOW_NEEDS_JSON": make_needs(),
+            }
+            with (
+                mock.patch.dict(os.environ, environment, clear=False),
+                mock.patch.object(
+                    evidence.artifact_harness.ManagedArtifactRun,
+                    "create",
+                    return_value=managed_run,
+                ),
+            ):
+                evidence.collect_from_environment()
+
+            report = json.loads(
+                (managed_run.artifact_root / "workflow-report.json").read_text(encoding="utf-8")
+            )
+            markdown = (managed_run.artifact_root / "workflow-report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(report["git_sha"], "d" * 40)
+        self.assertEqual(managed_run.metadata["runner_git_sha"], "c" * 40)
+        self.assertIn("Source Git SHA", markdown)
 
     def test_unknown_fields_and_job_states_are_rejected(self) -> None:
         report = self.build_report()
