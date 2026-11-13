@@ -363,5 +363,37 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
         self.assertEqual(harness.verify_run(run_root), [])
 
 
+class FreshArchiveIgnoreTests(unittest.TestCase):
+    def test_nonexistent_directory_only_ignored_archive_can_be_created(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            (repository / ".gitignore").write_text(
+                "/banchmark_result_log/\n",
+                encoding="utf-8",
+            )
+            harness.subprocess.run(
+                ["git", "init", "-q"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+            )
+            archive_root = repository / "banchmark_result_log"
+            self.assertFalse(archive_root.exists())
+
+            with (
+                mock.patch.object(harness, "repository_root", return_value=repository),
+                mock.patch.object(harness, "default_archive_root", return_value=archive_root),
+            ):
+                run = harness.ManagedArtifactRun.create(
+                    family="fresh-archive-ignore",
+                    category="80-pr-governance",
+                    run_id="fresh-run",
+                    archive_root=archive_root,
+                )
+
+                run.complete()
+                self.assertEqual(run.verify(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

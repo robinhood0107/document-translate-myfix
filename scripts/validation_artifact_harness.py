@@ -141,6 +141,8 @@ def _is_ignored_by_git(path: Path) -> bool:
         relative_path = path.resolve().relative_to(root).as_posix()
     except ValueError:
         return False
+    if not relative_path.endswith("/"):
+        relative_path += "/"
     try:
         completed = subprocess.run(
             ["git", "check-ignore", "-q", "--", relative_path],
