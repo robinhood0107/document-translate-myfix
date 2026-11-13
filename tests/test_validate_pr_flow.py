@@ -33,3 +33,13 @@ def test_regular_chore_branch_still_targets_develop() -> None:
     assert validate_pr_flow("chore/nuitka-release-policy", "main") == [
         "chore/nuitka-release-policy must target develop, not main."
     ]
+
+
+def test_benchmarking_lab_accepts_work_branches() -> None:
+    assert validate_pr_flow("feature/runner-update", "benchmarking/lab") == []
+    assert validate_pr_flow("fix/metrics-contract", "benchmarking/lab") == []
+
+
+def test_benchmarking_lab_rejects_integration_branches() -> None:
+    assert validate_pr_flow("main", "benchmarking/lab")
+    assert validate_pr_flow("chore/main-promotion-release", "benchmarking/lab")

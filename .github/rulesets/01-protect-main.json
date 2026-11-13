@@ -40,6 +40,9 @@
             "context": "validate-pr-flow"
           },
           {
+            "context": "validate-pr-metadata"
+          },
+          {
             "context": "validate-commit-attribution"
           },
           {
@@ -47,6 +50,9 @@
           },
           {
             "context": "validate"
+          },
+          {
+            "context": "report-guard"
           }
         ],
         "strict_required_status_checks_policy": true

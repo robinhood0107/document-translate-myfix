@@ -20,6 +20,7 @@ ALLOWED_DOC_PATTERNS = (
     re.compile(r"^docs/runtime/managed-llamacpp-only-ko\.md$"),
     re.compile(r"^docs/runtime/obsolete-vllm-runtime-manifest\.json$"),
     re.compile(r"^docs/repo/github-rulesets-public-free-ko\.md$"),
+    re.compile(r"^docs/repo/workflow-reporting-contract-ko\.md$"),
     re.compile(r"^hunyuanocr_docker_files/README\.md$"),
     re.compile(r"^mangalmm_docker_files/README\.md$"),
     re.compile(r"^paddleocr_vl_docker_files/README\.md$"),

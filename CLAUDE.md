@@ -15,15 +15,39 @@ Do not create a worktree. Work in the checkout, protect `main` and `develop`,
 keep `main`, `develop`, and `benchmarking/lab`, and use only the supported
 Windows environments named in `rules.md` for repository workflows.
 
-Setup and launch are separate Windows entrypoints. `setup*.bat` (core tier)
-and `setup_full*.bat` (adds MangaLMM and PaddleOCR VL Spotting) run the shared
-PowerShell bootstrap, which owns the isolated venvs, complete default
-application-model seal, and managed model volumes
-and never launches the application. `run_comic.bat` and `run_comic_cuda13.bat`
+## Product-code subagent routing
+
+When the active Codex coordinator uses a Sol-family model, Sol remains the task
+owner and continues investigation, progress coordination, independent
+verification, full audit, user communication, and final reporting. Delegate
+product source code, implementation tests, and execution runs to a
+`gpt-6-luna` subagent at `max` or `ultra` reasoning effort. Sol independently
+audits the full resulting code, diff, and run evidence, then owns the final
+report.
+
+Long execution runs stay token-efficient without weakening evidence: batch
+jobs into one detached chain script that runs, post-audits, proves GPU
+release, and records an attempt ledger per job, stopping on the first failure;
+wait for its single completion instead of polling or tailing logs; read
+ledger/summary JSON rather than raw logs; pass a model-free dry audit of pins,
+readiness, inputs, and audit wiring before any paid or model run; and open a
+fresh implementation subagent per phase with a compact brief. Training and
+follow-up absence is observed twice, at least 300 seconds apart, once per chain
+start; each job still re-checks ownership, containers, and GPU state without
+that wait.
+
+Setup and launch are separate Windows entrypoints. `setup*.bat` (core tier,
+including PaddleOCR VL Spotting geometry support) and `setup_full*.bat` (adds
+MangaLMM plus the full-only MIT 48px AR/CTC OCR assets) run the shared PowerShell bootstrap, which owns the isolated venvs,
+complete default application-model seal, and managed model volumes and never
+launches the application. `run_comic.bat` and `run_comic_cuda13.bat`
 remain dedicated CUDA12/CUDA13 launch entrypoints and must never create a venv,
 install packages, download models, pull images, create volumes, or invoke a
 `prepare_*` script. The application never repairs installation state; missing
-core/full seals fail before page work with the matching setup command. Treat Python 3.12 x64, WSL2,
+core seals fail before page work with `setup*.bat`; MangaLMM and selected MIT
+48px assets require `setup_full*.bat`. MIT 48px assets stay out of the
+core/default OCR profile, and the app does not download or substitute them.
+Treat Python 3.12 x64, WSL2,
 Docker Desktop, and the NVIDIA driver as prerequisites. Keep CI fast and source-contract-only; do not add a clean
 Windows package/model bootstrap job, but enforce release dependency closure.
 
@@ -66,3 +90,11 @@ agent policy, update `AGENTS.md`, `CLAUDE.md`, and `rules.md` together in one
 commit and one PR; local pre-commit and PR CI enforce the synchronization. Also
 update the hook, validator, CI workflow, or ruleset that enforces the policy
 when one exists. Do not record an AI identity in Git attribution.
+
+PR metadata must include issue references, a measurement denominator, command
+results, failed/unjudged/unmeasured counts, evidence state, impact, rollback,
+and unrun checks. The contract is enforced by the required
+`validate-pr-metadata` check on open, reopen, synchronize, edit, and
+ready-for-review events. See
+`docs/repo/workflow-reporting-contract-ko.md` for the sanitized report fields,
+private-run lifecycle, and limits of current app reports.
