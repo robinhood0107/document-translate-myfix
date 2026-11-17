@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation>인페인트 실패</translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>완료</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>취소됨</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>실패</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>중단됨</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>일시 중지됨</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>보고 실패</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>정리 실패</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>미완료</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>실행은 끝났지만 보고서를 저장하지 못했습니다. 출력 결과는 보존되어 있습니다.</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>실행은 끝났지만 일부 결과나 정리 상태를 확인하지 못했습니다. 출력 결과는 보존되어 있습니다.</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>

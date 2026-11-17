@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>Завершено</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Отменено</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Не удалось</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>Прервано</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>Приостановлено</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>Ошибка отчёта</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>Ошибка очистки</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>Не завершено</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>Запуск завершён, но отчёт не удалось сохранить. Результаты сохранены.</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>Запуск завершён, но часть результатов или очистки не проверена. Результаты сохранены.</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>
@@ -2400,7 +2440,7 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Приостановлено</translation>
     </message>
     <message>
         <source>Running</source>
@@ -4927,7 +4967,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Приостановлено</translation>
     </message>
     <message>
         <source>#{index:02d} · {name}</source>

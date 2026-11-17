@@ -10,6 +10,7 @@ from modules.utils.txt_md_exchange import (
     apply_translation_pages,
     build_exchange_text,
     collect_page_entries,
+    dump_exchange_text,
     find_duplicate_page_names,
     parse_translation_exchange_file,
 )
@@ -132,6 +133,46 @@ class TxtMdExchangeTests(unittest.TestCase):
         )
 
         self.assertEqual(duplicates, ["page_001.png"])
+
+    def test_partial_write_failure_preserves_existing_exchange_file(self) -> None:
+        from unittest import mock
+        from modules.utils import txt_md_exchange
+
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "exchange.txt"
+            destination.write_bytes(b"previous exchange bytes")
+            original_fdopen = os.fdopen
+
+            def write_part_then_fail(descriptor, *args, **kwargs):
+                with original_fdopen(descriptor, *args, **kwargs) as handle:
+                    handle.write("partial exchange")
+                    handle.flush()
+                raise OSError("synthetic partial write failure")
+
+            with mock.patch.object(
+                txt_md_exchange.os, "fdopen", side_effect=write_part_then_fail
+            ):
+                with self.assertRaisesRegex(OSError, "partial write"):
+                    dump_exchange_text(str(destination), [("page.png", ["new text"])])
+
+            self.assertEqual(destination.read_bytes(), b"previous exchange bytes")
+            self.assertEqual(list(Path(temporary).glob(".exchange.txt.*")), [])
+
+    def test_replace_failure_preserves_existing_exchange_file(self) -> None:
+        from unittest import mock
+        from modules.utils import txt_md_exchange
+
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "exchange.txt"
+            destination.write_bytes(b"previous exchange bytes")
+            with mock.patch.object(
+                txt_md_exchange.os, "replace", side_effect=OSError("replace failed")
+            ):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    dump_exchange_text(str(destination), [("page.png", ["new text"])])
+
+            self.assertEqual(destination.read_bytes(), b"previous exchange bytes")
+            self.assertEqual(list(Path(temporary).glob(".exchange.txt.*")), [])
 
 
 if __name__ == "__main__":

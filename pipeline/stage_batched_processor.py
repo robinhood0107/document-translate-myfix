@@ -53,7 +53,6 @@ from app.projects.stage_checkpoints import (
     snapshot_project_render_blocks,
     snapshot_project_translations,
 )
-from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
@@ -116,11 +115,6 @@ from modules.utils.image_utils import (
     generate_mask,
     release_protected_mask_for_explicit_additions,
 )
-from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill
-from modules.utils.inpaint_composite import (
-    composite_with_edit_mask,
-    count_changed_outside_edit_mask,
-)
 from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, language_codes
 from modules.utils.ocr_debug import (
@@ -130,7 +124,7 @@ from modules.utils.ocr_debug import (
     split_inpaint_protected_ocr_blocks,
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
-from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
+from modules.utils.pipeline_config import get_config, get_inpainter_runtime
 from modules.utils.render_style_policy import VERTICAL_ALIGNMENT_CENTER
 from pipeline.inpaint_cleanup_job import (
     InpaintCleanupInput,
@@ -1557,7 +1551,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._render_executor = QtRenderPool(max_workers=workers)
         return self._render_executor
 
-    def _shutdown_render_executor(self) -> None:
+    def _shutdown_render_executor(self, *, raise_on_failure: bool = False) -> None:
         # 정리는 어떤 상황에서도 실패하면 안 된다. 생성자를 거치지 않은 객체에서도
         # 안전하도록 속성 존재를 가정하지 않는다.
         try:
@@ -1571,9 +1565,11 @@ class StageBatchedProcessor(BatchProcessor):
                 executor.shutdown(wait=True)
         except Exception:
             logger.warning(
-                "렌더 워커 실행기 정리 중 예외가 발생했지만 무시합니다.",
+                "렌더 워커 실행기 정리 중 예외가 발생했습니다.",
                 exc_info=True,
             )
+            if raise_on_failure:
+                raise
 
     def _warm_render_font_caches(self, render_settings: Any) -> None:
         """렌더 워커가 폰트 캐시(`modules/rendering/render.py`의 lru_cache 4개)를
@@ -4811,8 +4807,9 @@ class StageBatchedProcessor(BatchProcessor):
         """
 
         total_images = len(pages)
-        fallbacks: list[dict[str, str]] = []
+        fallbacks: list[dict[str, Any]] = []
         unrecoverable: list[str] = []
+        missing_source_unit_indices: list[int] = []
         produced = 0
         for index, ctx in enumerate(pages):
             # 내부 기록만 믿지 않고 파일이 실제로 있는지 본다. 어느 한 경로가
@@ -4820,6 +4817,11 @@ class StageBatchedProcessor(BatchProcessor):
             # 잡힌다. 디스크에 있는 파일이 유일한 진실이다.
             if self._output_file_is_decodable(ctx.output_path):
                 produced += 1
+                if not ctx.failed_stage and not ctx.output_fallback_kind:
+                    report = getattr(self.main_page, "batch_report_ctrl", None)
+                    register = getattr(report, "register_batch_success", None)
+                    if callable(register):
+                        register(ctx.image_path)
                 continue
             if ctx.output_path:
                 logger.warning(
@@ -4837,6 +4839,7 @@ class StageBatchedProcessor(BatchProcessor):
                 produced += 1
                 fallbacks.append(
                     {
+                        "source_unit_index": index,
                         "image_name": ctx.image_name,
                         "kind": ctx.output_fallback_kind,
                         "failed_stage": ctx.failed_stage,
@@ -4846,6 +4849,7 @@ class StageBatchedProcessor(BatchProcessor):
                 )
             else:
                 unrecoverable.append(ctx.image_name)
+                missing_source_unit_indices.append(index)
                 ctx.output_path = ""
             self._release_page_buffers(ctx)
 
@@ -4855,6 +4859,7 @@ class StageBatchedProcessor(BatchProcessor):
             "fallback_count": len(fallbacks),
             "fallbacks": fallbacks,
             "missing": unrecoverable,
+            "missing_source_unit_indices": missing_source_unit_indices,
         }
         self._emit_benchmark_event(
             "batch_output_reconciled",
@@ -4925,15 +4930,25 @@ class StageBatchedProcessor(BatchProcessor):
     def _page_outcomes(self, pages: list[StagePageContext]) -> list[dict[str, Any]]:
         return [
             {
+                "source_unit_index": index,
+                "image_path": ctx.image_path,
                 "image_name": ctx.image_name,
                 "output_path": ctx.output_path,
+                "output_status": "measured" if ctx.output_path else "unmeasured",
                 "fallback_kind": ctx.output_fallback_kind,
                 "failed_stage": ctx.failed_stage,
                 "failed_reason": ctx.failed_reason,
                 "no_text_detected": bool(ctx.no_text_detected),
                 "block_count": len(ctx.blk_list or []),
+                "quality_status": (
+                    "failed"
+                    if ctx.failed_stage
+                    else "completed"
+                    if ctx.output_path
+                    else "unjudged"
+                ),
             }
-            for ctx in pages
+            for index, ctx in enumerate(pages)
         ]
 
     def _write_run_report(
@@ -4941,29 +4956,57 @@ class StageBatchedProcessor(BatchProcessor):
         pages: list[StagePageContext],
         *,
         output_summary: dict[str, Any],
+        processing_status: str = "unknown",
+        cleanup_status: str = "unknown",
+        processing_error: BaseException | None = None,
+        cleanup_errors: list[dict[str, str]] | None = None,
     ) -> str:
-        """이번 실행의 실측 소요시간과 페이지별 결과를 파일로 남긴다."""
+        """종료 후 실측과 페이지 결과를 배치 보고서에 넘긴다."""
 
         try:
             telemetry = self._performance_telemetry().snapshot()
         except Exception:
             logger.debug("Could not snapshot the run telemetry.", exc_info=True)
-            telemetry = {}
+            telemetry = None
+        terminal_status = (
+            processing_status
+            if processing_status in {"failed", "cancelled", "interrupted", "paused"}
+            else "cleanup_failed"
+            if cleanup_status == "failed"
+            else "completed"
+        )
         report = build_run_report(
             telemetry=telemetry,
             total_wall_sec=self._click_to_now_seconds(),
             page_outcomes=self._page_outcomes(pages),
             output_summary=output_summary,
             started_at_local=self._run_started_wall_text(),
+            terminal_status=terminal_status,
+            processing_status=processing_status,
+            report_status="completed",
+            cleanup_status=cleanup_status,
+            processing_error=(
+                {
+                    "error_type": type(processing_error).__name__,
+                    "message": str(processing_error)[:1024],
+                }
+                if processing_error is not None
+                else None
+            ),
+            cleanup_errors=cleanup_errors or [],
+            telemetry_reason_code="snapshot_failed",
         )
+        report_ctrl = getattr(self.main_page, "batch_report_ctrl", None)
+        register = getattr(report_ctrl, "register_pipeline_run_report", None)
+        if callable(register) and register(report):
+            return ""
         try:
             from modules.utils.paths import get_log_dir
 
-            log_dir = get_log_dir("runs")
+            path = write_run_report(report, log_dir=get_log_dir("runs"))
         except Exception:
-            logger.debug("Could not resolve the run report directory.", exc_info=True)
-            return ""
-        path = write_run_report(report, log_dir=log_dir)
+            logger.warning("Could not write the run report.", exc_info=True)
+            path = ""
         if path:
             logger.info(
                 "Run finished in %s for %d page(s); report at %s",
@@ -4972,6 +5015,98 @@ class StageBatchedProcessor(BatchProcessor):
                 path,
             )
         return path
+
+    def _finalize_batch_run(
+        self,
+        *,
+        pages: list[StagePageContext],
+        policy: dict[str, Any],
+        batch_completed: bool,
+        processing_status: str,
+        processing_error: BaseException | None,
+        output_summary: dict[str, Any],
+        autosave_deferral_started: bool,
+        runtime_cleanup_needed: bool,
+    ) -> None:
+        cleanup_exceptions: list[BaseException] = []
+        cleanup_errors: list[dict[str, str]] = []
+
+        def run_cleanup_step(name: str, action: Callable[[], Any]) -> None:
+            try:
+                action()
+            except Exception as cleanup_error:
+                cleanup_exceptions.append(cleanup_error)
+                cleanup_errors.append(
+                    {
+                        "step": name,
+                        "error_type": type(cleanup_error).__name__,
+                        "message": str(cleanup_error)[:1024],
+                    }
+                )
+                logger.warning("Batch cleanup step %s failed.", name, exc_info=True)
+
+        run_cleanup_step("persist_stage_rates", self._persist_stage_rates)
+        run_cleanup_step("shutdown_page_cache_executor", self._shutdown_page_cache_executor)
+        run_cleanup_step(
+            "shutdown_render_executor",
+            lambda: self._shutdown_render_executor(raise_on_failure=True),
+        )
+        detector_cache = getattr(
+            getattr(self, "block_detection", None),
+            "block_detector_cache",
+            None,
+        )
+        detector_release = getattr(detector_cache, "release", None)
+        if callable(detector_release):
+            run_cleanup_step("release_detector_cache", detector_release)
+        for index, ctx in enumerate(pages):
+            run_cleanup_step(
+                f"release_page_buffers_{index}",
+                lambda ctx=ctx: self._release_page_buffers(ctx),
+            )
+        project_ctrl = getattr(self.main_page, "project_ctrl", None)
+        if autosave_deferral_started and project_ctrl is not None:
+            run_cleanup_step(
+                "end_batch_autosave_deferral",
+                lambda: project_ctrl.end_batch_autosave_deferral(
+                    pages[-1].image_path if pages else ""
+                ),
+            )
+        if hasattr(self, "_prewarm_executor") or hasattr(self, "_prewarm_jobs"):
+            run_cleanup_step("shutdown_prewarm_executor", self._shutdown_prewarm_executor)
+        if runtime_cleanup_needed:
+            run_cleanup_step(
+                "shutdown_managed_runtimes",
+                lambda: self._shutdown_managed_runtimes(
+                    context="terminal cleanup",
+                    preserve_sleeping_paddle=batch_completed,
+                    raise_on_failure=True,
+                    ocr_service=self._ocr_runtime_service_name(
+                        str(policy.get("primary_ocr_engine", ""))
+                    ),
+                ),
+            )
+        self._progress_image_path = None
+        if processing_status == "running":
+            processing_status = "completed" if batch_completed else "failed"
+        cleanup_status = "failed" if cleanup_exceptions else "completed"
+        try:
+            self._write_run_report(
+                pages,
+                output_summary=output_summary,
+                processing_status=processing_status,
+                cleanup_status=cleanup_status,
+                processing_error=processing_error,
+                cleanup_errors=cleanup_errors,
+            )
+        except Exception as report_error:
+            logger.warning("Could not finalize the run report.", exc_info=True)
+            report_ctrl = getattr(self.main_page, "batch_report_ctrl", None)
+            mark_failed = getattr(report_ctrl, "mark_pipeline_run_report_failed", None)
+            if callable(mark_failed):
+                mark_failed(report_error)
+        if cleanup_exceptions and processing_status == "completed":
+            raise cleanup_exceptions[0]
 
     def _render_all(self, pages: list[StagePageContext]) -> None:
         # 대부분의 렌더는 이미 인페인팅 sweep 동안 전용 워커에서 끝나 있다
@@ -5006,97 +5141,196 @@ class StageBatchedProcessor(BatchProcessor):
         self._render_cancel_event = threading.Event()
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
-        benchmark_stage_ceiling = self._benchmark_stage_ceiling()
-        reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
-        if callable(reset_output_reservations):
-            reset_output_reservations()
         self._run_started_at = time.monotonic()
         self._page_started_at = None
         self._progress_image_path = None
-        self._recent_page_durations.clear()
-        self._released_page_buffer_bytes = 0
-        self._paddleocr_cache_store = None
-        self._paddleocr_cache_identity = None
-        self._render_context_cache = None
-        self._emit_benchmark_event("batch_run_start", total_images=total_images)
-        self._record_performance_workload(
-            "pipeline",
-            page_count=total_images,
-            workflow_mode="stage_batched",
-        )
-        resource_plan_getter = getattr(
-            self.main_page.file_handler,
-            "image_resource_plan",
-            None,
-        )
-        self._reset_prewarm_lifecycle()
-        pdf_preflight = getattr(
-            self.main_page.file_handler, "preflight_for_processing", None
-        )
-        pdf_count = (
-            pdf_preflight(
-                image_list,
-                should_cancel=lambda: bool(
-                    getattr(self.main_page, "is_current_task_cancelled", lambda: False)()
-                ),
+        batch_completed = False
+        processing_status = "running"
+        processing_error: BaseException | None = None
+        output_summary: dict[str, Any] = {
+            "input_count": total_images,
+            "output_count": None,
+            "fallback_count": None,
+            "fallbacks": None,
+            "missing": None,
+        }
+        autosave_deferral_started = False
+        runtime_cleanup_needed = False
+        benchmark_stage_ceiling: str | None = None
+        pages: list[StagePageContext] = []
+        policy: dict[str, Any] = {}
+        self._project_checkpoint_store = None
+        self._project_checkpoint_page_keys = []
+        try:
+            self._emit_benchmark_event("batch_run_start", total_images=total_images)
+            benchmark_stage_ceiling = self._benchmark_stage_ceiling()
+            reset_output_reservations = getattr(
+                self.main_page,
+                "reset_automatic_output_reservations",
+                None,
             )
-            if callable(pdf_preflight)
-            else 0
-        )
-        if pdf_count:
-            logger.info(
-                "Validated %d PDF-backed pages before stage-batched processing.",
-                pdf_count,
-            )
-            warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
-            if warnings:
-                pages = ", ".join(str(item["page_number"]) for item in warnings)
-                sizes = "; ".join(
-                    "{page_number}: {requested_width}×{requested_height} → "
-                    "{applied_width}×{applied_height}".format(**item)
-                    for item in warnings
-                )
-                self.main_page.batch_report_ctrl.register_preflight_warning(
-                    QCoreApplication.translate(
-                        "PdfImport", "PDF import memory limit applied"
-                    ),
-                    QCoreApplication.translate(
-                        "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
-                    ).replace("{pages}", pages).replace("{sizes}", sizes),
-                )
-        if callable(resource_plan_getter):
-            resource_plan = resource_plan_getter()
+            if callable(reset_output_reservations):
+                reset_output_reservations()
+            self._recent_page_durations.clear()
+            self._released_page_buffer_bytes = 0
+            self._paddleocr_cache_store = None
+            self._paddleocr_cache_identity = None
+            self._render_context_cache = None
             self._record_performance_workload(
                 "pipeline",
-                page_count=int(getattr(resource_plan, "page_count", total_images)),
-                largest_page_pixels=int(getattr(resource_plan, "largest_pixels", 0)),
-                largest_page_peak_bytes=int(
-                    getattr(resource_plan, "largest_page_peak_bytes", 0)
-                ),
+                page_count=total_images,
+                workflow_mode="stage_batched",
             )
-        with self._measure_performance(
-            stage="pipeline",
-            operation="prepare_work_context",
-            workload={"page_count": total_images},
-            node_id="pipeline.prepare",
-        ):
-            pages = self._load_page_contexts(image_list)
-            policy = self._ensure_stage_policy(pages)
-            self._project_checkpoint_store = open_project_stage_checkpoint_store(
-                self.main_page,
-                initialize=True,
+            resource_plan_getter = getattr(
+                self.main_page.file_handler,
+                "image_resource_plan",
+                None,
             )
-        self._project_checkpoint_page_keys = (
-            [
-                project_checkpoint_page_key(self.main_page, image_path)
-                for image_path in image_list
-            ]
-            if self._project_checkpoint_store is not None
-            else []
-        )
-        batch_completed = False
+            self._reset_prewarm_lifecycle()
+            pdf_preflight = getattr(
+                self.main_page.file_handler, "preflight_for_processing", None
+            )
+            pdf_count = (
+                pdf_preflight(
+                    image_list,
+                    should_cancel=lambda: bool(
+                        getattr(
+                            self.main_page,
+                            "is_current_task_cancelled",
+                            lambda: False,
+                        )()
+                    ),
+                )
+                if callable(pdf_preflight)
+                else 0
+            )
+            if pdf_count:
+                logger.info(
+                    "Validated %d PDF-backed pages before stage-batched processing.",
+                    pdf_count,
+                )
+                warnings = self.main_page.file_handler.get_pdf_import_warnings(image_list)
+                if warnings:
+                    pages_text = ", ".join(
+                        str(item["page_number"]) for item in warnings
+                    )
+                    sizes = "; ".join(
+                        "{page_number}: {requested_width}×{requested_height} → "
+                        "{applied_width}×{applied_height}".format(**item)
+                        for item in warnings
+                    )
+                    self.main_page.batch_report_ctrl.register_preflight_warning(
+                        QCoreApplication.translate(
+                            "PdfImport", "PDF import memory limit applied"
+                        ),
+                        QCoreApplication.translate(
+                            "PdfImport", "Pages: {pages}. Requested/applied sizes: {sizes}."
+                        ).replace("{pages}", pages_text).replace("{sizes}", sizes),
+                    )
+            if callable(resource_plan_getter):
+                resource_plan = resource_plan_getter()
+                self._record_performance_workload(
+                    "pipeline",
+                    page_count=int(getattr(resource_plan, "page_count", total_images)),
+                    largest_page_pixels=int(getattr(resource_plan, "largest_pixels", 0)),
+                    largest_page_peak_bytes=int(
+                        getattr(resource_plan, "largest_page_peak_bytes", 0)
+                    ),
+                )
+            with self._measure_performance(
+                stage="pipeline",
+                operation="prepare_work_context",
+                workload={"page_count": total_images},
+                node_id="pipeline.prepare",
+            ):
+                pages = self._load_page_contexts(image_list)
+                policy = self._ensure_stage_policy(pages)
+                self._project_checkpoint_store = open_project_stage_checkpoint_store(
+                    self.main_page,
+                    initialize=True,
+                )
+            self._project_checkpoint_page_keys = (
+                [
+                    project_checkpoint_page_key(self.main_page, image_path)
+                    for image_path in image_list
+                ]
+                if self._project_checkpoint_store is not None
+                else []
+            )
+        except OperationCancelledError as exc:
+            checker = getattr(self.main_page, "is_current_task_cancelled", None)
+            try:
+                requested = bool(checker()) if callable(checker) else bool(self._is_cancelled())
+            except Exception:
+                requested = False
+            if requested:
+                processing_status = (
+                    "paused"
+                    if bool(getattr(self.main_page, "_batch_pause_requested", False))
+                    and not bool(getattr(self.main_page, "_batch_cancel_requested", False))
+                    else "cancelled"
+                )
+                try:
+                    self._emit_benchmark_event(
+                        "batch_run_cancelled", total_images=total_images
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not record the cancelled preparation event.",
+                        exc_info=True,
+                    )
+            else:
+                processing_status = "failed"
+                processing_error = exc
+                try:
+                    self._emit_benchmark_event(
+                        "batch_run_failed",
+                        total_images=total_images,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not record the failed preparation event.",
+                        exc_info=True,
+                    )
+            self._finalize_batch_run(
+                pages=pages,
+                policy=policy,
+                batch_completed=False,
+                processing_status=processing_status,
+                processing_error=processing_error,
+                output_summary=output_summary,
+                autosave_deferral_started=False,
+                runtime_cleanup_needed=runtime_cleanup_needed,
+            )
+            if not requested:
+                raise RuntimeError(str(exc) or "Unexpected preparation cancellation") from exc
+            raise
+        except Exception as exc:
+            processing_status = "failed"
+            processing_error = exc
+            try:
+                self._emit_benchmark_event(
+                    "batch_run_failed",
+                    total_images=total_images,
+                    reason=f"{type(exc).__name__}: {exc}",
+                )
+            except Exception:
+                logger.debug("Could not record the failed preparation event.", exc_info=True)
+            self._finalize_batch_run(
+                pages=pages,
+                policy=policy,
+                batch_completed=False,
+                processing_status=processing_status,
+                processing_error=processing_error,
+                output_summary=output_summary,
+                autosave_deferral_started=False,
+                runtime_cleanup_needed=runtime_cleanup_needed,
+            )
+            raise
         try:
             self._raise_if_cancelled()
+            runtime_cleanup_needed = True
             with self._measure_performance(
                 stage="pipeline",
                 operation="runtime_startup_preflight",
@@ -5253,6 +5487,7 @@ class StageBatchedProcessor(BatchProcessor):
             project_ctrl = getattr(self.main_page, "project_ctrl", None)
             if project_ctrl is not None:
                 project_ctrl.begin_batch_autosave_deferral()
+                autosave_deferral_started = True
             with self._measure_performance(
                 stage="inpaint",
                 operation="stage_window",
@@ -5320,7 +5555,6 @@ class StageBatchedProcessor(BatchProcessor):
                     self.main_page.settings_page
                 ),
             )
-            self._write_run_report(pages, output_summary=output_summary)
             if int(output_summary.get("output_count", 0)) != total_images:
                 raise RuntimeError(
                     self._stage_tr("출력 페이지 수가 입력과 다릅니다.")
@@ -5333,6 +5567,7 @@ class StageBatchedProcessor(BatchProcessor):
                 fallback_count=int(output_summary.get("fallback_count", 0)),
             )
             batch_completed = True
+            processing_status = "completed"
         except OperationCancelledError as exc:
             checker = getattr(self.main_page, "is_current_task_cancelled", None)
             try:
@@ -5340,46 +5575,63 @@ class StageBatchedProcessor(BatchProcessor):
             except Exception:
                 requested = False
             if not requested:
+                processing_status = "failed"
+                processing_error = exc
+                try:
+                    self._emit_benchmark_event(
+                        "batch_run_failed",
+                        total_images=total_images,
+                        reason=f"Unexpected render cancellation: {exc}",
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not record the failed run event.",
+                        exc_info=True,
+                    )
+                raise RuntimeError(str(exc) or "Unexpected render cancellation") from exc
+            processing_status = (
+                "paused"
+                if bool(getattr(self.main_page, "_batch_pause_requested", False))
+                and not bool(getattr(self.main_page, "_batch_cancel_requested", False))
+                else "cancelled"
+            )
+            try:
+                self._emit_benchmark_event(
+                    "batch_run_cancelled",
+                    total_images=total_images,
+                )
+            except Exception:
+                logger.debug(
+                    "Could not record the cancelled run event.",
+                    exc_info=True,
+                )
+            return
+        except Exception as exc:
+            processing_status = "failed"
+            processing_error = exc
+            try:
                 self._emit_benchmark_event(
                     "batch_run_failed",
                     total_images=total_images,
-                    reason=f"Unexpected render cancellation: {exc}",
+                    reason=f"{type(exc).__name__}: {exc}",
                 )
-                raise RuntimeError(str(exc) or "Unexpected render cancellation") from exc
-            self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
-            return
-        except Exception as exc:
-            self._emit_benchmark_event(
-                "batch_run_failed",
-                total_images=total_images,
-                reason=f"{type(exc).__name__}: {exc}",
-            )
-            raise
-        finally:
-            self._persist_stage_rates()
-            self._shutdown_page_cache_executor()
-            self._shutdown_render_executor()
-            try:
-                project_ctrl = getattr(self.main_page, "project_ctrl", None)
-                if project_ctrl is not None:
-                    project_ctrl.end_batch_autosave_deferral(
-                        pages[-1].image_path if pages else ""
-                    )
             except Exception:
-                logger.warning(
-                    "Sweep 종료 자동저장 트리거 중 예외가 발생했지만 무시합니다.",
+                logger.debug(
+                    "Could not record the failed run event.",
                     exc_info=True,
                 )
-            try:
-                self._shutdown_prewarm_executor()
-            finally:
-                self._shutdown_managed_runtimes(
-                    preserve_sleeping_paddle=batch_completed,
-                    ocr_service=self._ocr_runtime_service_name(
-                        str(policy.get("primary_ocr_engine", ""))
-                    ),
-                )
-            self._progress_image_path = None
+            raise
+        finally:
+            self._finalize_batch_run(
+                pages=pages,
+                policy=policy,
+                batch_completed=batch_completed,
+                processing_status=processing_status,
+                processing_error=processing_error,
+                output_summary=output_summary,
+                autosave_deferral_started=autosave_deferral_started,
+                runtime_cleanup_needed=runtime_cleanup_needed,
+            )
 
     def _complete_ocr_stage_ceiling(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)

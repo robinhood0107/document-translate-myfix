@@ -185,13 +185,15 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         ComicTranslate.on_batch_process_finished(controller)
 
         controller._start_batch_archive_finalization.assert_not_called()
+        controller._finalize_batch_report.assert_not_called()
         controller._finish_batch_process_ui.assert_called_once_with(
             was_cancelled=False,
             failed=False,
             total_images=2,
             completed_batch_paths=["page-a.png", "page-b.png"],
-            report={"skipped_count": 0},
             was_paused=False,
+            processing_status="completed",
+            archive_status="not_applicable",
         )
         self.assertFalse(controller._batch_active)
         self.assertFalse(controller._batch_cancel_requested)
@@ -204,10 +206,11 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         ComicTranslate.on_batch_process_finished(controller)
 
         controller._finish_batch_process_ui.assert_not_called()
+        controller._finalize_batch_report.assert_not_called()
         controller._start_batch_archive_finalization.assert_called_once_with(
             completed_batch_paths=["page-a.png", "page-b.png"],
             total_images=2,
-            report={"skipped_count": 0},
+            processing_status="completed",
         )
 
     def test_paused_batch_skips_archive_finalization(self) -> None:
@@ -222,8 +225,9 @@ class ControllerBatchPreflightTests(unittest.TestCase):
             failed=False,
             total_images=2,
             completed_batch_paths=["page-a.png", "page-b.png"],
-            report={"skipped_count": 0},
             was_paused=True,
+            processing_status="paused",
+            archive_status="not_applicable",
         )
         self.assertFalse(controller._batch_active)
         self.assertFalse(controller._batch_cancel_requested)
@@ -234,6 +238,12 @@ class ControllerBatchPreflightTests(unittest.TestCase):
             OUTPUT_TARGET_IMAGES
         )
         controller._is_shutting_down = True
+        controller.settings_page = SimpleNamespace(
+            get_export_settings=mock.Mock(side_effect=OSError("settings unavailable"))
+        )
+        controller._run_txt_md_auto_exports = (
+            ComicTranslate._run_txt_md_auto_exports.__get__(controller)
+        )
 
         with mock.patch(
             "controller.finish_debug_artifact_run"
@@ -243,6 +253,15 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         finish_debug.assert_called_once_with(
             controller,
             status="interrupted",
+        )
+        finalize_kwargs = controller._finalize_batch_report.call_args.kwargs
+        self.assertEqual(finalize_kwargs["processing_status"], "interrupted")
+        self.assertEqual(
+            finalize_kwargs["auto_export_result"]["status"], "not_observed"
+        )
+        self.assertEqual(
+            finalize_kwargs["auto_export_result"]["reason_code"],
+            "auto_export_settings_not_observed",
         )
         controller._finish_batch_process_ui.assert_not_called()
         self.assertEqual(controller.selected_batch, [])

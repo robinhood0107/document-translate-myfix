@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>Tamamlandı</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>İptal edildi</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Başarısız</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>Kesintiye uğradı</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>Duraklatıldı</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>Rapor başarısız</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>Temizleme başarısız</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>Tamamlanmadı</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>Çalıştırma tamamlandı ancak rapor kaydedilemedi. Çıktılar korunmuştur.</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>Çalıştırma tamamlandı ancak bazı sonuçlar veya temizleme işlemleri doğrulanmadı. Çıktılar korunmuştur.</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>
@@ -2400,7 +2440,7 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Duraklatıldı</translation>
     </message>
     <message>
         <source>Running</source>
@@ -4926,7 +4966,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Duraklatıldı</translation>
     </message>
     <message>
         <source>#{index:02d} · {name}</source>

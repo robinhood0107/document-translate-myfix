@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>Terminé</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Annulé</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Échec</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>Interrompu</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>En pause</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>Échec du rapport</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>Échec du nettoyage</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>Incomplet</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>L’exécution est terminée, mais le rapport n’a pas pu être enregistré. Les sorties sont conservées.</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>L’exécution est terminée, mais certains résultats ou nettoyages n’ont pas été vérifiés. Les sorties sont conservées.</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>
@@ -2400,7 +2440,7 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">En pause</translation>
     </message>
     <message>
         <source>Running</source>
@@ -4926,7 +4966,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">En pause</translation>
     </message>
     <message>
         <source>#{index:02d} · {name}</source>

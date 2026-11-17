@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>Completato</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Annullato</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Non riuscito</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>Interrotto</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>In pausa</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>Errore del rapporto</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>Errore della pulizia</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>Incompleto</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>L’esecuzione è terminata, ma non è stato possibile salvare il rapporto. I risultati sono stati conservati.</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>L’esecuzione è terminata, ma alcuni risultati o operazioni di pulizia non sono verificati. I risultati sono stati conservati.</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>
@@ -2400,7 +2440,7 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">In pausa</translation>
     </message>
     <message>
         <source>Running</source>
@@ -4927,7 +4967,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">In pausa</translation>
     </message>
     <message>
         <source>#{index:02d} · {name}</source>

@@ -131,9 +131,150 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
                 processor._write_run_report.call_args.kwargs["output_summary"]["missing"],
                 ["chapter-a.png"],
             )
+            self.assertEqual(
+                processor._write_run_report.call_args.kwargs["output_summary"]["missing_source_unit_indices"],
+                [0],
+            )
             tags = [call.args[0] for call in processor._emit_benchmark_event.call_args_list]
             self.assertIn("batch_run_failed", tags)
             self.assertNotIn("batch_run_done", tags)
+
+    def test_report_failure_runs_after_cleanup_and_keeps_output(self) -> None:
+        with TemporaryDirectory() as temporary:
+            output_root = Path(temporary)
+            processor = self._processor(output_root)
+            events: list[str] = []
+
+            def shutdown(
+                *,
+                context: str,
+                raise_on_failure: bool = False,
+                preserve_sleeping_paddle: bool = False,
+                ocr_service: str = "ocr",
+            ) -> None:
+                if context == "terminal cleanup":
+                    events.append("cleanup")
+
+            def render(pages: list[StagePageContext]) -> None:
+                target = output_root / "chapter-a-translated.png"
+                Image.new("RGB", (8, 8), (31, 0, 0)).save(target)
+                pages[0].output_path = str(target)
+
+            def write_report(*_args, **_kwargs) -> None:
+                events.append("report")
+                raise OSError("synthetic report failure")
+
+            processor._shutdown_managed_runtimes.side_effect = shutdown
+            processor._render_all = render
+            processor._write_run_report.side_effect = write_report
+            with mock.patch(
+                "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
+                return_value=None,
+            ):
+                processor.batch_process(["chapter-a.png"])
+
+            self.assertEqual(events, ["cleanup", "report"])
+            self.assertTrue((output_root / "chapter-a-translated.png").is_file())
+            self.assertEqual(
+                processor._write_run_report.call_args.kwargs["processing_status"],
+                "completed",
+            )
+            self.assertEqual(
+                processor._write_run_report.call_args.kwargs["cleanup_status"],
+                "completed",
+            )
+
+    def test_cleanup_failure_does_not_replace_processing_exception(self) -> None:
+        with TemporaryDirectory() as temporary:
+            processor = self._processor(Path(temporary))
+
+            def shutdown(
+                *,
+                context: str,
+                raise_on_failure: bool = False,
+                preserve_sleeping_paddle: bool = False,
+                ocr_service: str = "ocr",
+            ) -> None:
+                if context == "terminal cleanup":
+                    raise RuntimeError("synthetic cleanup failure")
+
+            processor._shutdown_managed_runtimes.side_effect = shutdown
+            processor._render_all = mock.Mock(
+                side_effect=RuntimeError("synthetic processing failure")
+            )
+            processor._render_executor = SimpleNamespace(
+                shutdown=mock.Mock(side_effect=RuntimeError("synthetic render cleanup failure"))
+            )
+            with mock.patch(
+                "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
+                return_value=None,
+            ), self.assertRaisesRegex(RuntimeError, "synthetic processing failure"):
+                processor.batch_process(["chapter-a.png"])
+
+            self.assertEqual(
+                processor._write_run_report.call_args.kwargs["processing_status"],
+                "failed",
+            )
+            self.assertEqual(
+                processor._write_run_report.call_args.kwargs["cleanup_status"],
+                "failed",
+            )
+            self.assertEqual(
+                processor._write_run_report.call_args.kwargs["processing_error"].args,
+                ("synthetic processing failure",),
+            )
+            self.assertIn(
+                "shutdown_render_executor",
+                [
+                    item["step"]
+                    for item in processor._write_run_report.call_args.kwargs["cleanup_errors"]
+                ],
+            )
+            self.assertTrue(
+                processor._shutdown_managed_runtimes.call_args.kwargs["raise_on_failure"]
+            )
+
+    def test_preparation_failures_write_terminal_report(self) -> None:
+        for failure_point in (
+            "pdf_preflight",
+            "load_page_contexts",
+            "ensure_stage_policy",
+            "checkpoint_store",
+        ):
+            with self.subTest(failure_point=failure_point), TemporaryDirectory() as temporary:
+                processor = self._processor(Path(temporary))
+                error = RuntimeError(f"synthetic {failure_point} failure")
+                if failure_point == "pdf_preflight":
+                    processor.main_page.file_handler.preflight_for_processing = mock.Mock(
+                        side_effect=error
+                    )
+                elif failure_point == "load_page_contexts":
+                    processor._load_page_contexts = mock.Mock(side_effect=error)
+                elif failure_point == "ensure_stage_policy":
+                    processor._ensure_stage_policy = mock.Mock(side_effect=error)
+
+                checkpoint_error = (
+                    mock.patch(
+                        "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
+                        side_effect=error,
+                    )
+                    if failure_point == "checkpoint_store"
+                    else mock.patch(
+                        "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
+                        return_value=None,
+                    )
+                )
+                with checkpoint_error, self.assertRaisesRegex(RuntimeError, failure_point):
+                    processor.batch_process(["chapter-a.png"])
+
+                self.assertEqual(processor._write_run_report.call_count, 1)
+                self.assertEqual(
+                    processor._write_run_report.call_args.kwargs["processing_status"],
+                    "failed",
+                )
+                self.assertIsNone(
+                    processor._write_run_report.call_args.kwargs["output_summary"]["output_count"]
+                )
 
     def test_series_queue_two_children_save_pixels_and_done_states(self) -> None:
         class SeriesMain(QtCore.QObject):
@@ -273,7 +414,7 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
 
             with Image.open(output_root / "retry-translated.png") as image:
                 self.assertEqual(image.getpixel((0, 0)), (83, 0, 0))
-            self.assertEqual(processor._write_run_report.call_count, 1)
+            self.assertEqual(processor._write_run_report.call_count, 2)
 
     def test_failed_run_can_retry_with_a_new_render_token(self) -> None:
         with TemporaryDirectory() as temporary:

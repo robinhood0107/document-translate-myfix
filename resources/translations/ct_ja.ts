@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>完了</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>キャンセル</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>中断</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>一時停止</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>レポート失敗</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>クリーンアップ失敗</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>未完了</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>実行は完了しましたが、レポートを保存できませんでした。出力は保持されています。</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>実行は完了しましたが、一部の結果またはクリーンアップは未確認です。出力は保持されています。</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>
@@ -2400,7 +2440,7 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">一時停止</translation>
     </message>
     <message>
         <source>Running</source>
@@ -4927,7 +4967,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">一時停止</translation>
     </message>
     <message>
         <source>#{index:02d} · {name}</source>
