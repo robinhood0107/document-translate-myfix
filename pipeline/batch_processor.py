@@ -57,7 +57,10 @@ from modules.utils.inpaint_debug import (
     has_debug_exports,
 )
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill
-from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
+from modules.utils.inpaint_composite import (
+    composite_with_edit_mask,
+    exclude_protected_pixels,
+)
 from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
@@ -2133,6 +2136,7 @@ class BatchProcessor:
                         protected_corner_mask=mask_details.get(
                             "protected_corner_mask"
                         ),
+                        protect_mask=mask_details.get("protect_mask"),
                     )
                     inpaint_input_img = imk.convert_scale_abs(
                         inpaint_input_img
@@ -2177,17 +2181,12 @@ class BatchProcessor:
                         mask_details,
                         cleanup_stats,
                     )
-                    protected_corner_mask = normalize_edit_mask(
-                        mask_details.get("protected_corner_mask"),
+                    mask = exclude_protected_pixels(
+                        mask,
                         image.shape,
+                        mask_details.get("protect_mask"),
+                        mask_details.get("protected_corner_mask"),
                     )
-                    if np.any(protected_corner_mask):
-                        mask = np.where(
-                            (normalize_edit_mask(mask, image.shape) > 0)
-                            & (protected_corner_mask <= 0),
-                            255,
-                            0,
-                        ).astype(np.uint8)
                     inpaint_input_img = composite_with_edit_mask(
                         image,
                         inpaint_input_img,

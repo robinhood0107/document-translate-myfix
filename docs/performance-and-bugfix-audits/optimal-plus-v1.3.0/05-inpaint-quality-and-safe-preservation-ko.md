@@ -58,6 +58,7 @@
 
 ## 운영 불변 조건
 
+- 최종 edit mask에서는 `protect_mask`와 `protected_corner_mask` 영역을 제외한다. 보호 mask가 페이지 크기와 맞지 않으면 자동 처리를 중단한다. cleanup 계약이 바뀌면 구형 checkpoint는 miss되어 다시 계산하고, 새 checkpoint는 보호된 픽셀과 최종 mask를 그대로 복원한다. 모의 검증은 이 old-miss/new-hit 동작을 확인했으며, 실제 페이지의 D1/D2 시각 검수는 실행하지 않았다.
 - 학습형 인페인트는 CUDA에서만 실행한다. CPU fallback은 성공으로 처리하지 않는다.
 - 한 번에 Paddle 또는 Manga OCR, inpainter, Gemma를 함께 GPU에 상주시키지 않는다.
 - GPU OOM은 좁은 ROI 재시도까지 허용하되, CPU로 자동 후퇴하지 않는다.

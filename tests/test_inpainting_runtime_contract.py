@@ -451,3 +451,57 @@ def test_handler_losslessly_restores_every_pixel_outside_edit_mask() -> None:
         == 0
     )
     assert handler.last_inpaint_diagnostics["cpu_fallback_used"] is False
+
+
+def test_handler_excludes_protected_pixels_after_blockwise_expansion() -> None:
+    handler = InpaintingHandler(SimpleNamespace(settings_page=object()))
+    handler.cached_inpainter_key = "lama_large_512px"
+    handler.inpainter_cache = SimpleNamespace(
+        runtime_device="cuda",
+        precision="fp32",
+        inpaint_size=2048,
+    )
+    handler._ensure_inpainter = lambda: handler.inpainter_cache
+    image = np.full((8, 8, 3), 10, dtype=np.uint8)
+    mask = np.full((8, 8), 255, dtype=np.uint8)
+    protected = np.zeros((8, 8), dtype=np.uint8)
+    protected[:2, :2] = 255
+    raw_source_mask = mask.copy()
+    positive_claim_raw_mask = mask.copy()
+    unsafe_result = np.full_like(image, 200)
+
+    with mock.patch(
+        "pipeline.inpainting.source_lama_blockwise_inpaint_result",
+        return_value=SourceLamaBlockwiseResult(
+            image=unsafe_result,
+            edit_mask=mask.copy(),
+            diagnostics=[],
+        ),
+    ) as run_lama:
+        result = handler.inpaint_with_blocks(
+            image,
+            mask,
+            [],
+            config=object(),
+            raw_source_mask=raw_source_mask,
+            positive_claim_raw_mask=positive_claim_raw_mask,
+            protect_mask=protected,
+        )
+
+    model_mask = run_lama.call_args.args[1]
+    np.testing.assert_array_equal(model_mask[protected > 0], 0)
+    for forwarded_mask in (
+        run_lama.call_args.kwargs["raw_source_mask"],
+        run_lama.call_args.kwargs["positive_claim_raw_mask"],
+    ):
+        np.testing.assert_array_equal(forwarded_mask[protected > 0], 0)
+        np.testing.assert_array_equal(
+            forwarded_mask[protected == 0],
+            mask[protected == 0],
+        )
+    np.testing.assert_array_equal(result[protected > 0], image[protected > 0])
+    np.testing.assert_array_equal(
+        handler.last_inpaint_edit_mask[protected > 0],
+        0,
+    )
+    np.testing.assert_array_equal(result[protected == 0], unsafe_result[protected == 0])

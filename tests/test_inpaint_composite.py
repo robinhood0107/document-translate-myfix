@@ -8,7 +8,9 @@ from modules.utils.inpaint_composite import (
     composite_crop_with_edit_mask,
     composite_with_edit_mask,
     count_changed_outside_edit_mask,
+    exclude_protected_pixels,
     normalize_edit_mask,
+    normalize_protection_mask,
 )
 
 
@@ -33,6 +35,27 @@ class InpaintCompositeTests(unittest.TestCase):
 
         self.assertEqual(normalized.shape, (4, 6))
         self.assertEqual(int(np.count_nonzero(normalized)), 24)
+
+    def test_protection_mask_requires_page_geometry_and_keeps_boundary_pixels(self) -> None:
+        image_shape = (4, 5, 3)
+        edit_mask = np.full(image_shape[:2], 255, dtype=np.uint8)
+        protected = np.zeros(image_shape[:2], dtype=np.uint8)
+        protected[0, :2] = 255
+        protected[:2, 0] = 255
+
+        allowed = exclude_protected_pixels(edit_mask, image_shape, protected)
+
+        np.testing.assert_array_equal(allowed[protected > 0], 0)
+        self.assertTrue(np.all(allowed[protected == 0] == 255))
+        self.assertEqual(int(np.count_nonzero(normalize_protection_mask(None, image_shape))), 0)
+        with self.assertRaisesRegex(ValueError, "Protection mask shape"):
+            normalize_protection_mask(np.zeros((3, 5), dtype=np.uint8), image_shape)
+        with self.assertRaisesRegex(ValueError, "Edit mask shape"):
+            exclude_protected_pixels(
+                np.zeros((3, 5), dtype=np.uint8),
+                image_shape,
+                protected,
+            )
 
     def test_changed_outside_mask_counts_only_unprotected_pixels(self) -> None:
         original = np.zeros((5, 5), dtype=np.uint8)
