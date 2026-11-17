@@ -100,24 +100,31 @@ def _available_page_cache_bytes(
     엉뚱한 판단을 한다.
     """
 
-    completed = run_docker_command(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--name",
-            GEMMA_MODEL_SIZE_PROBE_CONTAINER + "-mem",
-            "--pull",
-            "never",
-            "--entrypoint",
-            "/bin/sh",
-            DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
-            "-ec",
-            "awk '/^MemAvailable:/ {print $2}' /proc/meminfo",
-        ],
-        check=False,
-        cancel_checker=cancel_checker,
-    )
+    from modules.utils.llama_cpp_runtime import remove_named_container
+
+    probe_container = f"{GEMMA_MODEL_SIZE_PROBE_CONTAINER}-mem"
+    remove_named_container(probe_container)
+    try:
+        completed = run_docker_command(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                probe_container,
+                "--pull",
+                "never",
+                "--entrypoint",
+                "/bin/sh",
+                DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
+                "-ec",
+                "awk '/^MemAvailable:/ {print $2}' /proc/meminfo",
+            ],
+            check=False,
+            cancel_checker=cancel_checker,
+        )
+    finally:
+        remove_named_container(probe_container)
     if completed.returncode != 0:
         return 0
     try:
@@ -138,29 +145,33 @@ def _volume_model_size_bytes(
 
     from modules.utils.llama_cpp_runtime import remove_named_container
 
-    remove_named_container(GEMMA_MODEL_SIZE_PROBE_CONTAINER)
-    completed = run_docker_command(
-        [
-            "docker",
-            "run",
-            "--name",
-            GEMMA_MODEL_SIZE_PROBE_CONTAINER,
-            "--rm",
-            "--pull",
-            "never",
-            "-e",
-            f"MODEL_FILE={model_name}",
-            "--mount",
-            f"type=volume,source={volume_name},target=/models,readonly",
-            "--entrypoint",
-            "/bin/sh",
-            image_ref,
-            "-ec",
-            'stat -c %s "/models/$MODEL_FILE"',
-        ],
-        check=False,
-        cancel_checker=cancel_checker,
-    )
+    probe_container = GEMMA_MODEL_SIZE_PROBE_CONTAINER
+    remove_named_container(probe_container)
+    try:
+        completed = run_docker_command(
+            [
+                "docker",
+                "run",
+                "--name",
+                probe_container,
+                "--rm",
+                "--pull",
+                "never",
+                "-e",
+                f"MODEL_FILE={model_name}",
+                "--mount",
+                f"type=volume,source={volume_name},target=/models,readonly",
+                "--entrypoint",
+                "/bin/sh",
+                image_ref,
+                "-ec",
+                'stat -c %s "/models/$MODEL_FILE"',
+            ],
+            check=False,
+            cancel_checker=cancel_checker,
+        )
+    finally:
+        remove_named_container(probe_container)
     if completed.returncode != 0:
         return 0
     try:
@@ -523,31 +534,35 @@ class LocalGemmaRuntimeManager:
 
             from modules.utils.llama_cpp_runtime import remove_named_container
 
-            remove_named_container(GEMMA_PAGE_CACHE_PREFETCH_CONTAINER)
+            prefetch_container = GEMMA_PAGE_CACHE_PREFETCH_CONTAINER
+            remove_named_container(prefetch_container)
             started_at = time.perf_counter()
-            completed = run_docker_command(
-                [
-                    "docker",
-                    "run",
-                    "--name",
-                    GEMMA_PAGE_CACHE_PREFETCH_CONTAINER,
-                    "--rm",
-                    "--pull",
-                    "never",
-                    "-e",
-                    f"MODEL_FILE={model_name}",
-                    "--mount",
-                    f"type=volume,source={volume_name},target=/models,readonly",
-                    "--entrypoint",
-                    "/bin/sh",
-                    image_ref,
-                    "-ec",
-                    'test -f "/models/$MODEL_FILE" && '
-                    'cat "/models/$MODEL_FILE" > /dev/null',
-                ],
-                check=False,
-                cancel_checker=cancel_checker,
-            )
+            try:
+                completed = run_docker_command(
+                    [
+                        "docker",
+                        "run",
+                        "--name",
+                        prefetch_container,
+                        "--rm",
+                        "--pull",
+                        "never",
+                        "-e",
+                        f"MODEL_FILE={model_name}",
+                        "--mount",
+                        f"type=volume,source={volume_name},target=/models,readonly",
+                        "--entrypoint",
+                        "/bin/sh",
+                        image_ref,
+                        "-ec",
+                        'test -f "/models/$MODEL_FILE" && '
+                        'cat "/models/$MODEL_FILE" > /dev/null',
+                    ],
+                    check=False,
+                    cancel_checker=cancel_checker,
+                )
+            finally:
+                remove_named_container(prefetch_container)
             elapsed_sec = time.perf_counter() - started_at
             if completed.returncode != 0:
                 # 프리페치는 최적화일 뿐이다. 실패해도 적재는 그대로 된다.
