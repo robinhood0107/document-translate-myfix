@@ -1519,11 +1519,14 @@ class StageBatchedProcessor(BatchProcessor):
     def _shutdown_page_cache_executor(self) -> None:
         # 정리는 어떤 상황에서도 실패하면 안 된다. 생성자를 거치지 않은 객체에서도
         # 안전하도록 속성 존재를 가정하지 않는다.
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
         executor = getattr(self, "_page_cache_executor", None)
         self._page_cache_executor = None
         self._gemma_prefetch_job = None
         if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
     @staticmethod
     def _render_worker_count() -> int:

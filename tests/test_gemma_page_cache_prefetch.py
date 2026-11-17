@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -27,7 +28,10 @@ from modules.translation.local_runtime import (  # noqa: E402
     GEMMA_MODEL_SIZE_PROBE_CONTAINER,
     GEMMA_PAGE_CACHE_PREFETCH_CONTAINER,
     LocalGemmaRuntimeManager,
+    _available_page_cache_bytes,
+    _volume_model_size_bytes,
 )
+from modules.utils.exceptions import OperationCancelledError  # noqa: E402
 from pipeline.stage_batched_processor import StageBatchedProcessor  # noqa: E402
 
 
@@ -111,6 +115,30 @@ class PrefetchFailsOpenTests(unittest.TestCase):
 
         processor = object.__new__(StageBatchedProcessor)
         processor._shutdown_page_cache_executor()
+        processor._shutdown_page_cache_executor()
+
+    def test_the_next_batch_resets_the_prefetch_cancel_signal(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        processor._prewarm_cancel_event = threading.Event()
+        processor._prewarm_cancel_event.set()
+        processor._runtime_progress_lock = threading.RLock()
+        processor._runtime_progress_started = {}
+
+        processor._reset_prewarm_lifecycle()
+
+        self.assertFalse(processor._prewarm_cancel_event.is_set())
+
+    def test_a_completed_prefetch_can_be_awaited_and_torn_down(self) -> None:
+        manager = mock.create_autospec(LocalGemmaRuntimeManager, instance=True)
+        manager.prefetch_model_into_page_cache.return_value = {"performed": True}
+        processor = self._processor(manager)
+
+        processor._start_gemma_page_cache_prefetch()
+        processor._await_gemma_page_cache_prefetch()
+        processor._shutdown_page_cache_executor()
+
+        manager.prefetch_model_into_page_cache.assert_called_once()
+        self.assertIsNone(processor._page_cache_executor)
 
     def test_teardown_cancels_a_queued_prefetch(self) -> None:
         processor = object.__new__(StageBatchedProcessor)
@@ -119,9 +147,204 @@ class PrefetchFailsOpenTests(unittest.TestCase):
         processor._shutdown_page_cache_executor()
         self.assertIsNone(processor._page_cache_executor)
 
-    def test_the_batch_teardown_shuts_the_executor_down(self) -> None:
-        source = inspect.getsource(StageBatchedProcessor.batch_process)
-        self.assertIn("_shutdown_page_cache_executor()", source)
+    def test_the_batch_finalizer_shuts_the_executor_down(self) -> None:
+        source = inspect.getsource(StageBatchedProcessor._finalize_batch_run)
+        self.assertIn(
+            'run_cleanup_step("shutdown_page_cache_executor", '
+            "self._shutdown_page_cache_executor)",
+            source,
+        )
+
+
+class PageCacheTeardownTests(unittest.TestCase):
+    def test_batch_finalization_waits_for_a_cancelled_running_prefetch(self) -> None:
+        started = threading.Event()
+        cancel_observed = threading.Event()
+        allow_worker_exit = threading.Event()
+        worker_finished = threading.Event()
+        finalizer_finished = threading.Event()
+        finalizer_errors: list[BaseException] = []
+
+        def blocked_prefetch(_settings_page, *, cancel_checker=None):
+            started.set()
+            try:
+                while not cancel_checker():
+                    cancel_observed.wait(0.01)
+                cancel_observed.set()
+                allow_worker_exit.wait()
+                return {"performed": False, "reason": "cancelled"}
+            finally:
+                worker_finished.set()
+
+        manager = mock.create_autospec(LocalGemmaRuntimeManager, instance=True)
+        manager.prefetch_model_into_page_cache.side_effect = blocked_prefetch
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(
+            local_translation_runtime_manager=manager,
+            settings_page=object(),
+            is_current_task_cancelled=lambda: False,
+        )
+        processor._prewarm_cancel_event = threading.Event()
+        processor._page_cache_executor = None
+        processor._gemma_prefetch_job = None
+        processor._prewarm_executor = None
+        processor._prewarm_jobs = {}
+        processor._ocr_container_prewarm_job = None
+        processor._render_executor = None
+        processor._render_cancel_event = threading.Event()
+        processor._pending_render_jobs = []
+        processor._persist_stage_rates = mock.Mock()
+        processor._write_run_report = mock.Mock()
+
+        def finalize() -> None:
+            try:
+                processor._finalize_batch_run(
+                    pages=[],
+                    policy={},
+                    batch_completed=False,
+                    processing_status="cancelled",
+                    processing_error=None,
+                    output_summary={},
+                    autosave_deferral_started=False,
+                    runtime_cleanup_needed=False,
+                )
+            except BaseException as exc:
+                finalizer_errors.append(exc)
+            finally:
+                finalizer_finished.set()
+
+        finalizer_thread = None
+        try:
+            processor._start_gemma_page_cache_prefetch()
+            self.assertTrue(started.wait(2))
+            finalizer_thread = threading.Thread(target=finalize, daemon=True)
+            finalizer_thread.start()
+
+            self.assertTrue(cancel_observed.wait(2))
+            self.assertFalse(finalizer_finished.wait(0.2))
+        finally:
+            processor._prewarm_cancel_event.set()
+            allow_worker_exit.set()
+            if finalizer_thread is not None:
+                finalizer_thread.join(2)
+
+        self.assertTrue(finalizer_finished.is_set())
+        self.assertTrue(worker_finished.is_set())
+        self.assertFalse(finalizer_errors)
+        self.assertEqual(
+            processor._write_run_report.call_args.kwargs["processing_status"],
+            "cancelled",
+        )
+
+
+class GemmaNamedContainerCleanupTests(unittest.TestCase):
+    def _manager(self) -> LocalGemmaRuntimeManager:
+        manager = object.__new__(LocalGemmaRuntimeManager)
+        manager._lock = threading.RLock()
+        manager.router_credentials = lambda _settings: (
+            "http://127.0.0.1:18080/v1",
+            "gemma-4-26B-IQ4_NL.gguf",
+        )
+        manager._configured_volume_name = lambda: "comic-translate-gemma-models-v2"
+        return manager
+
+    def _run_with_fake_container(self, operation, *, error=None):
+        live_containers: set[str] = set()
+        created_containers: list[str] = []
+
+        def fake_run_docker_command(command, **_kwargs):
+            container_name = command[command.index("--name") + 1]
+            live_containers.add(container_name)
+            created_containers.append(container_name)
+            if error is not None:
+                raise error
+            return SimpleNamespace(returncode=0, stdout="100", stderr="")
+
+        with mock.patch(
+            "modules.translation.local_runtime.run_docker_command",
+            side_effect=fake_run_docker_command,
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.remove_named_container",
+            side_effect=live_containers.discard,
+        ):
+            if error is None:
+                result = operation()
+            else:
+                with self.assertRaises(type(error)):
+                    operation()
+                result = None
+
+        self.assertTrue(created_containers)
+        self.assertFalse(live_containers)
+        return result, created_containers
+
+    def test_prefetch_removes_its_container_on_normal_error_and_cancel(self) -> None:
+        manager = self._manager()
+        outcomes = (
+            None,
+            RuntimeError("docker failed"),
+            OperationCancelledError("cancelled"),
+        )
+        for error in outcomes:
+            with self.subTest(error=type(error).__name__ if error else "success"):
+                with mock.patch(
+                    "modules.translation.local_runtime._available_page_cache_bytes",
+                    return_value=1000,
+                ), mock.patch(
+                    "modules.translation.local_runtime._volume_model_size_bytes",
+                    return_value=100,
+                ):
+                    result, created = self._run_with_fake_container(
+                        lambda: manager.prefetch_model_into_page_cache(
+                            object(),
+                            cancel_checker=lambda: False,
+                        ),
+                        error=error,
+                    )
+                self.assertEqual(created, [GEMMA_PAGE_CACHE_PREFETCH_CONTAINER])
+                if error is None:
+                    self.assertTrue(result["performed"])
+
+    def test_named_page_cache_probes_remove_their_containers_on_all_exits(
+        self,
+    ) -> None:
+        probes = (
+            (
+                "memory",
+                lambda: _available_page_cache_bytes(
+                    cancel_checker=lambda: False
+                ),
+                f"{GEMMA_MODEL_SIZE_PROBE_CONTAINER}-mem",
+            ),
+            (
+                "model size",
+                lambda: _volume_model_size_bytes(
+                    volume_name="comic-translate-gemma-models-v2",
+                    model_name="gemma-4-26B-IQ4_NL.gguf",
+                    image_ref="pinned-image",
+                    cancel_checker=lambda: False,
+                ),
+                GEMMA_MODEL_SIZE_PROBE_CONTAINER,
+            ),
+        )
+        outcomes = (
+            None,
+            RuntimeError("docker failed"),
+            OperationCancelledError("cancelled"),
+        )
+        for probe_name, probe, expected_container in probes:
+            for error in outcomes:
+                with self.subTest(
+                    probe=probe_name,
+                    error=type(error).__name__ if error else "success",
+                ):
+                    result, created = self._run_with_fake_container(
+                        probe,
+                        error=error,
+                    )
+                    self.assertEqual(created, [expected_container])
+                    if error is None:
+                        self.assertGreater(result, 0)
 
 
 class PrefetchRuntimeContractTests(unittest.TestCase):
