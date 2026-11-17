@@ -41,6 +41,7 @@ OCR_EMPTY_REASON_SPOTTING_UNMATCHED = (
 )
 OCR_EMPTY_REASON_HUNYUAN_TRUNCATED = "ocr_response_truncated"
 HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION = "hunyuan_finish_reason_v1"
+PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION = "paddle_spotting_full_page_v3"
 UI_PANEL_MODE_PRESERVE_ORIGINAL = "preserve_original"
 UI_PANEL_MODE_PREVIEW = "ui_panel_mode_preview"
 UI_PANEL_MODE_BUBBLE_PANEL_TEXT = "bubble_panel_text_candidate"

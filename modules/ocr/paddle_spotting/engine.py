@@ -34,6 +34,7 @@ from modules.utils.ocr_debug import (
     OCR_STATUS_OK,
     OCR_STATUS_OK_AFTER_RETRY,
     OCR_EMPTY_REASON_SPOTTING_UNMATCHED,
+    PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION,
     ensure_three_channel,
     set_block_ocr_crop_diagnostics,
     set_block_ocr_diagnostics,
@@ -83,7 +84,7 @@ class PaddleOCRVLSpottingEngine(OCREngine):
     RECOVERY_REPEAT_PENALTY = 1.15
     RECOVERY_REPEAT_LAST_N = 4096
     RESPONSE_SCHEMA_VERSION = PADDLE_SPOTTING_RESPONSE_SCHEMA_VERSION
-    CACHE_IDENTITY_VERSION = "paddle_spotting_full_page_v2"
+    CACHE_IDENTITY_VERSION = PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION
     RECONCILIATION_SCHEMA_VERSION = 2
 
     def __init__(self) -> None:
@@ -206,12 +207,61 @@ class PaddleOCRVLSpottingEngine(OCREngine):
             selected = self._select_attempt(primary, recovery)
 
         parsed = selected.get("parsed")
+        selected_finish_reason = str(
+            selected.get("finish_reason") or ""
+        ).strip().lower()
+        attempt_profiles = [
+            {
+                key: value
+                for key, value in attempt.items()
+                if key not in {"parsed", "response"}
+            }
+            for attempt in attempts
+        ]
         if not isinstance(parsed, PaddleSpottingParsedResponse):
             error = str(
                 selected.get("parser_error")
                 or selected.get("failure_reason")
                 or "PaddleOCR-VL Spotting returned no parseable regions."
             )
+            raise LocalServiceResponseError(
+                error,
+                service_name=SERVICE_NAME,
+                settings_page_name=SETTINGS_PAGE_NAME,
+            )
+        self.last_raw_regions = [
+            {
+                "text": region.text,
+                "normalized_points": [
+                    list(point) for point in region.normalized_points
+                ],
+                "source_line": region.source_line,
+            }
+            for region in parsed.regions
+        ]
+        if selected_finish_reason == "length":
+            error = (
+                "PaddleOCR-VL Spotting response ended before completion "
+                "(finish_reason=length)."
+            )
+            self.last_page_profile = {
+                "schema_version": 2,
+                "strategy": OCR_STRATEGY_PADDLE_SPOTTING,
+                "preprocess": preprocess,
+                "encode_ms": round(encode_ms, 3),
+                "request_bytes": len(image_bytes),
+                "attempt_count": len(attempts),
+                "attempts": attempt_profiles,
+                "selected_attempt": int(selected["attempt_index"]),
+                "raw_region_count": len(parsed.regions),
+                "page_status": "error",
+                "finish_reason": selected_finish_reason,
+                "failure_reason": "response_incomplete",
+                "elapsed_ms": round(
+                    (time.perf_counter() - started) * 1000.0,
+                    3,
+                ),
+            }
             raise LocalServiceResponseError(
                 error,
                 service_name=SERVICE_NAME,
@@ -234,16 +284,6 @@ class PaddleOCRVLSpottingEngine(OCREngine):
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         quality = summarize_ocr_quality(blk_list)
 
-        self.last_raw_regions = [
-            {
-                "text": region.text,
-                "normalized_points": [
-                    list(point) for point in region.normalized_points
-                ],
-                "source_line": region.source_line,
-            }
-            for region in parsed.regions
-        ]
         self.last_shadow_regions = [
             {
                 "text": region.text,
@@ -284,14 +324,7 @@ class PaddleOCRVLSpottingEngine(OCREngine):
             "encode_ms": round(encode_ms, 3),
             "request_bytes": len(image_bytes),
             "attempt_count": len(attempts),
-            "attempts": [
-                {
-                    key: value
-                    for key, value in attempt.items()
-                    if key not in {"parsed", "response"}
-                }
-                for attempt in attempts
-            ],
+            "attempts": attempt_profiles,
             "selected_attempt": int(selected["attempt_index"]),
             "raw_region_count": len(parsed.regions),
             "duplicate_region_count": parsed.duplicate_region_count,

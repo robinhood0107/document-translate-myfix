@@ -2463,7 +2463,8 @@ class StageBatchedProcessor(BatchProcessor):
         result: dict[str, Any],
     ) -> None:
         if (
-            ctx.project_ocr_checkpoint_status == "hit"
+            ctx.failed_stage
+            or ctx.project_ocr_checkpoint_status == "hit"
             or not ctx.project_ocr_fingerprint
             or not ctx.project_ocr_identity
         ):
