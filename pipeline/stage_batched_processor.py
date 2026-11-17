@@ -3646,6 +3646,7 @@ class StageBatchedProcessor(BatchProcessor):
                         protected_corner_mask=ctx.mask_details.get(
                             "protected_corner_mask"
                         ),
+                        protect_mask=ctx.mask_details.get("protect_mask"),
                     )
                 self._sample_performance_resources("inpainter_forward_end")
                 ctx.inpaint_diagnostics = dict(

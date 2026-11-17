@@ -71,7 +71,7 @@ TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
 INPAINT_INPUT_SCHEMA_VERSION = (
     "semantic-action-mask-deterministic-ordered-input-brush-v5"
 )
-INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v3"
+INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v4"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
 INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"

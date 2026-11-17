@@ -817,6 +817,91 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 "accepted",
             )
 
+    def test_protected_edit_cleanup_schema_misses_old_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            blocks = self._blocks()[:1]
+            blocks[0].text = "OCR"
+            source_image = np.full((12, 10, 3), 10, dtype=np.uint8)
+            protected = np.zeros((12, 10), dtype=np.uint8)
+            protected[2:5, 3:8] = 255
+            unsafe_image = source_image.copy()
+            unsafe_image[protected > 0] = 200
+            unsafe_mask = np.full((12, 10), 255, dtype=np.uint8)
+            safe_mask = unsafe_mask.copy()
+            safe_mask[protected > 0] = 0
+            identity_inputs = {
+                "source_sha256": "d" * 64,
+                "detection_fingerprint": "e" * 64,
+                "ocr_fingerprint": "f" * 64,
+                "blocks": blocks,
+                "brush_strokes": [],
+                "runtime": {"key": "AOT", "precision": "fp32"},
+                "model_identity": {"id": "aot"},
+                "hd_strategy": {"strategy": "Original"},
+                "mask_settings": {"mask_refiner": "ctd"},
+            }
+            old_identity = build_inpaint_identity(**identity_inputs)
+            old_identity["cleanup_schema"] = "bubble-residue-duplicate-fill-cuda-v3"
+            old_fingerprint = build_inpaint_fingerprint(old_identity)
+            self.assertTrue(
+                record_inpaint_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=old_fingerprint,
+                    identity=old_identity,
+                    blocks=blocks,
+                    cleaned_image=unsafe_image,
+                    raw_mask=unsafe_mask,
+                    final_mask=unsafe_mask,
+                    cleanup_stats={},
+                )
+            )
+
+            identity = build_inpaint_identity(**identity_inputs)
+            fingerprint = build_inpaint_fingerprint(identity)
+            self.assertIsNone(
+                lookup_inpaint_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    source_shape=source_image.shape,
+                    current_blocks=blocks,
+                )
+            )
+
+            self.assertTrue(
+                record_inpaint_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    blocks=blocks,
+                    cleaned_image=source_image,
+                    raw_mask=unsafe_mask,
+                    final_mask=safe_mask,
+                    cleanup_stats={},
+                )
+            )
+            hit = lookup_inpaint_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=fingerprint,
+                identity=identity,
+                source_shape=source_image.shape,
+                current_blocks=blocks,
+            )
+
+            self.assertIsNotNone(hit)
+            assert hit is not None
+            np.testing.assert_array_equal(hit.cleaned_image, source_image)
+            np.testing.assert_array_equal(hit.final_mask, safe_mask)
+            np.testing.assert_array_equal(
+                hit.cleaned_image[protected > 0],
+                source_image[protected > 0],
+            )
+
     def test_inpaint_identity_changes_with_processing_action_and_mask(
         self,
     ) -> None:
@@ -879,7 +964,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         )
         self.assertEqual(
             translate_identity["cleanup_schema"],
-            "bubble-residue-duplicate-fill-cuda-v3",
+            "bubble-residue-duplicate-fill-cuda-v4",
         )
         self.assertNotEqual(
             build_inpaint_fingerprint(translate_identity),

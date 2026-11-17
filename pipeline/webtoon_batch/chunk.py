@@ -318,6 +318,7 @@ class ChunkMixin:
                 "positive_claim_raw_mask"
             ),
             protected_corner_mask=mask_details.get("protected_corner_mask"),
+            protect_mask=mask_details.get("protect_mask"),
         )
         inpainted = imk.convert_scale_abs(inpainted)
         cleanup_stats = {

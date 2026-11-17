@@ -37,6 +37,41 @@ def normalize_edit_mask(mask: np.ndarray | None, image_shape: tuple[int, ...]) -
     return binarized
 
 
+def normalize_protection_mask(
+    mask: np.ndarray | None,
+    image_shape: tuple[int, ...],
+) -> np.ndarray:
+    if mask is None:
+        return np.zeros(image_shape[:2], dtype=np.uint8)
+    if np.asarray(mask).shape[:2] != image_shape[:2]:
+        raise ValueError("Protection mask shape must match the image.")
+    return normalize_edit_mask(mask, image_shape)
+
+
+def exclude_protected_pixels(
+    edit_mask: np.ndarray | None,
+    image_shape: tuple[int, ...],
+    *protection_masks: np.ndarray | None,
+) -> np.ndarray:
+    if (
+        edit_mask is not None
+        and any(mask is not None for mask in protection_masks)
+        and np.asarray(edit_mask).shape[:2] != image_shape[:2]
+    ):
+        raise ValueError("Edit mask shape must match the image with protection.")
+    allowed = normalize_edit_mask(edit_mask, image_shape)
+    for protection_mask in protection_masks:
+        if protection_mask is None:
+            continue
+        protected = np.asarray(protection_mask)
+        if protected.shape[:2] != image_shape[:2]:
+            raise ValueError("Protection mask shape must match the image.")
+        if protected.ndim == 3:
+            protected = protected[:, :, 0]
+        allowed[protected > 0] = 0
+    return allowed
+
+
 def composite_with_edit_mask(
     original_image: np.ndarray | None,
     edited_image: np.ndarray | None,
