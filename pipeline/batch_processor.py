@@ -9,7 +9,7 @@ import imkit as imk
 import numpy as np
 import time
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Mapping
 from typing import List
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
@@ -22,7 +22,11 @@ from modules.ocr.common.result_contract import (
     select_translate_inpaint_blocks,
 )
 from modules.translation.processor import Translator
-from modules.utils.textblock import sort_blk_list
+from modules.utils.textblock import (
+    sort_blk_list,
+    text_block_identity_map,
+    text_block_source_output_rows,
+)
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.language_utils import get_language_code, is_no_space_lang
@@ -1182,6 +1186,131 @@ class BatchProcessor:
             quality.get("reason", ""),
         )
 
+    def _publish_source_unit_outcomes(
+        self,
+        image_path: str,
+        blocks: list[Any],
+        operation_statuses: Mapping[str, Mapping[str, Any]] | None = None,
+        source_blocks: list[Any] | None = None,
+        filtered_blocks: list[tuple[Any, str]] | None = None,
+        default_status: str | None = None,
+        default_reason_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows, partial = text_block_source_output_rows(
+            blocks,
+            default_image_path=image_path,
+            operation_statuses=operation_statuses,
+        )
+        mapped_sources = {
+            (row.get("source_unit_id"), row.get("source_image_path"))
+            for row in rows
+            if isinstance(row.get("source_unit_id"), str)
+        }
+        filtered_outcomes: dict[
+            tuple[str, str | None], tuple[str, str]
+        ] = {}
+        for block, reason_code in list(filtered_blocks or []):
+            identity = text_block_identity_map(
+                block,
+                default_image_path=image_path,
+            )
+            action = str(getattr(block, "processing_action", "") or "")
+            if action == "preserve":
+                status = "preserved"
+            elif action == "review":
+                status = "unjudged"
+            else:
+                status = "intentionally_skipped"
+            observed_reason = str(
+                getattr(block, "processing_decision_source", "")
+                or reason_code
+            )
+            for source in identity["source_units"]:
+                source_id = source.get("block_id")
+                if isinstance(source_id, str) and source_id:
+                    filtered_outcomes[(source_id, source.get("image_path"))] = (
+                        status,
+                        observed_reason,
+                    )
+        for block in list(source_blocks or []):
+            identity = text_block_identity_map(
+                block,
+                default_image_path=image_path,
+            )
+            for source in identity["source_units"]:
+                source_id = source.get("block_id")
+                source_path = source.get("image_path")
+                if not isinstance(source_id, str) or not source_id:
+                    partial = True
+                    continue
+                key = (source_id, source_path)
+                if key in mapped_sources:
+                    continue
+                filtered_outcome = filtered_outcomes.get(key)
+                operation = (
+                    operation_statuses.get(identity.get("output_unit_id"))
+                    if isinstance(operation_statuses, Mapping)
+                    else None
+                )
+                action = str(getattr(block, "processing_action", "") or "")
+                if filtered_outcome:
+                    status, reason_code = filtered_outcome
+                elif isinstance(operation, Mapping):
+                    status = str(operation.get("status") or "unjudged")
+                    reason_code = operation.get("reason_code")
+                elif action == "preserve":
+                    status = "preserved"
+                    reason_code = (
+                        str(getattr(block, "processing_decision_source", "") or "")
+                        or "processing_action_preserve"
+                    )
+                elif action == "review":
+                    status = "unjudged"
+                    reason_code = (
+                        str(getattr(block, "processing_decision_source", "") or "")
+                        or "review_required"
+                    )
+                else:
+                    status = default_status or "unjudged"
+                    reason_code = (
+                        default_reason_code
+                        or "source_unit_not_in_final_blocks"
+                    )
+                rows.append(
+                    {
+                        "source_unit_id": source_id,
+                        "source_image_path": source_path,
+                        "status": status,
+                        "reason_code": reason_code,
+                        "output_unit_ids": [],
+                        "output_group_ids": [],
+                        "output_units": [],
+                        "output_relation_status": "unavailable",
+                        "output_relation_reason_code": "source_unit_not_in_output",
+                        "semantic_quality_status": "unjudged",
+                    }
+                )
+        register = getattr(
+            self.main_page,
+            "register_batch_source_unit_outcomes",
+            None,
+        )
+        if callable(register):
+            try:
+                register(
+                    image_path,
+                    rows,
+                    status="partially_observed" if partial else "observed",
+                    reason_code=("source_lineage_not_observed" if partial else None),
+                )
+            except Exception:
+                logger.warning(
+                    "Could not register source-unit outcomes for %s.",
+                    os.path.basename(image_path),
+                    exc_info=True,
+                )
+        return rows
+
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = build_export_timestamp()
         self._export_run_tokens = {}
@@ -1317,6 +1446,23 @@ class BatchProcessor:
                 self.block_detection.block_detector_cache = TextBlockDetector(settings_page)
             
             blk_list = self.block_detection.block_detector_cache.detect(image)
+            source_blocks = list(blk_list or [])
+            for block in source_blocks:
+                text_block_identity_map(
+                    block,
+                    default_image_path=image_path,
+                )
+            if source_blocks:
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    default_status="unjudged",
+                    default_reason_code="operation_not_observed",
+                )
+            rejected_empty_blocks = []
+            embedded_ui_blocks = []
+            operation_statuses: dict[str, dict[str, Any]] = {}
             precomputed_mask_details = self.block_detection.block_detector_cache.last_mask_details
             detector_key = self.block_detection.block_detector_cache.detector or settings_page.get_tool_selection('detector') or 'RT-DETR-v2'
             detector_engine = self.block_detection.block_detector_cache.last_engine_name or ""
@@ -1374,6 +1520,13 @@ class BatchProcessor:
 
             self.emit_progress(index, total_images, 2, 10, False)
             if self._is_cancelled():
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    default_status="unjudged",
+                    default_reason_code="run_cancelled_before_ocr",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
@@ -1556,6 +1709,15 @@ class BatchProcessor:
                             strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                         )
                         self.main_page.register_batch_output(image_path, final_output_path)
+                        self._publish_source_unit_outcomes(
+                            image_path,
+                            [],
+                            source_blocks=source_blocks,
+                            filtered_blocks=[
+                                *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                                *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                            ],
+                        )
                         self.main_page.image_ctrl.update_processing_summary(
                             image_path,
                             {
@@ -1633,6 +1795,17 @@ class BatchProcessor:
                         **page_ocr_metrics,
                     )
                     if self._benchmark_stage_ceiling() == "ocr":
+                        self._publish_source_unit_outcomes(
+                            image_path,
+                            [],
+                            source_blocks=source_blocks,
+                            filtered_blocks=[
+                                *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                                *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                            ],
+                            default_status="unjudged",
+                            default_reason_code="translation_not_observed",
+                        )
                         self.main_page.image_ctrl.update_processing_summary(
                             image_path,
                             {
@@ -1657,6 +1830,17 @@ class BatchProcessor:
                         continue
                     
                 except OperationCancelledError:
+                    self._publish_source_unit_outcomes(
+                        image_path,
+                        [],
+                        source_blocks=source_blocks,
+                        filtered_blocks=[
+                            *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                            *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                        ],
+                        default_status="unjudged",
+                        default_reason_code="ocr_cancelled_before_unit_outcome",
+                    )
                     self._emit_benchmark_event(
                         "batch_run_cancelled",
                         image_path=image_path,
@@ -1686,6 +1870,17 @@ class BatchProcessor:
                         err_msg = str(e)
 
                     logger.exception(f"OCR processing failed: {err_msg}")
+                    self._publish_source_unit_outcomes(
+                        image_path,
+                        [],
+                        source_blocks=source_blocks,
+                        filtered_blocks=[
+                            *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                            *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                        ],
+                        default_status="failed",
+                        default_reason_code="ocr_failed",
+                    )
                     self._emit_benchmark_event(
                         "page_failed",
                         image_path=image_path,
@@ -1789,6 +1984,15 @@ class BatchProcessor:
                     strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                 )
                 self.main_page.register_batch_output(image_path, final_output_path)
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                )
                 self.main_page.image_ctrl.update_processing_summary(
                     image_path,
                     {
@@ -1819,6 +2023,17 @@ class BatchProcessor:
 
             self.emit_progress(index, total_images, 3, 10, False)
             if self._is_cancelled():
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="run_cancelled_before_unit_outcome",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
             self._emit_benchmark_event(
@@ -1883,6 +2098,17 @@ class BatchProcessor:
 
                     self.emit_progress(index, total_images, 4, 10, False)
                     if self._is_cancelled():
+                        self._publish_source_unit_outcomes(
+                            image_path,
+                            [],
+                            source_blocks=source_blocks,
+                            filtered_blocks=[
+                                *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                                *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                            ],
+                            default_status="unjudged",
+                            default_reason_code="inpaint_cancelled_before_unit_outcome",
+                        )
                         return
 
                     inpaint_input_img = self.inpainting.inpaint_with_blocks(
@@ -2085,9 +2311,31 @@ class BatchProcessor:
                     patch_count=len(patches or []),
                 )
             except OperationCancelledError:
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="inpaint_cancelled_before_unit_outcome",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
             except Exception as e:
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="failed",
+                    default_reason_code="inpaint_failed",
+                )
                 self._handle_legacy_inpaint_failure(
                     index=index,
                     total_images=total_images,
@@ -2106,6 +2354,17 @@ class BatchProcessor:
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="translation_not_observed",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
@@ -2200,6 +2459,17 @@ class BatchProcessor:
                     **page_translation_metrics,
                 )
             except OperationCancelledError:
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="translation_cancelled_before_unit_outcome",
+                )
                 self._emit_benchmark_event(
                     "batch_run_cancelled",
                     image_path=image_path,
@@ -2230,6 +2500,29 @@ class BatchProcessor:
 
                 logger.exception(f"Translation failed: {err_msg}")
                 page_translation_metrics = self._translation_benchmark_metrics(translator)
+                failed_operations = {}
+                for block in translation_blocks:
+                    output_id = text_block_identity_map(
+                        block,
+                        default_image_path=image_path,
+                    ).get("output_unit_id")
+                    if output_id:
+                        failed_operations[output_id] = {
+                            "status": "failed",
+                            "reason_code": "translation_failed",
+                        }
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    operation_statuses=failed_operations,
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="translation_failure_without_unit_attribution",
+                )
                 self._emit_benchmark_event(
                     "page_failed",
                     image_path=image_path,
@@ -2253,6 +2546,17 @@ class BatchProcessor:
                 continue
 
             if self._is_cancelled():
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="run_cancelled_before_unit_outcome",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
@@ -2269,6 +2573,17 @@ class BatchProcessor:
                 if translation_blocks and (
                     (not raw_text_obj) or (not translated_text_obj)
                 ):
+                    self._publish_source_unit_outcomes(
+                        image_path,
+                        [],
+                        source_blocks=source_blocks,
+                        filtered_blocks=[
+                            *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                            *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                        ],
+                        default_status="failed",
+                        default_reason_code="translation_output_invalid",
+                    )
                     self._emit_benchmark_event(
                         "page_failed",
                         image_path=image_path,
@@ -2293,6 +2608,17 @@ class BatchProcessor:
                 error_message = str(e)
                 reason = f"Translator: JSONDecodeError: {error_message}"
                 logger.exception(reason)
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="failed",
+                    default_reason_code="translation_output_invalid",
+                )
                 self._emit_benchmark_event(
                     "page_failed",
                     image_path=image_path,
@@ -2314,6 +2640,28 @@ class BatchProcessor:
                 self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                 continue
 
+            for block in translation_blocks:
+                output_id = text_block_identity_map(
+                    block,
+                    default_image_path=image_path,
+                ).get("output_unit_id")
+                if not output_id:
+                    continue
+                translated_value = getattr(block, "translation", "") or getattr(
+                    block,
+                    "rich_text",
+                    "",
+                )
+                has_translation = (
+                    any(str(value or "").strip() for value in translated_value)
+                    if isinstance(translated_value, (list, tuple))
+                    else bool(str(translated_value or "").strip())
+                )
+                operation_statuses[output_id] = {
+                    "status": "translated" if has_translation else "failed",
+                    "reason_code": None if has_translation else "translation_output_missing",
+                }
+
             self._write_json_exports(
                 directory,
                 export_token,
@@ -2328,6 +2676,18 @@ class BatchProcessor:
 
             self.emit_progress(index, total_images, 7, 10, False)
             if self._is_cancelled():
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    operation_statuses=operation_statuses,
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="run_cancelled_before_render",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
@@ -2751,6 +3111,18 @@ class BatchProcessor:
             
             self.emit_progress(index, total_images, 9, 10, False)
             if self._is_cancelled():
+                self._publish_source_unit_outcomes(
+                    image_path,
+                    [],
+                    operation_statuses=operation_statuses,
+                    source_blocks=source_blocks,
+                    filtered_blocks=[
+                        *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                        *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                    ],
+                    default_status="unjudged",
+                    default_reason_code="run_cancelled_before_output_save",
+                )
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
@@ -2785,6 +3157,16 @@ class BatchProcessor:
                 strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
             )
             self.main_page.register_batch_output(image_path, final_output_path)
+            self._publish_source_unit_outcomes(
+                image_path,
+                blk_list,
+                operation_statuses=operation_statuses,
+                source_blocks=source_blocks,
+                filtered_blocks=[
+                    *((block, "ocr_rejected_empty") for block in rejected_empty_blocks),
+                    *((block, "embedded_ui_filtered") for block in embedded_ui_blocks),
+                ],
+            )
             logger.info("Saved final translated image to %s", final_output_path)
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,

@@ -19,7 +19,7 @@ from modules.utils.correction_dictionary import (
 from modules.utils.image_utils import generate_mask
 from modules.utils.ocr_debug import drop_rejected_empty_ocr_blocks
 from modules.utils.pipeline_config import get_config
-from modules.utils.textblock import TextBlock, sort_blk_list
+from modules.utils.textblock import TextBlock, ensure_text_block_id, sort_blk_list
 
 if TYPE_CHECKING:
     from .processor import WebtoonBatchProcessor
@@ -173,9 +173,9 @@ class ChunkMixin:
         source_lang: str,
         target_lang: str,
         image_path: str,
-    ) -> None:
+    ) -> dict[str, dict[str, str | None]]:
         if not blocks:
-            return
+            return {}
         extra_context = self.main_page.settings_page.get_llm_settings()["extra_context"]
         translator = Translator(self.main_page, source_lang, target_lang)
         self._emit_benchmark_event(
@@ -185,7 +185,7 @@ class ChunkMixin:
             translator_key=self.main_page.settings_page.get_tool_selection("translator"),
         )
         try:
-            translator.translate(blocks, image, extra_context)
+            translated_blocks = translator.translate(blocks, image, extra_context)
             apply_translation_result_dictionary(
                 blocks,
                 self.main_page.settings_page.get_translation_result_dictionary_rules(),
@@ -197,6 +197,35 @@ class ChunkMixin:
                 translator_key=self.main_page.settings_page.get_tool_selection("translator"),
                 translator_engine=translator.engine.__class__.__name__,
             )
+            translated_by_id = {
+                ensure_text_block_id(block): block
+                for block in list(translated_blocks or [])
+            }
+            outcomes = {}
+            for block in blocks:
+                block_id = ensure_text_block_id(block)
+                translated = translated_by_id.get(block_id)
+                if translated is None:
+                    outcomes[block_id] = {
+                        "status": "unjudged",
+                        "reason_code": "translation_result_identity_not_observed",
+                    }
+                    continue
+                value = getattr(translated, "translation", "") or getattr(
+                    translated,
+                    "rich_text",
+                    "",
+                )
+                has_translation = (
+                    any(str(item or "").strip() for item in value)
+                    if isinstance(value, (list, tuple))
+                    else bool(str(value or "").strip())
+                )
+                outcomes[block_id] = {
+                    "status": "translated" if has_translation else "failed",
+                    "reason_code": None if has_translation else "translation_output_missing",
+                }
+            return outcomes
         except Exception as error:
             err_msg = self._extract_error_message(error, context="translation")
             logger.exception("Translation failed for %s: %s", image_path, err_msg)
@@ -210,6 +239,23 @@ class ChunkMixin:
             )
             for block in blocks:
                 block.translation = ""
+            status = (
+                "unjudged"
+                if self._is_cancelled()
+                else "failed"
+            )
+            reason_code = (
+                "run_cancelled_before_unit_outcome"
+                if status == "unjudged"
+                else "translation_batch_failed"
+            )
+            return {
+                ensure_text_block_id(block): {
+                    "status": status,
+                    "reason_code": reason_code,
+                }
+                for block in blocks
+            }
 
     def _inpaint_image_with_blocks(
         self: WebtoonBatchProcessor,

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QRectF
 
+from app.projects.parsers import ProjectDecoder, ProjectEncoder
+from app.projects.stage_checkpoints import snapshot_project_render_blocks
 from modules.utils.block_geometry import (
     map_block_bbox_fields,
     render_geometry_relation,
@@ -12,6 +15,7 @@ from modules.utils.block_geometry import (
     snapshot_block_bbox_fields,
 )
 from modules.utils.textblock import TextBlock
+from app.ui.canvas.webtoons.scene_items.text_block_manager import TextBlockManager
 from pipeline.block_detection import BlockDetectionHandler
 from pipeline.virtual_page import VirtualPage
 from pipeline.webtoon_batch.chunk import ChunkMixin
@@ -247,6 +251,8 @@ def test_virtual_to_physical_and_crop_local_map_every_render_bbox() -> None:
 def test_seam_semantic_merge_invalidates_inherited_render_geometry() -> None:
     top = _block(xyxy=(20, 80, 80, 100), bubble_xyxy=(10, 70, 90, 100))
     bottom = _block(xyxy=(20, 0, 80, 20), bubble_xyxy=(10, 0, 90, 30))
+    top.block_id = top.canonical_block_id = "source-top"
+    bottom.block_id = bottom.canonical_block_id = "source-bottom"
     harness = SimpleNamespace(
         _match_split_blocks=lambda *_args: [(0, 0)],
         _shift_xyxy=ChunkMixin._shift_xyxy,
@@ -255,17 +261,86 @@ def test_seam_semantic_merge_invalidates_inherited_render_geometry() -> None:
 
     matches, consumed = FlowMixin._build_pair_split_matches(
         harness,
-        {"detected_blocks": [top], "image": np.zeros((100, 100, 3), dtype=np.uint8)},
-        {"detected_blocks": [bottom]},
+        {
+            "detected_blocks": [top],
+            "image": np.zeros((100, 100, 3), dtype=np.uint8),
+            "path": "example_top.png",
+        },
+        {"detected_blocks": [bottom], "path": "example_bottom.png"},
         set(),
     )
 
     assert consumed == {0}
     assert len(matches) == 1
     owner = matches[0].owner_block
+    assert owner.block_id == "source-top"
+    assert owner.merge_split_diagnostics["source_units"] == [
+        {"block_id": "source-top", "image_path": "example_top.png"},
+        {"block_id": "source-bottom", "image_path": "example_bottom.png"},
+    ]
     assert owner._render_area_source == "text_bbox"
     assert owner._render_original_xyxy is None
     assert owner._render_area_xyxy is None
     assert owner._render_bubble_xyxy is None
     assert owner.bubble_panel_render_xyxy is None
     assert owner.bubble_panel_extra_xyxy is None
+
+
+def test_clipped_ui_merge_keeps_parent_block_ids() -> None:
+    top = TextBlock(
+        text_bbox=np.asarray([0, 80, 20, 100]),
+        text="first fragment",
+        block_id="source-top",
+    )
+    bottom = TextBlock(
+        text_bbox=np.asarray([0, 0, 20, 20]),
+        text="second fragment",
+        block_id="source-bottom",
+    )
+    main = SimpleNamespace(
+        image_states={
+            "example_top.png": {"blk_list": [top]},
+            "example_bottom.png": {"blk_list": [bottom]},
+        }
+    )
+    manager = TextBlockManager(
+        viewer=None,
+        layout_manager=SimpleNamespace(get_page_at_position=lambda _y: 0),
+        coordinate_converter=SimpleNamespace(
+            page_local_to_scene_position=lambda point, _page: point,
+            scene_to_page_local_position=lambda point, _page: point,
+        ),
+        image_loader=SimpleNamespace(
+            image_file_paths=["example_top.png", "example_bottom.png"]
+        ),
+    )
+    manager.main_controller = main
+
+    manager._merge_text_block_group(
+        [
+            {
+                "blk": top,
+                "page_idx": 0,
+                "scene_bounds": QRectF(0, 80, 20, 20),
+            },
+            {
+                "blk": bottom,
+                "page_idx": 1,
+                "scene_bounds": QRectF(0, 100, 20, 20),
+            },
+        ]
+    )
+
+    merged = main.image_states["example_top.png"]["blk_list"][0]
+    assert merged.block_id == "source-top"
+    assert merged.merge_split_diagnostics["source_units"] == [
+        {"block_id": "source-top", "image_path": "example_top.png"},
+        {"block_id": "source-bottom", "image_path": "example_bottom.png"},
+    ]
+    serialized = json.dumps(merged, default=ProjectEncoder().encode)
+    restored = json.loads(serialized, object_hook=ProjectDecoder().decode)
+    checkpoint_copy = snapshot_project_render_blocks([restored])[0]
+    assert restored.block_id == "source-top"
+    assert checkpoint_copy.merge_split_diagnostics["source_units"] == (
+        merged.merge_split_diagnostics["source_units"]
+    )

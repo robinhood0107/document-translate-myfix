@@ -11,7 +11,7 @@ from modules.utils.block_geometry import (
     invalidate_render_geometry,
     map_block_bbox_fields,
 )
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, text_block_identity_map
 
 
 class TextBlockManager:
@@ -209,7 +209,6 @@ class TextBlockManager:
                 
             # Check if text block intersects with this page
             blk_y = blk.xyxy[1]
-            blk_height = blk.xyxy[3] - blk.xyxy[1] 
             blk_bottom = blk.xyxy[3]
             
             # Check if text block is on this page (same logic as rectangles)
@@ -463,6 +462,28 @@ class TextBlockManager:
         base_block_item = group_sorted[0]
         base_blk = base_block_item['blk']
         merged_blk = base_blk.deep_copy()
+        source_units_by_identity = {}
+        for item in group_sorted:
+            block = item['blk']
+            source_path = str(
+                self.image_loader.image_file_paths[item['page_idx']] or ''
+            )
+            identity = text_block_identity_map(
+                block,
+                default_image_path=source_path or None,
+            )
+            for source_unit in identity['source_units']:
+                source_id = str(source_unit.get('block_id') or '')
+                source_unit_path = source_unit.get('image_path')
+                if source_id:
+                    source_units_by_identity.setdefault(
+                        (source_id, source_unit_path),
+                        {'block_id': source_id, 'image_path': source_unit_path},
+                    )
+        merged_blk.merge_split_diagnostics = {
+            **dict(getattr(merged_blk, 'merge_split_diagnostics', {}) or {}),
+            'source_units': list(source_units_by_identity.values()),
+        }
         
         # Calculate unified bounds in scene coordinates
         all_bounds = [item['scene_bounds'] for item in group_sorted]

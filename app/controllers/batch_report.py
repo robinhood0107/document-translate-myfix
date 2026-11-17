@@ -269,6 +269,7 @@ class BatchReportController:
             "skipped": {},
             "completed_paths": set(),
             "batch_output_paths": {},
+            "source_unit_outcomes_by_output_page": {},
             "previous_report": self.export_latest_report_for_project(),
             "preflight_errors": [],
             "preflight_warnings": [],
@@ -380,6 +381,218 @@ class BatchReportController:
         report["completed_paths"].add(image_path)
         return True
 
+    def register_batch_source_unit_outcomes(
+        self,
+        output_page_image_path: str,
+        source_units: list[Mapping[str, Any]] | None,
+        *,
+        status: str = "observed",
+        reason_code: str | None = None,
+    ) -> bool:
+        report = self._current_batch_report
+        if (
+            not report
+            or output_page_image_path not in report["path_set"]
+            or status not in {"observed", "partially_observed", "unavailable"}
+        ):
+            return False
+        source_map = report["source_unit_outcomes_by_output_page"]
+        record = source_map.setdefault(
+            output_page_image_path,
+            {
+                "status": status,
+                "reason_code": reason_code,
+                "units": {},
+                "unidentified": [],
+            },
+        )
+        if record["status"] != status:
+            record["status"] = "partially_observed"
+            record["reason_code"] = "source_unit_mapping_status_conflict"
+        elif record.get("reason_code") != reason_code and reason_code:
+            record["reason_code"] = reason_code
+        if not isinstance(source_units, list):
+            return True
+        units = record["units"]
+        valid_statuses = {
+            "translated",
+            "preserved",
+            "intentionally_skipped",
+            "failed",
+            "unjudged",
+        }
+        for source_unit in source_units:
+            if not isinstance(source_unit, Mapping):
+                continue
+            source_unit_id = source_unit.get("source_unit_id")
+            if not isinstance(source_unit_id, str) or not source_unit_id:
+                unidentified = dict(source_unit)
+                unidentified["source_unit_id"] = None
+                unidentified["status"] = "unjudged"
+                unidentified["reason_code"] = (
+                    unidentified.get("reason_code")
+                    or "source_unit_identity_not_observed"
+                )
+                unidentified["semantic_quality_status"] = "unjudged"
+                output_ids = unidentified.get("output_unit_ids")
+                unidentified["output_unit_ids"] = (
+                    list(
+                        dict.fromkeys(
+                            value
+                            for value in output_ids
+                            if isinstance(value, str) and value
+                        )
+                    )
+                    if isinstance(output_ids, list)
+                    else []
+                )
+                unidentified_records = record["unidentified"]
+                if unidentified not in unidentified_records:
+                    unidentified_records.append(unidentified)
+                record["status"] = "partially_observed"
+                record["reason_code"] = (
+                    record.get("reason_code")
+                    or "source_unit_identity_not_observed"
+                )
+                continue
+            row = dict(source_unit)
+            row["source_unit_id"] = source_unit_id
+            if "source_image_path" not in row:
+                row["source_image_path"] = output_page_image_path
+            if row.get("status") not in valid_statuses:
+                row["status"] = "unjudged"
+                row["reason_code"] = row.get("reason_code") or "unit_status_not_observed"
+            row["semantic_quality_status"] = "unjudged"
+            output_ids = row.get("output_unit_ids")
+            row["output_unit_ids"] = (
+                list(
+                    dict.fromkeys(
+                        value
+                        for value in output_ids
+                        if isinstance(value, str) and value
+                    )
+                )
+                if isinstance(output_ids, list)
+                else []
+            )
+            output_units = row.get("output_units")
+            row["output_units"] = (
+                [dict(value) for value in output_units if isinstance(value, Mapping)]
+                if isinstance(output_units, list)
+                else []
+            )
+            if not row["output_unit_ids"]:
+                row["output_unit_ids"] = list(
+                    dict.fromkeys(
+                        value.get("output_unit_id")
+                        for value in row["output_units"]
+                        if isinstance(value.get("output_unit_id"), str)
+                        and value.get("output_unit_id")
+                    )
+                )
+            output_group_ids = row.get("output_group_ids")
+            row["output_group_ids"] = (
+                list(
+                    dict.fromkeys(
+                        value
+                        for value in output_group_ids
+                        if isinstance(value, str) and value
+                    )
+                )
+                if isinstance(output_group_ids, list)
+                else []
+            )
+            existing = units.get(source_unit_id)
+            if existing is None:
+                units[source_unit_id] = row
+                continue
+            for output_id in row["output_unit_ids"]:
+                if output_id not in existing["output_unit_ids"]:
+                    existing["output_unit_ids"].append(output_id)
+            existing_group_ids = existing.setdefault("output_group_ids", [])
+            for group_id in row["output_group_ids"]:
+                if group_id not in existing_group_ids:
+                    existing_group_ids.append(group_id)
+            existing_outputs = existing.setdefault("output_units", [])
+            for output in list(row.get("output_units", []) or []):
+                if isinstance(output, Mapping) and output not in existing_outputs:
+                    existing_outputs.append(dict(output))
+            if row.get("output_relation_status") == "observed":
+                existing["output_relation_status"] = "observed"
+                existing["output_relation_reason_code"] = None
+            existing_reason = existing.get("reason_code")
+            new_reason = row.get("reason_code")
+            if (
+                existing.get("status") == "unjudged"
+                and existing_reason
+                in {
+                    "operation_not_observed",
+                    "translation_not_observed",
+                    "operation_status_not_observed",
+                }
+                and (
+                    row.get("status") != "unjudged"
+                    or new_reason
+                    not in {
+                        "operation_not_observed",
+                        "translation_not_observed",
+                        "operation_status_not_observed",
+                    }
+                )
+            ):
+                existing["status"] = row["status"]
+                existing["reason_code"] = new_reason
+            elif (
+                row.get("status") == "unjudged"
+                and new_reason
+                in {
+                    "operation_not_observed",
+                    "translation_not_observed",
+                    "operation_status_not_observed",
+                }
+            ):
+                pass
+            elif existing.get("status") != row.get("status"):
+                existing["status"] = "unjudged"
+                existing["reason_code"] = "source_unit_status_conflict"
+            elif existing_reason != new_reason and existing_reason and new_reason:
+                existing["reason_code"] = "source_unit_reason_conflict"
+            elif existing_reason is None:
+                existing["reason_code"] = new_reason
+        return True
+
+    @staticmethod
+    def _source_unit_page_report_data(
+        report: Mapping[str, Any],
+        output_page_image_path: str,
+    ) -> dict[str, Any]:
+        source_map = report.get("source_unit_outcomes_by_output_page")
+        record = (
+            source_map.get(output_page_image_path)
+            if isinstance(source_map, Mapping)
+            else None
+        )
+        if not isinstance(record, Mapping):
+            return {
+                "source_unit_mapping_status": "unavailable",
+                "source_unit_mapping_reason_code": "source_unit_operation_not_observed",
+                "source_units": None,
+            }
+        units = record.get("units")
+        unidentified = record.get("unidentified")
+        return {
+            "source_unit_mapping_status": record.get("status", "unavailable"),
+            "source_unit_mapping_reason_code": record.get("reason_code"),
+            "source_units": (
+                [
+                    *(list(units.values()) if isinstance(units, Mapping) else []),
+                    *(list(unidentified) if isinstance(unidentified, list) else []),
+                ]
+                if isinstance(units, Mapping) or isinstance(unidentified, list)
+                else None
+            ),
+        }
+
     def _legacy_output_run_report(
         self,
         report: Mapping[str, Any],
@@ -400,20 +613,24 @@ class BatchReportController:
         ):
             return None
         telemetry = self._pipeline_telemetry_snapshot(report)
+        page_outcomes = []
+        for index, path in enumerate(paths):
+            page_outcome = {
+                "source_unit_index": index,
+                "image_path": path,
+                "image_name": os.path.basename(path),
+                "output_path": output_paths[path],
+                "output_status": "measured",
+                "quality_status": "completed",
+            }
+            page_outcome.update(
+                self._source_unit_page_report_data(report, path)
+            )
+            page_outcomes.append(page_outcome)
         return build_run_report(
             telemetry=telemetry,
             total_wall_sec=None,
-            page_outcomes=[
-                {
-                    "source_unit_index": index,
-                    "image_path": path,
-                    "image_name": os.path.basename(path),
-                    "output_path": output_paths[path],
-                    "output_status": "measured",
-                    "quality_status": "completed",
-                }
-                for index, path in enumerate(paths)
-            ],
+            page_outcomes=page_outcomes,
             output_summary={
                 "input_count": len(paths),
                 "output_count": len(paths),
@@ -1041,16 +1258,32 @@ class BatchReportController:
             try:
                 if pipeline_data is None:
                     report_page_outcomes = []
+                    output_paths = report.get("batch_output_paths")
                     for index, item in enumerate(run_page_outcomes):
                         quality_status = item["status"]
-                        report_page_outcomes.append(
-                            {
-                                "source_unit_index": index,
-                                "image_name": os.path.basename(item["image_path"]),
-                                "output_path": None,
-                                "quality_status": quality_status,
-                            }
+                        image_path = item["image_path"]
+                        output_path = (
+                            output_paths.get(image_path)
+                            if isinstance(output_paths, Mapping)
+                            else None
                         )
+                        if not isinstance(output_path, str) or not os.path.isfile(output_path):
+                            output_path = None
+                        page_outcome = {
+                            "source_unit_index": index,
+                            "image_path": image_path,
+                            "image_name": os.path.basename(image_path),
+                            "output_path": output_path,
+                            "output_status": "measured" if output_path else "unmeasured",
+                            "quality_status": quality_status,
+                        }
+                        page_outcome.update(
+                            self._source_unit_page_report_data(
+                                report,
+                                image_path,
+                            )
+                        )
+                        report_page_outcomes.append(page_outcome)
                     run_report = build_run_report(
                         telemetry=self._pipeline_telemetry_snapshot(report),
                         total_wall_sec=total_wall_sec,

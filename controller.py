@@ -1940,6 +1940,21 @@ class ComicTranslate(ComicTranslateUI):
     def register_batch_output(self, image_path: str, output_path: str) -> bool:
         return self.batch_report_ctrl.register_batch_output(image_path, output_path)
 
+    def register_batch_source_unit_outcomes(
+        self,
+        output_page_image_path: str,
+        source_units: list[dict[str, Any]] | None,
+        *,
+        status: str = "observed",
+        reason_code: str | None = None,
+    ) -> bool:
+        return self.batch_report_ctrl.register_batch_source_unit_outcomes(
+            output_page_image_path,
+            source_units,
+            status=status,
+            reason_code=reason_code,
+        )
+
     def register_batch_telemetry(self, telemetry: object) -> bool:
         return self.batch_report_ctrl.register_batch_telemetry(telemetry)
 

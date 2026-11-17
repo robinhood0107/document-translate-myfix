@@ -182,6 +182,17 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _project, _reference, store = self._store(tmp)
             blocks = self._blocks()
+            blocks[0].canonical_block_id = "block-a"
+            blocks[0].duplicate_alias_block_ids = ["detector-alias-a"]
+            blocks[0].compound_group_id = "compound-a"
+            blocks[0].merge_split_diagnostics = {
+                "source_units": [
+                    {
+                        "block_id": "source-a",
+                        "image_path": "example_source_page.png",
+                    }
+                ]
+            }
             identity = {"detector": "RT-DETR-v2", "runtime": "test"}
             source_sha = "1" * 64
             fingerprint = build_detection_fingerprint(
@@ -221,6 +232,27 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             self.assertEqual(
                 [block.text_class for block in restored.blocks],
                 ["text_bubble", "text_free"],
+            )
+            self.assertEqual(
+                restored.blocks[0].duplicate_alias_block_ids,
+                ["detector-alias-a"],
+            )
+            self.assertEqual(
+                restored.blocks[0].canonical_block_id,
+                "block-a",
+            )
+            self.assertEqual(
+                restored.blocks[0].compound_group_id,
+                "compound-a",
+            )
+            self.assertEqual(
+                restored.blocks[0].merge_split_diagnostics["source_units"],
+                [
+                    {
+                        "block_id": "source-a",
+                        "image_path": "example_source_page.png",
+                    }
+                ],
             )
             self.assertEqual(
                 detection_structure_signature(restored.blocks),
@@ -290,6 +322,14 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _project, _reference, store = self._store(tmp)
             detection_blocks = self._blocks()
+            detection_blocks[1].merge_split_diagnostics = {
+                "source_units": [
+                    {
+                        "block_id": "source-b",
+                        "image_path": "example_source_page.png",
+                    }
+                ]
+            }
             detection_fingerprint = "4" * 64
             identity = build_project_ocr_identity(
                 detection_fingerprint=detection_fingerprint,
@@ -329,6 +369,14 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 )
             )
             fresh_detection_blocks = self._blocks()
+            fresh_detection_blocks[1].merge_split_diagnostics = {
+                "source_units": [
+                    {
+                        "block_id": "source-b",
+                        "image_path": "example_source_page.png",
+                    }
+                ]
+            }
             restored = lookup_ocr_checkpoint(
                 store,
                 page_key="page:00000000",
@@ -345,6 +393,15 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             )
             self.assertEqual(restored.blocks[0].text, "raw OCR")
             self.assertEqual(restored.blocks[0].texts, ["raw", "OCR"])
+            self.assertEqual(
+                restored.blocks[0].merge_split_diagnostics["source_units"],
+                [
+                    {
+                        "block_id": "source-b",
+                        "image_path": "example_source_page.png",
+                    }
+                ],
+            )
             self.assertEqual(restored.attempt_count, 2)
             self.assertEqual(
                 restored.page_profile,

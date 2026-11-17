@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import os
 import threading
 import time
@@ -2092,6 +2093,15 @@ class StageBatchedCancellationTests(unittest.TestCase):
             page.project_translation_checkpoint_status,
             "hit",
         )
+        outcome = processor._page_outcomes([page])[0]
+        self.assertEqual(
+            outcome["source_units"][0]["status"],
+            "translated",
+        )
+        self.assertEqual(
+            outcome["source_units"][0]["semantic_quality_status"],
+            "unjudged",
+        )
 
     def test_preserve_only_page_skips_translator_and_gemma(self) -> None:
         processor = self._processor(cancelled=False)
@@ -2157,6 +2167,12 @@ class StageBatchedCancellationTests(unittest.TestCase):
             "translation",
             "skipped",
             reason="no_translate_inpaint_blocks",
+        )
+        outcome = processor._page_outcomes([page])[0]
+        self.assertEqual(outcome["source_units"][0]["status"], "preserved")
+        self.assertEqual(
+            outcome["source_units"][0]["semantic_quality_status"],
+            "unjudged",
         )
 
     def test_preserve_block_never_creates_render_item(self) -> None:
@@ -2397,6 +2413,337 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         processor._start_gemma_prewarm.assert_not_called()
         processor._await_gemma_runtime.assert_not_called()
+
+class StageSourceUnitReportingTests(unittest.TestCase):
+    def _run_translation(self, fake_translator):
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(
+            is_current_task_cancelled=lambda: False,
+            settings_page=SimpleNamespace(
+                get_llm_settings=lambda: {"extra_context": "context"},
+                get_tool_selection=lambda _tool: "example-translator",
+                get_translation_result_dictionary_rules=lambda: [],
+            ),
+        )
+        processor.cache_manager = object()
+        processor._project_checkpoint_store = None
+        processor._inpainter_release_gate = {
+            "required": False,
+            "observed": True,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor._mark_page_failed = mock.Mock()
+        processor._release_source_image = mock.Mock()
+        processor._measure_performance = lambda **_kwargs: nullcontext()
+        processor.emit_progress = mock.Mock()
+        block = TextBlock(
+            text_bbox=np.asarray([1, 1, 10, 10]),
+            text="example source",
+            text_class="text_bubble",
+            block_id="example-source-unit",
+            processing_action="translate_inpaint",
+            processing_decision_source="example_detection",
+            semantic_role="dialogue_bubble",
+        )
+        page = StagePageContext(
+            image_path="example_source_page.png",
+            image_name="example_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((12, 12, 3), dtype=np.uint8),
+            blk_list=[block],
+        )
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            return_value=fake_translator,
+        ):
+            processor._translate_all([page])
+        return processor, page
+
+    def test_canonical_alias_and_seam_lineage_stays_separate_until_output(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        canonical = TextBlock(
+            text_bbox=np.asarray([1, 1, 10, 10]),
+            block_id="source-canonical",
+        )
+        alias = TextBlock(
+            text_bbox=np.asarray([1, 1, 10, 10]),
+            block_id="source-alias",
+        )
+        merged = TextBlock(
+            text_bbox=np.asarray([20, 1, 30, 10]),
+            block_id="seam-top",
+            compound_group_id="compound-example",
+            merge_split_diagnostics={
+                "source_units": [
+                    {"block_id": "seam-top", "image_path": "example_top.png"},
+                    {"block_id": "seam-bottom", "image_path": "example_bottom.png"},
+                ]
+            },
+        )
+        page = StagePageContext(
+            image_path="example_top.png",
+            image_name="example_top.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            source_decoded_sha256="example-source",
+            blk_list=[canonical, alias, merged],
+        )
+
+        StageBatchedProcessor._canonicalize_ocr_inputs([page])
+
+        pending = processor._page_outcomes([page])[0]
+        pending_units = {
+            item["source_unit_id"]: item for item in pending["source_units"]
+        }
+        self.assertEqual(pending["source_unit_mapping_status"], "observed")
+        for source_id in ("source-canonical", "source-alias", "seam-top", "seam-bottom"):
+            self.assertEqual(pending_units[source_id]["output_unit_ids"], [])
+            self.assertEqual(
+                pending_units[source_id]["output_relation_status"],
+                "unavailable",
+            )
+
+        canonical.translation = "example translated sentence"
+        merged.translation = "example translated sentence"
+        StageBatchedProcessor._record_source_unit_translation_results(
+            page,
+            page.blk_list,
+            page.blk_list,
+        )
+        page.output_path = "example-output.png"
+        outcome = processor._page_outcomes([page])[0]
+        units = {item["source_unit_id"]: item for item in outcome["source_units"]}
+        self.assertEqual(
+            units["source-alias"]["output_unit_ids"], ["source-canonical"]
+        )
+        self.assertEqual(
+            units["seam-top"]["output_unit_ids"], ["seam-top"]
+        )
+        self.assertEqual(
+            units["seam-bottom"]["output_unit_ids"], ["seam-top"]
+        )
+        self.assertEqual(
+            units["seam-top"]["output_group_ids"], ["compound-example"]
+        )
+        self.assertEqual(units["source-alias"]["status"], "translated")
+        self.assertEqual(units["seam-bottom"]["status"], "translated")
+        self.assertEqual(
+            units["seam-bottom"]["source_image_path"], "example_bottom.png"
+        )
+        self.assertEqual(units["seam-bottom"]["semantic_quality_status"], "unjudged")
+
+    def test_ocr_preserve_skip_and_failure_statuses_reach_page_outcome(self) -> None:
+        from modules.ocr.persistent_cache import snapshot_raw_ocr_result
+        from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
+        from modules.utils.ocr_debug import (
+            OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER,
+            OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
+        )
+        from modules.utils.run_report import build_run_report
+
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(
+            lang_mapping={"Japanese": "Japanese"},
+            settings_page=SimpleNamespace(
+                is_gpu_enabled=lambda: False,
+                get_ocr_result_dictionary_rules=lambda: [],
+            ),
+        )
+        processor.cache_manager = mock.Mock()
+        processor._paddleocr_cache_store = None
+        processor._paddleocr_cache_identity = None
+        processor._await_ocr_runtime = mock.Mock()
+        translated = TextBlock(
+            text_bbox=np.asarray([1, 1, 10, 10]),
+            text="example text",
+            text_class="text_bubble",
+            block_id="example-translated",
+        )
+        preserved = TextBlock(
+            text_bbox=np.asarray([12, 1, 20, 10]),
+            text_class="text_free",
+            block_id="example-preserved",
+        )
+        skipped = TextBlock(
+            text_bbox=np.asarray([22, 1, 30, 10]),
+            text_class="text_free",
+            block_id="example-skipped",
+        )
+        failed = TextBlock(
+            text_bbox=np.asarray([32, 1, 40, 10]),
+            text_class="text_bubble",
+            block_id="example-failed",
+        )
+        preserved.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+        skipped.ocr_empty_reason = OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER
+        failed.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+        failed.ocr_reject_reason = PaddleOCRVLEngine.TRUNCATED_OCR_REASON
+        blocks = [translated, preserved, skipped, failed]
+        for block in blocks:
+            block.ocr_status = "ok" if block is translated else "empty_initial"
+            block.text = "example text" if block is translated else ""
+        page = StagePageContext(
+            image_path="example_source_page.png",
+            image_name="example_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((48, 48, 3), dtype=np.uint8),
+            blk_list=blocks,
+            project_ocr_hit=SimpleNamespace(
+                raw_results={
+                    block.block_id: snapshot_raw_ocr_result(block)
+                    for block in blocks
+                },
+                page_profile={},
+                attempt_count=1,
+                engine_name="PaddleOCRVLEngine",
+            ),
+        )
+
+        processor._run_primary_ocr(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+        )
+        page.output_path = "example-output.png"
+
+        units = {
+            row["source_unit_id"]: row
+            for row in processor._page_outcomes([page])[0]["source_units"]
+        }
+        self.assertEqual(units["example-preserved"]["status"], "preserved")
+        self.assertEqual(units["example-skipped"]["status"], "intentionally_skipped")
+        self.assertEqual(units["example-failed"]["status"], "failed")
+        self.assertEqual(units["example-failed"]["reason_code"], "ocr_truncated")
+        self.assertEqual(units["example-failed"]["output_unit_ids"], [])
+        self.assertEqual(
+            units["example-failed"]["output_relation_status"], "unavailable"
+        )
+        self.assertEqual(
+            units["example-translated"]["output_relation_status"], "observed"
+        )
+        self.assertEqual(units["example-translated"]["status"], "unjudged")
+        report = build_run_report(
+            telemetry=None,
+            total_wall_sec=1.0,
+            page_outcomes=[processor._page_outcomes([page])[0]],
+            output_summary={
+                "input_count": 1,
+                "output_count": 1,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "missing": [],
+            },
+            terminal_status="completed",
+            processing_status="completed",
+            report_status="completed",
+            cleanup_status="completed",
+        )
+        self.assertEqual(report["quality"]["status"], "failed")
+        self.assertEqual(report["terminal_status"], "failed")
+        self.assertEqual(report["pages"][0]["quality_status"], "failed")
+
+    def test_translation_failure_is_attributed_only_by_block_id(self) -> None:
+        error = RuntimeError("example truncated response")
+        error.block_failure_kind = "translation_truncated"
+        error.block_ids = ["example-source-unit"]
+
+        class _FailingTranslator:
+            uses_persistent_translation_memory = False
+            translator_key = "example-translator"
+            engine = SimpleNamespace(last_benchmark_stats={})
+
+            @staticmethod
+            def translate_with_cache_manager(*_args, **_kwargs):
+                raise error
+
+        processor, page = self._run_translation(_FailingTranslator())
+
+        outcome = processor._page_outcomes([page])[0]
+        unit = outcome["source_units"][0]
+        self.assertEqual(unit["source_unit_id"], "example-source-unit")
+        self.assertEqual(unit["status"], "failed")
+        self.assertEqual(unit["reason_code"], "translation_truncated")
+        self.assertEqual(unit["semantic_quality_status"], "unjudged")
+
+    def test_cancelled_translation_stays_unjudged_with_reason(self) -> None:
+        class _CancelledTranslator:
+            uses_persistent_translation_memory = False
+            translator_key = "example-translator"
+            engine = SimpleNamespace(last_benchmark_stats={})
+
+            @staticmethod
+            def translate_with_cache_manager(*_args, **_kwargs):
+                raise OperationCancelledError("example cancellation")
+
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(
+            is_current_task_cancelled=lambda: False,
+            settings_page=SimpleNamespace(
+                get_llm_settings=lambda: {"extra_context": "context"},
+                get_tool_selection=lambda _tool: "example-translator",
+                get_translation_result_dictionary_rules=lambda: [],
+            ),
+        )
+        processor.cache_manager = object()
+        processor._project_checkpoint_store = None
+        processor._inpainter_release_gate = {
+            "required": False,
+            "observed": True,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor._mark_page_failed = mock.Mock()
+        processor._release_source_image = mock.Mock()
+        processor._measure_performance = lambda **_kwargs: nullcontext()
+        processor.emit_progress = mock.Mock()
+        block = TextBlock(
+            text_bbox=np.asarray([1, 1, 10, 10]),
+            text="example source",
+            text_class="text_bubble",
+            block_id="example-source-unit",
+            processing_action="translate_inpaint",
+            processing_decision_source="example_detection",
+            semantic_role="dialogue_bubble",
+        )
+        page = StagePageContext(
+            image_path="example_source_page.png",
+            image_name="example_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((12, 12, 3), dtype=np.uint8),
+            blk_list=[block],
+        )
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            return_value=_CancelledTranslator(),
+        ), self.assertRaises(OperationCancelledError):
+            processor._translate_all([page])
+
+        outcome = processor._page_outcomes(
+            [page],
+            processing_status="cancelled",
+        )[0]
+        unit = outcome["source_units"][0]
+        self.assertEqual(unit["status"], "unjudged")
+        self.assertEqual(
+            unit["reason_code"],
+            "run_cancelled_before_unit_outcome",
+        )
 
 
 if __name__ == "__main__":

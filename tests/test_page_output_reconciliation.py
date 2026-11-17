@@ -138,6 +138,103 @@ class OutputReconciliationTests(unittest.TestCase):
 
         self.assertEqual(ctx.output_fallback_kind, "inpainted")
 
+    def test_inpainted_fallback_has_no_text_output_relation_or_completed_quality(self) -> None:
+        from app.controllers.batch_report import BatchReportController
+        from modules.utils.run_report import build_run_report
+        from modules.utils.textblock import TextBlock
+
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("013.png")
+        block = TextBlock(
+            text_bbox=np.asarray([1, 1, 6, 6]),
+            text="example text",
+            block_id="example-fallback-unit",
+        )
+        block.translation = "example translated text"
+        ctx.blk_list = [block]
+        ctx.inpaint_input_img = np.full((8, 8, 3), 7, dtype=np.uint8)
+        StageBatchedProcessor._record_source_unit_roster(ctx)
+        StageBatchedProcessor._record_source_output_relations(
+            ctx,
+            ctx.blk_list,
+            output_observed=False,
+        )
+        StageBatchedProcessor._record_source_unit_translation_results(
+            ctx,
+            ctx.blk_list,
+            ctx.blk_list,
+        )
+        ctx.output_path = recorder.existing_output("render-before-fallback.png")
+        self.assertEqual(
+            processor._page_outcomes([ctx])[0]["source_units"][0][
+                "output_relation_status"
+            ],
+            "observed",
+        )
+
+        rendered_blocks = []
+        write_final_render_export = processor._write_final_render_export
+
+        def capture_export_blocks(directory, token, image_path, image, blocks, viewer, settings, **kwargs):
+            rendered_blocks.append(list(blocks))
+            return write_final_render_export(
+                directory,
+                token,
+                image_path,
+                image,
+                blocks,
+                viewer,
+                settings,
+                **kwargs,
+            )
+
+        processor._write_final_render_export = capture_export_blocks
+        ctx.output_path = str(self.out_dir / "missing-render.png")
+        output = processor._reconcile_page_outputs([ctx], export_settings={})
+        outcome = processor._page_outcomes([ctx])[0]
+        report = build_run_report(
+            telemetry=None,
+            total_wall_sec=1.0,
+            page_outcomes=[outcome],
+            output_summary=output,
+            terminal_status="completed",
+            processing_status="completed",
+            report_status="completed",
+            cleanup_status="completed",
+        )
+        report_main = types.SimpleNamespace(
+            image_files=[ctx.image_path],
+            image_states={ctx.image_path: {"skip": False}},
+        )
+        report_controller = BatchReportController(report_main)
+        report_controller.start_batch_report([ctx.image_path])
+        report_controller.register_batch_output(ctx.image_path, ctx.output_path)
+        report_controller.register_pipeline_run_report(report)
+        export_block_reason = report_controller.auto_export_ineligibility_reason(
+            processing_status="completed",
+            application_cleanup_status="completed",
+            archive_status="not_applicable",
+        )
+
+        self.assertEqual(ctx.output_fallback_kind, "inpainted")
+        self.assertTrue(Path(ctx.output_path).is_file())
+        self.assertEqual(output["output_count"], 1)
+        self.assertEqual(output["fallback_count"], 1)
+        self.assertEqual(rendered_blocks, [[]])
+        self.assertEqual(outcome["failed_stage"], "")
+        self.assertEqual(outcome["output_status"], "measured")
+        self.assertEqual(outcome["source_units"][0]["status"], "translated")
+        self.assertEqual(outcome["source_units"][0]["output_unit_ids"], [])
+        self.assertEqual(
+            outcome["source_units"][0]["output_relation_status"], "unavailable"
+        )
+        self.assertEqual(outcome["quality_status"], "incomplete")
+        self.assertEqual(report["quality"]["failed_units"]["value"], 0)
+        self.assertEqual(report["quality"]["status"], "incomplete")
+        self.assertEqual(report["terminal_status"], "incomplete")
+        self.assertEqual(export_block_reason, "page_quality_not_completed")
+
     def test_a_released_page_is_reloaded_from_disk(self) -> None:
         # 메모리 회수 뒤라도 폴백은 원본을 다시 읽어 반드시 파일을 남긴다.
         recorder = self._recorder()

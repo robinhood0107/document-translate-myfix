@@ -724,6 +724,26 @@ class BatchReportRuntimeTests(unittest.TestCase):
             ctrl = BatchReportController(main)
             ctrl.start_batch_report([path], run_report_log_dir=temporary)
             ctrl.register_batch_output(path, str(output_path))
+            ctrl.register_batch_source_unit_outcomes(
+                path,
+                [
+                    {
+                        "source_unit_id": "source-block",
+                        "source_image_path": path,
+                        "status": "translated",
+                        "reason_code": None,
+                        "output_unit_ids": ["output-block"],
+                        "output_units": [
+                            {
+                                "output_unit_id": "output-block",
+                                "output_page_image_path": path,
+                            }
+                        ],
+                        "output_relation_status": "observed",
+                        "semantic_quality_status": "unjudged",
+                    }
+                ],
+            )
 
             reason = ctrl.auto_export_ineligibility_reason(
                 processing_status="completed",
@@ -765,8 +785,64 @@ class BatchReportRuntimeTests(unittest.TestCase):
         self.assertEqual(report["auto_export_status"], "completed")
         self.assertEqual(report["terminal_status"], "completed")
         self.assertEqual(saved_report["quality"]["status"], "completed")
+        self.assertEqual(saved_report["source_unit_mapping"]["status"], "observed")
+        self.assertEqual(
+            saved_report["source_unit_mapping"]["entries"][0]["output_units"][0]["output_page_path"],
+            str(output_path),
+        )
+        self.assertEqual(
+            saved_report["source_unit_mapping"]["entries"][0]["semantic_quality_status"],
+            "unjudged",
+        )
         self.assertEqual(saved_report["pipeline_cleanup_status"], "not_applicable")
         self.assertIn("example source text", exchange_content)
+
+    def test_cancelled_legacy_run_keeps_unjudged_source_unit_outcome(self) -> None:
+        main = _FakeMain()
+        path = "example_source_page.png"
+        main.image_files = [path]
+        main.image_states = {path: {"skip": False}}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            ctrl = BatchReportController(main)
+            ctrl.start_batch_report([path], run_report_log_dir=temporary)
+            ctrl.register_batch_source_unit_outcomes(
+                path,
+                [
+                    {
+                        "source_unit_id": "source-cancelled",
+                        "source_image_path": path,
+                        "status": "unjudged",
+                        "reason_code": "run_cancelled_before_unit_outcome",
+                        "output_unit_ids": [],
+                        "output_units": [],
+                        "output_relation_status": "unavailable",
+                        "output_relation_reason_code": "output_relation_not_observed",
+                        "semantic_quality_status": "unjudged",
+                    }
+                ],
+            )
+            ctrl.finalize_batch_report(
+                False,
+                processing_status="cancelled",
+                application_cleanup_status="completed",
+            )
+            reports = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in Path(temporary).glob("*.json")
+            ]
+            completed_report = next(
+                item for item in reports if "source_unit_mapping" in item
+            )
+
+        self.assertEqual(completed_report["source_unit_mapping"]["status"], "observed")
+        unit = completed_report["source_unit_mapping"]["entries"][0]
+        self.assertEqual(unit["status"], "unjudged")
+        self.assertEqual(
+            unit["reason_code"],
+            "run_cancelled_before_unit_outcome",
+        )
+        self.assertEqual(unit["semantic_quality_status"], "unjudged")
 
     def test_direct_finalize_keeps_synthesized_legacy_pipeline_bookkeeping(self) -> None:
         main = _FakeMain()
@@ -1026,6 +1102,449 @@ class BatchReportRuntimeTests(unittest.TestCase):
         self.assertEqual(report["cleanup_status"], "completed")
         self.assertEqual(report["terminal_status"], "completed")
 
+    def test_legacy_batch_source_units_survive_mixed_cancel_and_failure(self) -> None:
+        from collections import deque
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import numpy as np
+        from PIL import Image
+        from controller import ComicTranslate
+        from modules.utils.ocr_debug import (
+            OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
+            drop_rejected_empty_ocr_blocks as actual_drop_rejected_empty_ocr_blocks,
+        )
+        from modules.utils.textblock import TextBlock
+        from pipeline.batch_processor import BatchProcessor
+        from pipeline.performance_telemetry import PipelinePerformanceTelemetry
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source_path = Path(temporary) / "example_source.png"
+            failure_path = Path(temporary) / "example_failure.png"
+            translation_failure_path = Path(temporary) / "example_translation_failure.png"
+            ocr_failure_path = Path(temporary) / "example_ocr_failure.png"
+            cancelled_path = Path(temporary) / "example_cancelled.png"
+            for path in (
+                source_path,
+                translation_failure_path,
+                failure_path,
+                ocr_failure_path,
+                cancelled_path,
+            ):
+                Image.new("RGB", (8, 8), (1, 2, 3)).save(path)
+            output_root = Path(temporary) / "output"
+            image_paths = [
+                str(source_path),
+                str(translation_failure_path),
+                str(failure_path),
+                str(ocr_failure_path),
+                str(cancelled_path),
+            ]
+            page_states = {
+                path: {
+                    "source_lang": "Japanese",
+                    "target_lang": "Korean",
+                    "skip": False,
+                    "viewer_state": {},
+                }
+                for path in image_paths
+            }
+            block = TextBlock(
+                text_bbox=np.array([4, 4, 60, 60], dtype=np.int32),
+                text_class="text_bubble",
+                text="これは翻訳する文章です。",
+                processing_action="translate_inpaint",
+            )
+            block.block_id = ""
+            block.canonical_block_id = ""
+            failure_block = TextBlock(
+                text_bbox=np.array([4, 4, 60, 60], dtype=np.int32),
+                text_class="text_bubble",
+                text="",
+                processing_action="translate_inpaint",
+                block_id="legacy-failure-block",
+            )
+            failure_block.ocr_status = "empty_initial"
+            failure_block.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+            all_filtered_block = TextBlock(
+                text_bbox=np.array([8, 8, 36, 36], dtype=np.int32),
+                text_class="text_bubble",
+                text="",
+                block_id="legacy-all-filtered-block",
+            )
+            all_filtered_block.ocr_status = "empty_initial"
+            all_filtered_block.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+            translation_failure_block = TextBlock(
+                text_bbox=np.array([4, 4, 60, 60], dtype=np.int32),
+                text_class="text_bubble",
+                text="これは失敗する翻訳です。",
+                processing_action="translate_inpaint",
+                block_id="legacy-translation-failure-block",
+            )
+            cancelled_block = TextBlock(
+                text_bbox=np.array([4, 4, 60, 60], dtype=np.int32),
+                text_class="text_bubble",
+                text="これはキャンセルされる文章です。",
+                processing_action="translate_inpaint",
+                block_id="legacy-cancelled-block",
+            )
+            ocr_failure_block = TextBlock(
+                text_bbox=np.array([4, 4, 60, 60], dtype=np.int32),
+                text_class="text_bubble",
+                text="これは OCR に失敗する文章です。",
+                processing_action="translate_inpaint",
+                block_id="legacy-ocr-failure-block",
+            )
+            filtered_block = TextBlock(
+                text_bbox=np.array([4, 4, 30, 30], dtype=np.int32),
+                text_class="text_bubble",
+                block_id="legacy-filtered-block",
+            )
+            filtered_block.block_id = ""
+            filtered_block.canonical_block_id = ""
+            filtered_block.ocr_status = "empty_initial"
+            filtered_block.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+            current_path = {"value": image_paths[0]}
+            cancel_state = {"value": False}
+            blocks_by_path = {
+                image_paths[0]: [block, filtered_block],
+                image_paths[1]: [translation_failure_block],
+                image_paths[2]: [failure_block, all_filtered_block],
+                image_paths[3]: [ocr_failure_block],
+                image_paths[4]: [cancelled_block],
+            }
+            main = _FakeMain()
+            main.image_files = image_paths
+            main.image_states = page_states
+            main.curr_img_idx = -1
+            main.lang_mapping = {"Japanese": "Japanese", "Korean": "Korean"}
+            main.file_handler = SimpleNamespace(archive_info=None)
+            settings_page = SimpleNamespace(
+                get_hd_strategy_settings=lambda: {"strategy": "Original"},
+                get_tool_selection=lambda _tool: "example-tool",
+                get_mask_refiner_settings=lambda: {},
+                get_llm_settings=lambda: {"extra_context": ""},
+                get_ocr_result_dictionary_rules=lambda: [],
+                get_translation_result_dictionary_rules=lambda: [],
+                is_gpu_enabled=lambda: False,
+                ui=SimpleNamespace(value_mappings={}),
+            )
+            main.settings_page = settings_page
+
+            def load_image(path):
+                current_path["value"] = path
+                return np.zeros((64, 64, 3), dtype=np.uint8)
+
+            main.image_ctrl = SimpleNamespace(
+                load_image=load_image,
+                mark_processing_stage=mock.Mock(),
+                update_processing_summary=mock.Mock(),
+            )
+            main.image_skipped = SimpleNamespace(emit=mock.Mock())
+            main.render_state_ready = SimpleNamespace(emit=mock.Mock())
+            main.patches_processed = SimpleNamespace(emit=mock.Mock())
+            main.button_to_alignment = {
+                1: QtCore.Qt.AlignmentFlag.AlignCenter
+            }
+            main.button_to_vertical_alignment = {
+                1: "center"
+            }
+            main.render_settings = lambda: SimpleNamespace(
+                upper_case=False,
+                outline=False,
+                font_family="Arial",
+                color="#000000",
+                max_font_size=16,
+                min_font_size=8,
+                line_spacing=1.0,
+                outline_width=0,
+                outline_color="#000000",
+                bold=False,
+                italic=False,
+                underline=False,
+                alignment_id=1,
+                direction=QtCore.Qt.LayoutDirection.LeftToRight,
+                force_font_color=False,
+                smart_global_apply_all=False,
+                auto_max_font_profile="current",
+                auto_max_font_size=True,
+            )
+            main.get_resolved_export_settings = lambda: {
+                "resolved_automatic_output_target": "images"
+            }
+            main.get_reserved_automatic_output_series_dir = (
+                lambda *_args, **_kwargs: str(output_root)
+            )
+            main.is_current_task_cancelled = lambda: cancel_state["value"]
+            main.emit_memlog = mock.Mock()
+            report_ctrl = BatchReportController(main)
+            main.batch_report_ctrl = report_ctrl
+            main.register_batch_telemetry = (
+                ComicTranslate.register_batch_telemetry.__get__(main)
+            )
+            main.register_batch_output = ComicTranslate.register_batch_output.__get__(main)
+            main.register_batch_source_unit_outcomes = (
+                ComicTranslate.register_batch_source_unit_outcomes.__get__(main)
+            )
+            register_source_unit_outcomes = main.register_batch_source_unit_outcomes
+            registration_attempts = []
+
+            def register_with_one_observer_failure(*args, **kwargs):
+                if not registration_attempts:
+                    registration_attempts.append("failed")
+                    raise RuntimeError("synthetic observer failure")
+                registration_attempts.append("succeeded")
+                return register_source_unit_outcomes(*args, **kwargs)
+
+            main.register_batch_source_unit_outcomes = register_with_one_observer_failure
+            report_ctrl.start_batch_report(
+                image_paths,
+                run_report_log_dir=temporary,
+            )
+            main.image_skipped.emit.side_effect = (
+                lambda path, reason, error: report_ctrl.register_batch_skip(
+                    path,
+                    reason,
+                    error,
+                )
+            )
+            processor = BatchProcessor.__new__(BatchProcessor)
+            processor.main_page = main
+            processor.cache_manager = SimpleNamespace(
+                _get_ocr_cache_key=mock.Mock(return_value="synthetic-cache-key"),
+                _can_serve_all_blocks_from_ocr_cache=mock.Mock(return_value=False),
+                _cache_ocr_results=mock.Mock(),
+            )
+            processor.block_detection = SimpleNamespace(
+                block_detector_cache=SimpleNamespace(
+                    detect=lambda _image: blocks_by_path[current_path["value"]],
+                    last_mask_details=None,
+                    detector="example-detector",
+                    last_engine_name="",
+                    last_device="cpu",
+                )
+            )
+            processor.inpainting = SimpleNamespace(
+                get_inpainted_patches=lambda _mask, _image: [],
+                last_inpaint_edit_mask=None,
+                last_inpaint_evidence=(),
+            )
+
+            def process_synthetic_ocr(_image, _blocks):
+                if current_path["value"] == image_paths[3]:
+                    raise RuntimeError("synthetic OCR failure")
+                cancel_state["value"] = current_path["value"] == image_paths[4]
+
+            processor.ocr_handler = SimpleNamespace(
+                ocr=SimpleNamespace(
+                    initialize=mock.Mock(),
+                    process=mock.Mock(side_effect=process_synthetic_ocr),
+                    last_page_profile={},
+                    last_engine_name="synthetic-ocr",
+                )
+            )
+            processor._recent_page_durations = deque(maxlen=5)
+            telemetry = PipelinePerformanceTelemetry(resource_sampling_enabled=False)
+            telemetry.record_stage_detail(
+                stage="translate",
+                operation="previous_run_only",
+                elapsed_ms=999.0,
+                count=1,
+            )
+            processor.performance_telemetry = telemetry
+            processor.emit_progress = mock.Mock()
+            processor._ensure_page_state = lambda path: page_states[path]
+            processor._start_page_summary = mock.Mock()
+            processor._log_page_start = mock.Mock()
+            processor._log_page_done = mock.Mock()
+            processor._write_inpaint_debug_exports = mock.Mock()
+            processor._write_inpainted_debug_image = mock.Mock(return_value="")
+            processor._maybe_emit_preview_image = mock.Mock()
+            processor._write_json_exports = mock.Mock()
+            processor.skip_save = mock.Mock()
+            processor.log_skipped_image = mock.Mock()
+
+            def write_synthetic_output(*_args, **_kwargs):
+                output_root.mkdir(parents=True, exist_ok=True)
+                output_path = output_root / f"{Path(current_path['value']).stem}_translated.png"
+                Image.new("RGB", (64, 64), (3, 2, 1)).save(output_path)
+                return str(output_path), str(output_root)
+
+            processor._write_final_render_export = write_synthetic_output
+            translated_source_ids = []
+
+            class _SyntheticEngine:
+                last_benchmark_stats = {}
+
+            class _SyntheticTranslator:
+                def __init__(self, *_args):
+                    self.engine = _SyntheticEngine()
+
+                def translate_with_cache_manager(self, blocks, *_args):
+                    if current_path["value"] == image_paths[1]:
+                        raise RuntimeError("synthetic translation failure")
+                    for current in blocks:
+                        current.translation = "안녕, 번역된 문장입니다."
+                        translated_source_ids.append(current.block_id)
+                    return blocks, "miss"
+
+            def filter_ocr_blocks(blocks):
+                if current_path["value"] == image_paths[0]:
+                    self.assertTrue(block.block_id)
+                    self.assertTrue(filtered_block.block_id)
+                    self.assertSetEqual(
+                        {id(item) for item in blocks},
+                        {id(block), id(filtered_block)},
+                    )
+                return actual_drop_rejected_empty_ocr_blocks(blocks)
+
+            with (
+                mock.patch("pipeline.batch_processor.get_inpainter_runtime", return_value={"key": "test", "backend": "test"}),
+                mock.patch("pipeline.batch_processor.resolve_device", return_value="cpu"),
+                mock.patch("pipeline.batch_processor.split_inpaint_protected_ocr_blocks", side_effect=lambda blocks: ([], list(blocks))),
+                mock.patch("pipeline.batch_processor.drop_rejected_empty_ocr_blocks", side_effect=filter_ocr_blocks),
+                mock.patch("pipeline.batch_processor.Translator", _SyntheticTranslator),
+            ):
+                processor.batch_process(image_paths)
+
+            self.assertEqual(processor.ocr_handler.ocr.process.call_count, 5)
+            self.assertEqual(translated_source_ids, [block.block_id])
+            receipt = report_ctrl._current_batch_report["batch_output_paths"][image_paths[0]]
+            all_filtered_receipt = report_ctrl._current_batch_report[
+                "batch_output_paths"
+            ][image_paths[2]]
+            self.assertTrue(Path(receipt).is_file())
+            self.assertTrue(Path(all_filtered_receipt).is_file())
+            report = report_ctrl.finalize_batch_report(
+                False,
+                processing_status="cancelled",
+                application_cleanup_status="completed",
+            )
+            reports = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in Path(temporary).glob("*.json")
+            ]
+            saved_report = next(
+                item for item in reports if "source_unit_mapping" in item
+            )
+
+        telemetry_data = saved_report["telemetry"]["value"]
+        self.assertIn("detect", telemetry_data["stages"])
+        self.assertNotIn(
+            "previous_run_only",
+            telemetry_data["stage_details"].get("translate", {}),
+        )
+        self.assertEqual(report["terminal_status"], "cancelled")
+        self.assertEqual(report["application_cleanup_status"], "completed")
+        self.assertEqual(registration_attempts[0], "failed")
+        self.assertGreater(len(registration_attempts), 1)
+        self.assertEqual(saved_report["source_unit_mapping"]["status"], "observed")
+        outcomes = {
+            row["source_unit_id"]: row
+            for row in saved_report["source_unit_mapping"]["entries"]
+        }
+        page_outcomes = {
+            page["image_path"]: page for page in saved_report["pages"]
+        }
+        self.assertIsNone(saved_report["output"]["measurement"]["value"])
+        self.assertEqual(
+            saved_report["output"]["measurement"]["status"],
+            "unavailable",
+        )
+        self.assertEqual(page_outcomes[image_paths[0]]["output_path"], receipt)
+        self.assertEqual(page_outcomes[image_paths[0]]["output_status"], "measured")
+        self.assertIsNone(page_outcomes[image_paths[1]]["output_path"])
+        self.assertEqual(page_outcomes[image_paths[1]]["output_status"], "unmeasured")
+        self.assertEqual(
+            page_outcomes[image_paths[2]]["output_path"], all_filtered_receipt
+        )
+        self.assertEqual(page_outcomes[image_paths[2]]["output_status"], "measured")
+        self.assertEqual(
+            page_outcomes[image_paths[2]]["quality_status"], "review_required"
+        )
+        for path in image_paths[3:]:
+            self.assertIsNone(page_outcomes[path]["output_path"])
+            self.assertEqual(page_outcomes[path]["output_status"], "unmeasured")
+        self.assertEqual(
+            outcomes[block.block_id]["status"],
+            "translated",
+        )
+        self.assertEqual(
+            outcomes[block.block_id]["output_units"][0]["output_page_path"],
+            receipt,
+        )
+        self.assertEqual(
+            outcomes[block.block_id]["output_relation_status"],
+            "observed",
+        )
+        self.assertEqual(
+            outcomes[filtered_block.block_id]["status"],
+            "unjudged",
+        )
+        self.assertEqual(
+            outcomes[filtered_block.block_id]["reason_code"],
+            "ocr_rejected_empty",
+        )
+        self.assertEqual(
+            outcomes[filtered_block.block_id]["output_unit_ids"],
+            [],
+        )
+        self.assertEqual(outcomes[translation_failure_block.block_id]["status"], "failed")
+        self.assertEqual(
+            outcomes[translation_failure_block.block_id]["reason_code"],
+            "translation_failed",
+        )
+        self.assertEqual(
+            outcomes[translation_failure_block.block_id]["output_relation_status"],
+            "unavailable",
+        )
+        self.assertEqual(
+            outcomes[translation_failure_block.block_id]["output_unit_ids"], []
+        )
+        self.assertEqual(outcomes[failure_block.block_id]["status"], "unjudged")
+        self.assertEqual(
+            outcomes[failure_block.block_id]["reason_code"],
+            "ocr_rejected_empty",
+        )
+        self.assertEqual(
+            outcomes[failure_block.block_id]["semantic_quality_status"],
+            "unjudged",
+        )
+        self.assertEqual(
+            outcomes[failure_block.block_id]["output_relation_status"],
+            "unavailable",
+        )
+        self.assertEqual(outcomes[failure_block.block_id]["output_unit_ids"], [])
+        self.assertEqual(outcomes[all_filtered_block.block_id]["status"], "unjudged")
+        self.assertEqual(
+            outcomes[all_filtered_block.block_id]["reason_code"],
+            "ocr_rejected_empty",
+        )
+        self.assertEqual(
+            outcomes[all_filtered_block.block_id]["output_relation_status"],
+            "unavailable",
+        )
+        self.assertEqual(outcomes[all_filtered_block.block_id]["output_unit_ids"], [])
+        self.assertEqual(outcomes[ocr_failure_block.block_id]["status"], "failed")
+        self.assertEqual(
+            outcomes[ocr_failure_block.block_id]["reason_code"],
+            "ocr_failed",
+        )
+        self.assertEqual(
+            outcomes[ocr_failure_block.block_id]["output_relation_status"],
+            "unavailable",
+        )
+        self.assertEqual(outcomes[ocr_failure_block.block_id]["output_unit_ids"], [])
+        self.assertEqual(outcomes[cancelled_block.block_id]["status"], "unjudged")
+        self.assertEqual(
+            outcomes[cancelled_block.block_id]["reason_code"],
+            "run_cancelled_before_unit_outcome",
+        )
+        self.assertEqual(
+            outcomes[cancelled_block.block_id]["output_relation_status"],
+            "unavailable",
+        )
+
     def test_webtoon_saved_output_hook_reports_its_real_output_file(self) -> None:
         from types import SimpleNamespace
         from unittest import mock
@@ -1137,6 +1656,131 @@ class BatchReportRuntimeTests(unittest.TestCase):
             "previous_run_only",
             telemetry_data["stage_details"].get("translate", {}),
         )
+
+    def test_webtoon_lookahead_source_units_survive_cancel_and_mid_exception(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import numpy as np
+        from PIL import Image
+        from modules.utils.textblock import TextBlock
+        from pipeline.virtual_page import VirtualPage
+        from pipeline.webtoon_batch.processor import WebtoonBatchProcessor
+
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = [
+                str(Path(temporary) / "example_current.png"),
+                str(Path(temporary) / "example_lookahead.png"),
+            ]
+            for path in paths:
+                Image.new("RGB", (8, 8), (1, 2, 3)).save(path)
+            current_block = TextBlock(
+                text_bbox=np.asarray([1, 1, 6, 6]),
+                block_id="example-current-unit",
+            )
+            lookahead_block = TextBlock(
+                text_bbox=np.asarray([1, 1, 6, 6]),
+                block_id="example-lookahead-unit",
+            )
+            detections = iter((current_block, lookahead_block))
+            registered = mock.Mock()
+            main = _FakeMain()
+            main.image_files = paths
+            main.image_states = {
+                path: {
+                    "skip": False,
+                    "source_lang": "Japanese",
+                    "target_lang": "Korean",
+                }
+                for path in paths
+            }
+            main.s_combo = SimpleNamespace(currentText=lambda: "Japanese")
+            main.t_combo = SimpleNamespace(currentText=lambda: "Korean")
+            main.lang_mapping = {"Japanese": "Japanese"}
+            main.file_handler = SimpleNamespace()
+            main.progress_update = SimpleNamespace(emit=mock.Mock())
+            main.emit_memlog = mock.Mock()
+            main.register_batch_source_unit_outcomes = registered
+            processor = WebtoonBatchProcessor.__new__(WebtoonBatchProcessor)
+            processor.main_page = main
+            processor.final_patches_for_save = {}
+            processor._is_cancelled = mock.Mock(side_effect=(False, True))
+            processor._create_virtual_pages_for_physical = lambda **kwargs: [
+                VirtualPage(
+                    physical_page_index=kwargs["physical_page_index"],
+                    physical_page_path=kwargs["physical_page_path"],
+                    virtual_index=0,
+                    crop_top=0,
+                    crop_bottom=kwargs["physical_height"],
+                    crop_height=kwargs["physical_height"],
+                    physical_width=kwargs["physical_width"],
+                    physical_height=kwargs["physical_height"],
+                    virtual_id=f"example-virtual-{kwargs['physical_page_index']}",
+                )
+            ]
+            processor._read_virtual_image = lambda vpage: np.zeros(
+                (vpage.crop_height, vpage.physical_width, 3), dtype=np.uint8
+            )
+            processor._detect_blocks_for_page = lambda _image: [next(detections)]
+            processor._can_pair_for_seam = lambda _current, _next: False
+            processor._build_extended_ocr_image_for_pair = (
+                lambda current_record, next_record, split_owned_blocks: current_record[
+                    "image"
+                ]
+            )
+            processor._run_ocr_on_blocks = mock.Mock()
+            processor._inpaint_image_with_blocks = mock.Mock(
+                return_value=(None, None, None, {}, [], {})
+            )
+
+            def translate(image, blocks, *_args, **_kwargs):
+                for block in blocks:
+                    block.translation = "번역된 문장"
+                return {
+                    block.block_id: {"status": "translated", "reason_code": None}
+                    for block in blocks
+                }
+
+            processor._run_translation_on_blocks = translate
+            processor._convert_blocks_to_physical = lambda blocks, _vpage: blocks
+            processor._finalize_physical_page = mock.Mock()
+
+            processor.webtoon_batch_process(paths)
+            cancelled_rows_by_path = {
+                call.args[0]: {row["source_unit_id"]: row for row in call.args[1]}
+                for call in registered.call_args_list
+            }
+
+            registered.reset_mock()
+            detections = iter((current_block, lookahead_block))
+            processor._is_cancelled = mock.Mock(return_value=False)
+            processor._run_ocr_on_blocks.side_effect = RuntimeError(
+                "synthetic webtoon OCR failure"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "synthetic webtoon OCR failure",
+            ):
+                processor.webtoon_batch_process(paths)
+            failed_rows_by_path = {
+                call.args[0]: {row["source_unit_id"]: row for row in call.args[1]}
+                for call in registered.call_args_list
+            }
+
+        self.assertIn(paths[1], cancelled_rows_by_path)
+        outcome = cancelled_rows_by_path[paths[1]]["example-lookahead-unit"]
+        self.assertEqual(outcome["status"], "unjudged")
+        self.assertEqual(
+            outcome["reason_code"], "run_cancelled_before_unit_outcome"
+        )
+        self.assertEqual(outcome["output_unit_ids"], [])
+        self.assertEqual(outcome["output_relation_status"], "unavailable")
+        self.assertEqual(set(failed_rows_by_path), set(paths))
+        for rows in failed_rows_by_path.values():
+            outcome = next(iter(rows.values()))
+            self.assertEqual(outcome["status"], "unjudged")
+            self.assertEqual(outcome["output_unit_ids"], [])
+            self.assertEqual(outcome["output_relation_status"], "unavailable")
 
     def test_auto_export_stops_at_first_write_failure_and_preserves_prior_output(self) -> None:
         from controller import ComicTranslate
@@ -1374,8 +2018,21 @@ class BatchReportRuntimeTests(unittest.TestCase):
                         "image_path": path,
                         "image_name": os.path.basename(path),
                         "output_path": "output/page.png",
-                        "failed_stage": "inpaint",
-                        "quality_status": "failed",
+                        "quality_status": "completed",
+                        "source_unit_mapping_status": "observed",
+                        "source_units": [
+                            {
+                                "source_unit_id": "example-truncated-unit",
+                                "status": "failed",
+                                "reason_code": "ocr_truncated",
+                                "semantic_quality_status": "unjudged",
+                            },
+                            {
+                                "source_unit_id": "example-translated-unit",
+                                "status": "translated",
+                                "semantic_quality_status": "unjudged",
+                            },
+                        ],
                     }],
                     output_summary={
                         "input_count": 1,
@@ -1440,6 +2097,9 @@ class BatchReportRuntimeTests(unittest.TestCase):
 
         self.assertEqual(record["terminal_status"], "failed")
         self.assertEqual(record["quality"]["status"], "failed")
+        self.assertEqual(record["quality"]["failed_units"]["value"], 1)
+        self.assertEqual(record["quality"]["failed_units"]["unit"], "source_pages")
+        self.assertEqual(record["pages"][0]["quality_status"], "failed")
         self.assertEqual(record["auto_export_status"], "not_attempted")
         self.assertEqual(record["auto_export_reason_code"], "page_quality_not_completed")
         comic._write_txt_md_exchange.assert_not_called()
@@ -1447,6 +2107,7 @@ class BatchReportRuntimeTests(unittest.TestCase):
             ctrl._latest_batch_report["run_page_outcomes"],
             [{"image_path": path, "status": "failed"}],
         )
+        self.assertEqual(ctrl._latest_batch_report["retry_paths"], [path])
         self.assertEqual(comic.pipeline_status_panel.update_event.call_args.args[0]["step_key"], "batch_failed")
         finish_debug.assert_called_once_with(comic, status="failed")
         comic.series_ctrl.on_batch_process_finished.assert_called_once_with(

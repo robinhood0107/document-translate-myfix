@@ -15,7 +15,11 @@ from modules.utils.block_geometry import (
     map_block_bbox_fields,
 )
 from modules.utils.pipeline_config import get_inpainter_runtime
-from modules.utils.textblock import sort_blk_list
+from modules.utils.textblock import (
+    sort_blk_list,
+    text_block_identity_map,
+    text_block_source_output_rows,
+)
 from ..virtual_page import VirtualPage
 
 if TYPE_CHECKING:
@@ -25,6 +29,51 @@ logger = logging.getLogger(__name__)
 
 
 class FlowMixin:
+    def _record_webtoon_source_unit_outcomes(
+        self: WebtoonBatchProcessor,
+        output_page_image_path: str,
+        blocks: list,
+        operation_statuses: dict[str, dict[str, str | None]],
+        source_blocks: list | None = None,
+        default_status: str = "unjudged",
+        default_reason_code: str = "operation_not_observed",
+    ) -> None:
+        register = getattr(
+            self.main_page,
+            "register_batch_source_unit_outcomes",
+            None,
+        )
+        if not callable(register):
+            return
+        source_rows, partial = text_block_source_output_rows(
+            blocks if source_blocks is None else source_blocks,
+            default_image_path=output_page_image_path,
+            operation_statuses=operation_statuses if source_blocks is None else None,
+        )
+        if source_blocks is not None:
+            for row in source_rows:
+                row.update(
+                    status=default_status,
+                    reason_code=default_reason_code,
+                    output_unit_ids=[],
+                    output_group_ids=[],
+                    output_units=[],
+                    output_relation_status="unavailable",
+                    output_relation_reason_code="output_relation_not_observed",
+                )
+        try:
+            register(
+                output_page_image_path,
+                source_rows,
+                status="partially_observed" if partial else "observed",
+                reason_code="source_lineage_not_observed" if partial else None,
+            )
+        except Exception:
+            logger.warning(
+                "Could not register webtoon source-unit outcomes.",
+                exc_info=True,
+            )
+
     def _emit_progress(
         self: WebtoonBatchProcessor,
         index: int,
@@ -209,6 +258,13 @@ class FlowMixin:
 
         record["image"] = image
         record["detected_blocks"] = self._detect_blocks_for_page(image)
+        if record["detected_blocks"]:
+            self._record_webtoon_source_unit_outcomes(
+                record["path"],
+                [],
+                {},
+                source_blocks=record["detected_blocks"],
+            )
         logger.info(
             "Webtoon batch detect: page=%s virtual=%s detected_blocks=%d",
             record["path"],
@@ -267,6 +323,35 @@ class FlowMixin:
             top_block = current_blocks[top_idx]
             bottom_block = next_blocks[bottom_idx]
             owner_block = top_block.deep_copy()
+            source_units_by_identity: dict[
+                tuple[str, str | None], dict[str, str | None]
+            ] = {}
+            for source_block, source_path in (
+                (top_block, str(current_record.get("path") or "")),
+                (bottom_block, str(next_record.get("path") or "")),
+            ):
+                identity = text_block_identity_map(
+                    source_block,
+                    default_image_path=source_path,
+                )
+                for source_unit in identity["source_units"]:
+                    source_id = str(source_unit.get("block_id") or "")
+                    source_unit_path = source_unit.get("image_path")
+                    source_unit_path = (
+                        source_unit_path
+                        if isinstance(source_unit_path, str)
+                        and source_unit_path
+                        else None
+                    )
+                    if source_id:
+                        source_units_by_identity.setdefault(
+                            (source_id, source_unit_path),
+                            {"block_id": source_id, "image_path": source_unit_path},
+                        )
+            owner_block.merge_split_diagnostics = {
+                **dict(getattr(owner_block, "merge_split_diagnostics", {}) or {}),
+                "source_units": list(source_units_by_identity.values()),
+            }
 
             shifted_bottom_xyxy = self._shift_xyxy(
                 bottom_block.xyxy, 0.0, float(current_height)
@@ -565,6 +650,14 @@ class FlowMixin:
             cached_current: Optional[Dict] = None
             for index, record in enumerate(virtual_records):
                 if self._is_cancelled():
+                    if cached_current is not None and cached_current.get("detected_blocks"):
+                        self._record_webtoon_source_unit_outcomes(
+                            cached_current["path"],
+                            [],
+                            {},
+                            source_blocks=cached_current["detected_blocks"],
+                            default_reason_code="run_cancelled_before_unit_outcome",
+                        )
                     logger.warning("Webtoon batch cancelled.")
                     self._emit_benchmark_event("webtoon_run_cancelled", total_images=total_images)
                     return
@@ -705,12 +798,17 @@ class FlowMixin:
 
                 self._emit_progress(current_record["selected_index"], total_images, 7, False)
                 target_lang = page_state.get("target_lang", self.main_page.t_combo.currentText())
-                self._run_translation_on_blocks(
+                unit_operation_statuses = self._run_translation_on_blocks(
                     image=current_record["image"],
                     blocks=final_blocks_virtual,
                     source_lang=source_lang,
                     target_lang=target_lang,
                     image_path=current_record["path"],
+                )
+                self._record_webtoon_source_unit_outcomes(
+                    current_record["path"],
+                    final_blocks_virtual,
+                    unit_operation_statuses,
                 )
 
                 final_blocks_physical = self._convert_blocks_to_physical(
