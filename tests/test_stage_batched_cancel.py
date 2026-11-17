@@ -69,6 +69,62 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         self.assertFalse(called)
 
+    def test_main_body_failure_or_cancel_survives_terminal_telemetry_failure(self) -> None:
+        from collections import deque
+        from contextlib import nullcontext
+
+        for error, requested, expected_status in (
+            (RuntimeError("worker sentinel"), False, "failed"),
+            (OperationCancelledError("cancel sentinel"), True, "cancelled"),
+        ):
+            with self.subTest(expected_status=expected_status):
+                processor = StageBatchedProcessor.__new__(StageBatchedProcessor)
+                processor.main_page = SimpleNamespace(
+                    file_handler=SimpleNamespace(),
+                    is_current_task_cancelled=lambda: requested,
+                    _batch_cancel_requested=requested,
+                    _batch_pause_requested=False,
+                )
+                processor._recent_page_durations = deque(maxlen=5)
+                processor._emit_benchmark_event = mock.Mock(
+                    side_effect=lambda tag, **_kwargs: (
+                        (_ for _ in ()).throw(RuntimeError("telemetry sentinel"))
+                        if tag in {"batch_run_failed", "batch_run_cancelled"}
+                        else None
+                    )
+                )
+                processor._record_performance_workload = mock.Mock()
+                processor._benchmark_stage_ceiling = mock.Mock(return_value="")
+                processor._reset_prewarm_lifecycle = mock.Mock()
+                processor._load_page_contexts = mock.Mock(return_value=[])
+                processor._ensure_stage_policy = mock.Mock(return_value={})
+                processor._measure_performance = mock.Mock(return_value=nullcontext())
+                processor._raise_if_cancelled = mock.Mock(side_effect=error)
+                processor._finalize_batch_run = mock.Mock()
+
+                with mock.patch(
+                    "pipeline.stage_batched_processor.open_project_stage_checkpoint_store",
+                    return_value=None,
+                ):
+                    if requested:
+                        processor.batch_process([])
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "worker sentinel"):
+                            processor.batch_process([])
+
+                processor._finalize_batch_run.assert_called_once()
+                self.assertEqual(
+                    processor._finalize_batch_run.call_args.kwargs["processing_status"],
+                    expected_status,
+                )
+                if not requested:
+                    self.assertIs(
+                        processor._finalize_batch_run.call_args.kwargs[
+                            "processing_error"
+                        ],
+                        error,
+                    )
+
     def test_paddle_persistent_cache_defers_ocr_prewarm_until_lookup(self) -> None:
         processor = self._processor(cancelled=False)
         processor.main_page.local_ocr_runtime_manager = LocalOCRRuntimeManager()
@@ -1140,13 +1196,36 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
         processor.main_page.reset_automatic_output_reservations = mock.Mock()
         processor._recent_page_durations = []
-        pages = [object()]
+        pages = [
+            StagePageContext(
+                image_path="page.png",
+                image_name="page.png",
+                source_lang="Japanese",
+                target_lang="Korean",
+            )
+        ]
         processor._emit_benchmark_event = mock.Mock()
         processor._reset_prewarm_lifecycle = mock.Mock()
         processor._load_page_contexts = mock.Mock(return_value=pages)
         processor._ensure_stage_policy = mock.Mock(return_value={"primary_ocr_engine": "PaddleOCR VL"})
         processor._raise_if_cancelled = mock.Mock()
-        processor._shutdown_managed_runtimes = mock.Mock()
+        shutdown_calls = []
+
+        def shutdown_managed_runtimes(
+            *,
+            context: str,
+            raise_on_failure: bool = False,
+            preserve_sleeping_paddle: bool = False,
+            ocr_service: str = "ocr",
+        ) -> None:
+            shutdown_calls.append(context)
+
+        processor._shutdown_managed_runtimes = shutdown_managed_runtimes
+        processor._persist_stage_rates = lambda: None
+        processor._shutdown_page_cache_executor = lambda: None
+        processor._shutdown_render_executor = lambda *, raise_on_failure=False: None
+        processor._release_page_buffers = lambda _ctx: 0
+        processor._write_run_report = mock.Mock()
         stage_order: list[str] = []
         processor._start_ocr_prewarm = mock.Mock(
             side_effect=lambda _policy: stage_order.append("ocr_prewarm")
@@ -1175,6 +1254,11 @@ class StageBatchedCancellationTests(unittest.TestCase):
             {"primary_ocr_engine": "PaddleOCR VL"},
         )
         processor._complete_ocr_stage_ceiling.assert_called_once_with(pages)
+        processor._write_run_report.assert_called_once()
+        self.assertEqual(
+            processor._write_run_report.call_args.kwargs["processing_status"],
+            "completed",
+        )
         processor._inpaint_all.assert_not_called()
         processor._translate_all.assert_not_called()
         processor._render_all.assert_not_called()
@@ -1183,6 +1267,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
             total_images=1,
             stage_ceiling="ocr",
         )
+        self.assertEqual(shutdown_calls, ["batch startup preflight", "terminal cleanup"])
         self.assertEqual(stage_order, ["detect", "ocr_prewarm", "ocr"])
 
     def test_complete_ocr_stage_ceiling_marks_only_successful_pages_done(self) -> None:

@@ -14,7 +14,11 @@ from app.controllers.series import (
     _PreparedSeriesChild,
     _PreparedSeriesManifest,
 )
-from app.projects.series_state_v1 import create_series_project, load_series_project
+from app.projects.series_state_v1 import (
+    create_series_project,
+    load_series_project,
+    update_series_settings,
+)
 
 
 class _VisibleStub:
@@ -190,6 +194,57 @@ class SeriesControllerBusyTests(unittest.TestCase):
             self.assertFalse(runtime["pause_requested"])
             self.assertFalse(controller._queue_active)
             self.assertFalse(controller._pause_requested)
+
+    def test_unreportable_child_failure_does_not_consume_model_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = self._controller(self._series_file(temp_dir, status="running"))
+            update_series_settings(
+                controller.series_file,
+                {"queue_failure_policy": "retry", "retry_count": 2},
+            )
+            state = load_series_project(controller.series_file)
+            controller.series_manifest = dict(state["manifest"])
+            controller.series_items = list(state["items"])
+            controller._queue_active = True
+            controller._queue_pending_ids = []
+            controller._queue_completed_ids = []
+            controller._queue_failed_ids = []
+            controller._queue_skipped_ids = []
+            controller._queue_retry_remaining = {"item-1": 2}
+            controller.active_child_item_id = "item-1"
+            controller.is_child_project_active = mock.Mock(return_value=True)
+            controller.sync_active_child_to_series = mock.Mock()
+            controller._apply_workspace_state = mock.Mock()
+            controller._update_queue_runtime = mock.Mock()
+            controller._start_batch_for_active_child = mock.Mock()
+
+            with mock.patch("app.controllers.series.QtCore.QTimer.singleShot") as single_shot:
+                controller.on_batch_process_finished(
+                    was_cancelled=False,
+                    failed=True,
+                    retry_allowed=False,
+                )
+
+            self.assertEqual(controller._queue_retry_remaining["item-1"], 2)
+            self.assertEqual(controller._queue_failed_ids, ["item-1"])
+            controller._start_batch_for_active_child.assert_not_called()
+            self.assertEqual(single_shot.call_count, 1)
+
+            controller._queue_active = True
+            controller._queue_pending_ids = []
+            controller._queue_completed_ids = []
+            controller._queue_failed_ids = []
+            controller._queue_skipped_ids = []
+            controller._queue_retry_remaining = {"item-1": 2}
+            with mock.patch("app.controllers.series.QtCore.QTimer.singleShot") as retry_shot:
+                controller.on_batch_process_finished(
+                    was_cancelled=False,
+                    failed=True,
+                    retry_allowed=True,
+                )
+
+            self.assertEqual(controller._queue_retry_remaining["item-1"], 1)
+            retry_shot.assert_called_once()
 
     def test_series_manifest_commit_failure_restores_controller_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

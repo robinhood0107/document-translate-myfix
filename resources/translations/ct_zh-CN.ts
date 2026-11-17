@@ -176,6 +176,46 @@
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Completed</source>
+        <translation>已完成</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>已取消</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message>
+        <source>Interrupted</source>
+        <translation>已中断</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>已暂停</translation>
+    </message>
+    <message>
+        <source>Report failed</source>
+        <translation>报告失败</translation>
+    </message>
+    <message>
+        <source>Cleanup failed</source>
+        <translation>清理失败</translation>
+    </message>
+    <message>
+        <source>Incomplete</source>
+        <translation>未完成</translation>
+    </message>
+    <message>
+        <source>The run finished, but its report could not be saved. Outputs are preserved.</source>
+        <translation>运行已结束，但无法保存报告。输出已保留。</translation>
+    </message>
+    <message>
+        <source>The run finished, but some results or cleanup remain unverified. Outputs are preserved.</source>
+        <translation>运行已结束，但部分结果或清理状态尚未验证。输出已保留。</translation>
+    </message>
 </context>
 <context>
     <name>ComicTranslate</name>
@@ -2399,7 +2439,7 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">已暂停</translation>
     </message>
     <message>
         <source>Running</source>
@@ -4924,7 +4964,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Paused</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">已暂停</translation>
     </message>
     <message>
         <source>#{index:02d} · {name}</source>

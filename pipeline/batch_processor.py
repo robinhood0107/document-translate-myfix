@@ -166,6 +166,14 @@ class BatchProcessor:
                 payload=payload,
             )
         )
+        if tag == "batch_run_start":
+            register_telemetry = getattr(
+                self.main_page,
+                "register_batch_telemetry",
+                None,
+            )
+            if callable(register_telemetry):
+                register_telemetry(telemetry)
         if "performance_stats" in payload:
             self.last_performance_stats = dict(payload["performance_stats"])
         try:
@@ -1547,6 +1555,7 @@ class BatchProcessor:
                             total_pages=total_images,
                             strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                         )
+                        self.main_page.register_batch_output(image_path, final_output_path)
                         self.main_page.image_ctrl.update_processing_summary(
                             image_path,
                             {
@@ -1779,6 +1788,7 @@ class BatchProcessor:
                     total_pages=total_images,
                     strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                 )
+                self.main_page.register_batch_output(image_path, final_output_path)
                 self.main_page.image_ctrl.update_processing_summary(
                     image_path,
                     {
@@ -2774,6 +2784,7 @@ class BatchProcessor:
                 total_pages=total_images,
                 strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
             )
+            self.main_page.register_batch_output(image_path, final_output_path)
             logger.info("Saved final translated image to %s", final_output_path)
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,

@@ -74,6 +74,14 @@ class WebtoonBatchProcessor(FlowMixin, ChunkMixin, RenderMixin):
                 payload=payload,
             )
         )
+        if tag == "webtoon_run_start":
+            register_telemetry = getattr(
+                self.main_page,
+                "register_batch_telemetry",
+                None,
+            )
+            if callable(register_telemetry):
+                register_telemetry(telemetry)
         if "performance_stats" in payload:
             self.last_performance_stats = dict(payload["performance_stats"])
         try:

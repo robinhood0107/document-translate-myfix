@@ -12,7 +12,6 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QCoreApplication, QThreadPool
 from PySide6.QtGui import QUndoGroup, QUndoStack, QIcon
 
-from app.ui.dayu_widgets.qt import MPixmap
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
 from app.projects.project_types import (
@@ -1310,10 +1309,11 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
 
-    def mark_project_dirty(self):
+    def mark_project_dirty(self, *, render_dirty: bool = True):
         self._bump_dirty_revision()
         self._manual_dirty = True
-        self.mark_render_dirty()
+        if render_dirty:
+            self.mark_render_dirty()
         try:
             if getattr(self, "project_kind", PROJECT_KIND_SINGLE) == PROJECT_KIND_SERIES:
                 self.series_ctrl.notify_active_child_dirty()
@@ -1895,16 +1895,53 @@ class ComicTranslate(ComicTranslateUI):
         self.enable_hbutton_group()
 
     def _start_batch_report(self, batch_paths: list[str], run_type: str = "batch"):
-        self.batch_report_ctrl.start_batch_report(batch_paths, run_type=run_type)
+        from modules.utils.paths import get_log_dir
 
-    def _finalize_batch_report(self, was_cancelled: bool):
-        return self.batch_report_ctrl.finalize_batch_report(was_cancelled)
+        self.batch_report_ctrl.start_batch_report(
+            batch_paths,
+            run_type=run_type,
+            run_report_log_dir=get_log_dir("runs"),
+        )
+
+    def _finalize_batch_report(
+        self,
+        was_cancelled: bool,
+        *,
+        processing_status: str | None = None,
+        processing_error: dict[str, object] | None = None,
+        application_cleanup_status: str = "not_observed",
+        application_cleanup_errors: list[dict[str, str]] | None = None,
+        archive_status: str = "not_applicable",
+        auto_export_result: dict[str, object] | None = None,
+    ):
+        if processing_error is None and processing_status == "failed":
+            detail = str(getattr(self, "_last_batch_failure_detail", "") or "")
+            if detail:
+                processing_error = {
+                    "error_type": "BatchProcessingError",
+                    "message": detail[:1024],
+                }
+        return self.batch_report_ctrl.finalize_batch_report(
+            was_cancelled,
+            processing_status=processing_status,
+            processing_error=processing_error,
+            application_cleanup_status=application_cleanup_status,
+            application_cleanup_errors=application_cleanup_errors,
+            archive_status=archive_status,
+            auto_export_result=auto_export_result,
+        )
 
     def show_latest_batch_report(self):
         self.batch_report_ctrl.show_latest_batch_report()
 
     def register_batch_skip(self, image_path: str, skip_reason: str, error: str):
         self.batch_report_ctrl.register_batch_skip(image_path, skip_reason, error)
+
+    def register_batch_output(self, image_path: str, output_path: str) -> bool:
+        return self.batch_report_ctrl.register_batch_output(image_path, output_path)
+
+    def register_batch_telemetry(self, telemetry: object) -> bool:
+        return self.batch_report_ctrl.register_batch_telemetry(telemetry)
 
     def _sync_txt_md_project_state(self) -> None:
         if self.webtoon_mode:
@@ -2116,13 +2153,30 @@ class ComicTranslate(ComicTranslateUI):
                 traceback.format_exc(),
             )
 
-    def _run_txt_md_auto_exports(self, page_paths: list[str]) -> None:
-        if not page_paths:
-            return
-        if not self._ensure_txt_md_ready():
-            return
-
-        export_settings = self.settings_page.get_export_settings()
+    def _run_txt_md_auto_exports(
+        self,
+        page_paths: list[str],
+        *,
+        attempt: bool = True,
+        reason_code: str | None = None,
+    ) -> dict[str, object]:
+        try:
+            export_settings = self.settings_page.get_export_settings()
+        except Exception as exc:
+            logger.warning("Could not read automatic TXT/MD export settings.", exc_info=True)
+            return {
+                "status": "not_observed",
+                "selected_targets": [],
+                "completed_targets": [],
+                "failed_target": None,
+                "reason_code": "auto_export_settings_not_observed",
+                "error": {
+                    "phase": "auto_txt_md_settings",
+                    "error_type": type(exc).__name__,
+                    "reason_code": "auto_export_settings_not_observed",
+                    "message": str(exc)[:1024],
+                },
+            }
         targets = []
         if export_settings.get("auto_export_source_txt"):
             targets.append(("source", ".txt"))
@@ -2132,7 +2186,48 @@ class ComicTranslate(ComicTranslateUI):
             targets.append(("translation", ".txt"))
         if export_settings.get("auto_export_translation_md"):
             targets.append(("translation", ".md"))
+        selected_targets = [f"{target}{suffix}" for target, suffix in targets]
+        result: dict[str, object] = {
+            "status": "not_applicable" if not targets else "not_attempted",
+            "selected_targets": selected_targets,
+            "completed_targets": [],
+            "reason_code": "no_auto_export_targets" if not targets else reason_code,
+            "failed_target": None,
+            "error": None,
+        }
+        if not targets:
+            return result
+        if not attempt:
+            result["reason_code"] = reason_code or "run_not_export_eligible"
+            return result
+        if not page_paths:
+            result["status"] = "not_observed"
+            result["reason_code"] = "completed_pages_not_observed"
+            return result
+        try:
+            if not self._ensure_txt_md_ready():
+                result["status"] = "not_observed"
+                result["reason_code"] = "txt_md_readiness_not_observed"
+                return result
+        except Exception as exc:
+            logger.warning("Could not determine TXT/MD export readiness.", exc_info=True)
+            result.update(
+                {
+                    "status": "not_observed",
+                    "reason_code": "txt_md_readiness_not_observed",
+                    "error": {
+                        "phase": "auto_txt_md_readiness",
+                        "error_type": type(exc).__name__,
+                        "reason_code": "txt_md_readiness_not_observed",
+                        "message": str(exc)[:1024],
+                    },
+                }
+            )
+            return result
+
+        completed_targets: list[str] = []
         for target, suffix in targets:
+            target_id = f"{target}{suffix}"
             try:
                 self._write_txt_md_exchange(
                     target,
@@ -2140,7 +2235,8 @@ class ComicTranslate(ComicTranslateUI):
                     page_paths,
                     save_path=self._txt_md_auto_save_path(target, suffix),
                 )
-            except Exception:
+                completed_targets.append(target_id)
+            except Exception as exc:
                 logger.exception("Automatic TXT/MD export failed for %s%s", target, suffix)
                 Messages.show_warning(
                     self,
@@ -2152,7 +2248,23 @@ class ComicTranslate(ComicTranslateUI):
                     closable=True,
                     source="txt_md",
                 )
-                return
+                result.update(
+                    {
+                        "status": "failed",
+                        "completed_targets": completed_targets,
+                        "failed_target": target_id,
+                        "reason_code": "auto_export_write_failed",
+                        "error": {
+                            "phase": "auto_txt_md_export",
+                            "error_type": type(exc).__name__,
+                            "reason_code": "auto_export_write_failed",
+                            "message": str(exc)[:1024],
+                        },
+                    }
+                )
+                return result
+        result.update({"status": "completed", "completed_targets": completed_targets})
+        return result
 
     def _archive_source_for_page(self, file_path: str) -> str:
         state = self.image_states.get(file_path, {})
@@ -2557,6 +2669,28 @@ class ComicTranslate(ComicTranslateUI):
             return
         self._start_batch_process_for_paths([current_path], run_type="one_page_auto")
 
+    def _release_batch_model_caches(self) -> tuple[str, list[dict[str, str]]]:
+        pipeline = getattr(self, "pipeline", None)
+        if pipeline is None:
+            return "not_applicable", []
+        try:
+            pipeline.release_model_caches(raise_on_failure=True)
+        except Exception as exc:
+            logger.warning("Batch model-cache cleanup failed.", exc_info=True)
+            return "failed", [
+                {
+                    "step": "release_model_caches",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc)[:1024],
+                }
+            ]
+        try:
+            if self._memlogger is not None:
+                self._memlogger.emit("model_caches_released")
+        except Exception:
+            logger.debug("Could not record model-cache cleanup in memlog.", exc_info=True)
+        return "completed", []
+
     def _finish_batch_process_ui(
         self,
         *,
@@ -2564,10 +2698,66 @@ class ComicTranslate(ComicTranslateUI):
         failed: bool,
         total_images: int,
         completed_batch_paths: list[str],
-        report,
+        report=None,
         archive_path: str = "",
         was_paused: bool = False,
+        processing_status: str | None = None,
+        archive_status: str = "not_applicable",
+        processing_error: dict[str, object] | None = None,
     ) -> None:
+        application_cleanup_status, application_cleanup_errors = (
+            self._release_batch_model_caches()
+        )
+        if processing_status is None:
+            processing_status = (
+                "cancelled"
+                if was_cancelled
+                else "paused"
+                if was_paused
+                else "failed"
+                if failed
+                else "completed"
+            )
+        auto_export_reason_code = (
+            "run_cancelled"
+            if was_cancelled
+            else "run_paused"
+            if was_paused
+            else "run_failed"
+            if failed
+            else self.batch_report_ctrl.auto_export_ineligibility_reason(
+                processing_status=processing_status,
+                application_cleanup_status=application_cleanup_status,
+                archive_status=archive_status,
+            )
+        )
+        auto_export_result = self._run_txt_md_auto_exports(
+            completed_batch_paths,
+            attempt=auto_export_reason_code is None,
+            reason_code=auto_export_reason_code,
+        )
+        report = self._finalize_batch_report(
+            was_cancelled,
+            processing_status=processing_status,
+            processing_error=processing_error,
+            application_cleanup_status=application_cleanup_status,
+            application_cleanup_errors=application_cleanup_errors,
+            archive_status=archive_status,
+            auto_export_result=auto_export_result,
+        )
+        terminal_status = str((report or {}).get("terminal_status", "incomplete"))
+        failed = failed or terminal_status in {"failed", "cleanup_failed"}
+        queue_failed = failed or terminal_status in {"report_failed", "incomplete"}
+        retry_allowed = bool(
+            report
+            and (report.get("processing_status") == "failed" or report.get("run_failed_count", 0))
+            and report.get("report_status") == "completed"
+            and report.get("cleanup_status") == "completed"
+            and report.get("archive_status") in {"completed", "not_applicable"}
+        )
+        report_failed = terminal_status == "report_failed"
+        incomplete = terminal_status == "incomplete"
+        cleanup_failed = terminal_status == "cleanup_failed"
         self._last_batch_output_root = self._find_latest_batch_output_root(completed_batch_paths)
         if archive_path:
             self._last_batch_output_root = os.path.dirname(archive_path)
@@ -2613,10 +2803,46 @@ class ComicTranslate(ComicTranslateUI):
                 "message": self.tr("일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다."),
                 "panel_state": "paused",
             })
+        elif cleanup_failed:
+            self.set_pipeline_overlay_active(True)
+            panel.show()
+            panel.raise_()
+            cleanup_detail = "; ".join(
+                ": ".join(
+                    str(value)
+                    for value in (item.get("step"), item.get("error_type"), item.get("reason_code"))
+                    if value
+                )
+                for item in (report or {}).get("cleanup_errors", [])
+            )
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "failed",
+                "step_key": "batch_cleanup",
+                "message": QtCore.QCoreApplication.translate(
+                    "BatchReportController", "Cleanup failed"
+                ),
+                "detail": cleanup_detail,
+                "panel_state": "failed",
+                "panel_message_level": "warning",
+            })
         elif failed:
             self.set_pipeline_overlay_active(True)
             panel.show()
             panel.raise_()
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "failed",
+                "step_key": "batch_failed",
+                "message": QtCore.QCoreApplication.translate(
+                    "BatchReportController", "Failed"
+                ),
+                "detail": self._last_batch_failure_detail,
+                "panel_state": "failed",
+                "panel_message_level": "error",
+            })
             notify_pipeline_event(
                 {
                     "event_type": "pipeline_failed",
@@ -2628,6 +2854,38 @@ class ComicTranslate(ComicTranslateUI):
                     "detail": self._last_batch_failure_detail,
                 }
             )
+        elif report_failed:
+            self.set_pipeline_overlay_active(True)
+            panel.show()
+            panel.raise_()
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "failed",
+                "step_key": "run_report",
+                "message": QtCore.QCoreApplication.translate(
+                    "BatchReportController",
+                    "The run finished, but its report could not be saved. Outputs are preserved.",
+                ),
+                "panel_state": "failed",
+                "panel_message_level": "warning",
+            })
+        elif incomplete:
+            self.set_pipeline_overlay_active(True)
+            panel.show()
+            panel.raise_()
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "failed",
+                "step_key": "incomplete_report",
+                "message": QtCore.QCoreApplication.translate(
+                    "BatchReportController",
+                    "The run finished, but some results or cleanup remain unverified. Outputs are preserved.",
+                ),
+                "panel_state": "failed",
+                "panel_message_level": "warning",
+            })
         else:
             self.set_pipeline_overlay_active(True)
             self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
@@ -2659,21 +2917,12 @@ class ComicTranslate(ComicTranslateUI):
                 }
             )
 
-        self._cleanup_intermediate_preview_run(keep_failed=bool(failed and not was_cancelled and not was_paused))
+        self._cleanup_intermediate_preview_run(keep_failed=bool(queue_failed and not was_cancelled and not was_paused))
         if report and report["skipped_count"] > 0 and not was_paused:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
         elif not was_cancelled and not failed and not was_paused:
-            self._run_txt_md_auto_exports(completed_batch_paths)
-            Messages.show_translation_complete(self)
-
-        # Drop cached models/sessions after batch to keep RAM bounded.
-        try:
-            if self.pipeline is not None:
-                self.pipeline.release_model_caches()
-            if self._memlogger is not None:
-                self._memlogger.emit("model_caches_released")
-        except Exception:
-            pass
+            if not report_failed and not incomplete:
+                Messages.show_translation_complete(self)
         self.batch_report_ctrl.refresh_action_buttons()
         finish_debug_artifact_run(
             self,
@@ -2683,15 +2932,16 @@ class ComicTranslate(ComicTranslateUI):
                 else "paused"
                 if was_paused
                 else "failed"
-                if failed
+                if queue_failed
                 else "completed"
             ),
         )
         try:
             self.series_ctrl.on_batch_process_finished(
                 was_cancelled=was_cancelled,
-                failed=failed,
+                failed=queue_failed,
                 was_paused=was_paused,
+                retry_allowed=retry_allowed,
             )
         except Exception:
             logger.debug("Series queue completion hook failed.", exc_info=True)
@@ -2701,7 +2951,7 @@ class ComicTranslate(ComicTranslateUI):
         *,
         completed_batch_paths: list[str],
         total_images: int,
-        report,
+        processing_status: str,
     ) -> None:
         self.cancel_button.setEnabled(False)
         self._emit_archive_finalization_progress(
@@ -2711,7 +2961,12 @@ class ComicTranslate(ComicTranslateUI):
         )
 
         archive_result: dict[str, object] = {}
-        archive_failed = {"value": False, "detail": ""}
+        archive_failed = {
+            "value": False,
+            "detail": "",
+            "error_type": "",
+            "report_message": "",
+        }
 
         def progress_callback(event: dict) -> None:
             self._emit_archive_finalization_progress(
@@ -2738,9 +2993,13 @@ class ComicTranslate(ComicTranslateUI):
             try:
                 exctype, value, traceback_str = error_tuple
                 archive_failed["detail"] = f"{exctype.__name__}: {value}"
+                archive_failed["error_type"] = exctype.__name__
+                archive_failed["report_message"] = archive_failed["detail"]
                 logger.error("Failed to finalize automatic archive output.\n%s", traceback_str)
             except Exception:
                 archive_failed["detail"] = str(error_tuple)
+                archive_failed["error_type"] = "ArchiveFinalizationError"
+                archive_failed["report_message"] = archive_failed["detail"]
                 logger.exception("Failed to finalize automatic archive output.")
 
         def on_finished() -> None:
@@ -2749,10 +3008,14 @@ class ComicTranslate(ComicTranslateUI):
             if not failed:
                 try:
                     archive_path = ComicTranslate._apply_single_archive_output_result(self, archive_result)
-                except Exception:
+                except Exception as exc:
                     logger.exception("Failed to apply automatic archive output result.")
                     failed = True
                     archive_failed["detail"] = self.tr("Failed to apply automatic archive output result.")
+                    archive_failed["error_type"] = type(exc).__name__
+                    archive_failed["report_message"] = (
+                        f"{type(exc).__name__}: {str(exc)}"[:1024]
+                    )
             if failed:
                 self._batch_failed = True
                 self._last_batch_failure_detail = archive_failed["detail"]
@@ -2772,8 +3035,18 @@ class ComicTranslate(ComicTranslateUI):
                 failed=failed,
                 total_images=total_images,
                 completed_batch_paths=completed_batch_paths,
-                report=report,
                 archive_path=archive_path,
+                processing_status=processing_status,
+                archive_status="failed" if failed else "completed",
+                processing_error=(
+                    {
+                        "error_type": archive_failed["error_type"] or "ArchiveFinalizationError",
+                        "phase": "archive_finalization",
+                        "message": archive_failed["report_message"] or archive_failed["detail"][:1024],
+                    }
+                    if failed
+                    else None
+                ),
             )
 
         self.run_threaded_immediate(worker, on_result, on_error, on_finished)
@@ -2795,20 +3068,56 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_failed = False
         self._current_batch_run_type = None
         if getattr(self, "_is_shutting_down", False):
+            release_caches = getattr(self, "_release_batch_model_caches", None)
+            cleanup_status, cleanup_errors = (
+                release_caches()
+                if callable(release_caches)
+                else ("not_observed", [])
+            )
+            auto_export_result = self._run_txt_md_auto_exports(
+                completed_batch_paths,
+                attempt=False,
+                reason_code="shutdown",
+            )
+            self._finalize_batch_report(
+                False,
+                processing_status="interrupted",
+                application_cleanup_status=cleanup_status,
+                application_cleanup_errors=cleanup_errors,
+                archive_status="not_applicable",
+                auto_export_result=auto_export_result,
+            )
             finish_debug_artifact_run(self, status="interrupted")
             self.selected_batch = []
             return
-        report = self._finalize_batch_report(was_cancelled)
+        processing_status = (
+            "cancelled"
+            if was_cancelled
+            else "paused"
+            if was_paused
+            else "failed"
+            if failed
+            else "completed"
+        )
+        archive_status = "not_applicable"
+        try:
+            archive_requested = (
+                not was_cancelled
+                and not was_paused
+                and not failed
+                and is_single_archive_mode(self.get_resolved_export_settings())
+            )
+        except Exception:
+            logger.warning("Could not resolve automatic archive cleanup status.", exc_info=True)
+            archive_requested = False
+            archive_status = "not_observed"
         if (
-            not was_cancelled
-            and not was_paused
-            and not failed
-            and is_single_archive_mode(self.get_resolved_export_settings())
+            archive_requested
         ):
             self._start_batch_archive_finalization(
                 completed_batch_paths=completed_batch_paths,
                 total_images=total_images,
-                report=report,
+                processing_status=processing_status,
             )
             return
 
@@ -2817,8 +3126,9 @@ class ComicTranslate(ComicTranslateUI):
             failed=failed,
             total_images=total_images,
             completed_batch_paths=completed_batch_paths,
-            report=report,
             was_paused=was_paused,
+            processing_status=processing_status,
+            archive_status=archive_status,
         )
 
     def _find_latest_batch_output_root(self, page_paths: list[str]) -> str:

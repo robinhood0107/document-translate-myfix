@@ -13,6 +13,7 @@ from modules.utils.run_report import (  # noqa: E402
     format_hms,
     format_minutes,
     render_run_report_text,
+    start_run_report,
     write_run_report,
 )
 
@@ -86,6 +87,210 @@ class DurationFormatTests(unittest.TestCase):
 
 
 class BuildRunReportTests(unittest.TestCase):
+    def test_terminal_report_preserves_telemetry_and_source_unit_outcomes(self) -> None:
+        telemetry = {
+            "status": "failed",
+            "gemma": {"gemma_logical_request_count": 2, "gemma_http_attempt_count": 3},
+            "runtime": {"gemma": {"start_wall_ms": 12.0}},
+            "resources": {"sampling_enabled": False, "samples": [], "summary": {}},
+        }
+        report = build_run_report(
+            telemetry=telemetry,
+            total_wall_sec=None,
+            page_outcomes=[
+                {"source_unit_index": 0, "image_name": "a.png", "output_path": "out/a.png", "quality_status": "completed"},
+                {"source_unit_index": 1, "image_name": "b.png", "output_path": None, "failed_stage": "ocr", "quality_status": "failed"},
+                {"source_unit_index": 2, "image_name": "c.png", "output_path": None, "quality_status": "unjudged"},
+            ],
+            output_summary={
+                "input_count": 3,
+                "output_count": None,
+                "fallback_count": 1,
+                "fallbacks": [{"image_name": "b.png", "kind": "source"}],
+                "missing": None,
+            },
+            terminal_status="failed",
+            processing_status="failed",
+            report_status="completed",
+            cleanup_status="failed",
+        )
+
+        self.assertEqual(report["telemetry"]["value"], telemetry)
+        self.assertEqual(report["quality"]["required_units"]["value"], 3)
+        self.assertEqual(report["quality"]["failed_units"]["value"], 1)
+        self.assertEqual(report["quality"]["unjudged_units"]["value"], 1)
+        self.assertEqual(report["quality"]["unmeasured_units"]["value"], 2)
+        self.assertEqual(report["quality"]["source_fallback_units"]["value"], 1)
+        self.assertEqual(report["output"]["measurement"]["status"], "unavailable")
+        self.assertEqual(report["output"]["measurement_reason_code"], "output_reconciliation_not_observed")
+        self.assertEqual(report["total_wall_measurement"]["status"], "unavailable")
+        self.assertEqual(report["resource_collection"]["reason_code"], "resource_sampling_disabled")
+
+    def test_unjudged_or_unmeasured_input_prevents_completed_status(self) -> None:
+        report = _report(
+            page_outcomes=[
+                {"source_unit_index": 0, "image_name": "a.png", "output_path": "out/a.png", "quality_status": "completed"}
+            ],
+            output_summary={
+                "input_count": 2,
+                "output_count": 1,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "missing": [],
+            },
+            terminal_status="completed",
+            processing_status="completed",
+            report_status="completed",
+            cleanup_status="completed",
+        )
+
+        self.assertEqual(report["quality"]["unjudged_units"]["value"], 0)
+        self.assertEqual(report["quality"]["unmeasured_units"]["value"], 1)
+        self.assertEqual(report["quality"]["status"], "incomplete")
+        self.assertEqual(report["terminal_status"], "incomplete")
+
+        unjudged = _report(
+            page_outcomes=[{"quality_status": "unjudged", "output_path": None}],
+            output_summary={"input_count": 1, "output_count": 1},
+            terminal_status="completed",
+            processing_status="completed",
+            report_status="completed",
+            cleanup_status="completed",
+        )
+        self.assertEqual(unjudged["quality"]["unjudged_units"]["value"], 1)
+        self.assertEqual(unjudged["quality"]["status"], "incomplete")
+        self.assertEqual(unjudged["terminal_status"], "incomplete")
+
+    def test_missing_input_denominator_is_not_inferred_from_observed_pages(self) -> None:
+        report = _report(
+            page_outcomes=[
+                {"source_unit_index": 0, "image_name": "a.png", "output_path": "out/a.png", "quality_status": "completed"}
+            ],
+            output_summary={"output_count": 1},
+        )
+
+        self.assertIsNone(report["quality"]["required_units"]["value"])
+        self.assertEqual(report["quality"]["required_units"]["status"], "unavailable")
+        self.assertEqual(report["quality"]["required_units"]["reason_code"], "input_count_not_observed")
+        self.assertIsNone(report["page_count"])
+        self.assertIsNone(report["quality"]["unjudged_units"]["value"])
+
+    def test_start_run_report_leaves_a_durable_running_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = start_run_report(
+                log_dir=tmp,
+                run_id="test-run-001",
+                started_at_local="2026-11-17 03:00:00",
+                input_count=2,
+            )
+
+            record = json.loads(Path(path).read_text(encoding="utf-8"))
+
+        self.assertEqual(record["terminal_status"], "running")
+        self.assertEqual(record["processing_status"], "running")
+        self.assertEqual(record["report_status"], "running")
+        self.assertEqual(record["cleanup_status"], "not_started")
+        self.assertIsNone(record["telemetry"]["value"])
+        self.assertEqual(record["telemetry"]["reason_code"], "run_in_progress")
+
+    def test_preserved_review_source_is_not_reported_as_completed_quality(self) -> None:
+        report = _report(page_outcomes=[{
+            "image_name": "example.png", "output_path": "C:/out/example.png",
+            "failed_stage": "", "block_failure_ledger": [{
+                "block_id": "example-block", "stage": "inpaint",
+                "cause": "source_glyph_extension_unresolved",
+                "page_blocking": False, "review_required": True,
+            }],
+        }])
+        self.assertEqual(report["quality"]["status"], "review_required")
+        self.assertEqual(report["quality"]["review_page_count"], 1)
+        self.assertIn("검토 필요 1장", render_run_report_text(report))
+
+    def test_completed_terminal_is_lowered_for_failed_or_unjudged_quality(self) -> None:
+        failed = _report(
+            page_outcomes=[{
+                "source_unit_index": 0,
+                "image_name": "example_source.png",
+                "output_path": "example_output.png",
+                "quality_status": "failed",
+            }],
+            output_summary={
+                "input_count": 1,
+                "output_count": 0,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "missing": ["example_source.png"],
+            },
+            terminal_status="completed",
+            processing_status="completed",
+        )
+        review = _report(
+            page_outcomes=[{
+                "source_unit_index": 0,
+                "image_name": "example_source.png",
+                "output_path": "example_output.png",
+                "quality_status": "review_required",
+            }],
+            output_summary={
+                "input_count": 1,
+                "output_count": 1,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "missing": [],
+            },
+            terminal_status="completed",
+            processing_status="completed",
+        )
+
+        self.assertEqual(failed["quality"]["status"], "failed")
+        self.assertEqual(failed["terminal_status"], "failed")
+        self.assertEqual(review["quality"]["status"], "review_required")
+        self.assertEqual(review["terminal_status"], "incomplete")
+
+    def test_normal_output_and_stage_failure_have_distinct_quality(self) -> None:
+        normal = _report(
+            page_outcomes=[{"quality_status": "completed", "output_path": "out/a.png"}],
+            output_summary={
+                "input_count": 1,
+                "output_count": 1,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "missing": [],
+            },
+            terminal_status="completed",
+            processing_status="completed",
+            report_status="completed",
+            cleanup_status="completed",
+        )
+        self.assertEqual(normal["quality"]["status"], "completed")
+        report = _report(
+            page_outcomes=[{"failed_stage": "render"}],
+            processing_status="failed",
+        )
+        self.assertEqual(report["quality"]["status"], "failed")
+
+    def test_reloaded_source_fallback_and_disjoint_failures_use_source_indexes(self) -> None:
+        report = _report(
+            page_outcomes=[
+                {"source_unit_index": 0, "image_name": "same.png", "output_path": "out/first.png", "quality_status": "completed"},
+                {"source_unit_index": 1, "image_name": "same.png", "output_path": "out/second.png", "quality_status": "completed"},
+                {"source_unit_index": 2, "image_name": "failed.png", "output_path": None, "failed_stage": "ocr", "quality_status": "failed"},
+                {"source_unit_index": 3, "image_name": "missing.png", "output_path": "out/missing.png", "quality_status": "completed"},
+            ],
+            output_summary={
+                "input_count": 4,
+                "output_count": 3,
+                "fallback_count": 1,
+                "fallbacks": [{"source_unit_index": 1, "image_name": "same.png", "kind": "source-reloaded"}],
+                "missing": ["missing.png"],
+                "missing_source_unit_indices": [3],
+            },
+        )
+
+        self.assertEqual(report["quality"]["failed_units"]["value"], 2)
+        self.assertEqual(report["quality"]["source_fallback_units"]["value"], 1)
+        self.assertEqual(report["quality"]["completed_units"]["value"], 1)
+
     def test_the_total_is_measured_not_summed_from_stages(self) -> None:
         # 단계 합(1608초)과 우연히 같아도, 총 시간은 클릭부터 잰 실측값이어야 한다.
         report = _report(total_wall_sec=1750.0)
@@ -178,8 +383,57 @@ class RenderRunReportTests(unittest.TestCase):
         self.assertIn("15.0분", text)  # translate 900s
         self.assertIn("7.8분", text)  # inpaint 467s
 
+    def test_unknown_page_and_input_counts_stay_unmeasured(self) -> None:
+        report = _report(output_summary={"input_count": None, "output_count": None})
+        text = render_run_report_text(report)
+
+        self.assertIn("페이지: 미측정", text)
+        self.assertIn("출력: 미측정 / 입력 미측정", text)
+        self.assertNotIn("None장", text)
+
 
 class WriteRunReportTests(unittest.TestCase):
+    def test_stage_standalone_report_write_preserves_failed_terminal_quality(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from pipeline.stage_batched_processor import StageBatchedProcessor
+
+        processor = StageBatchedProcessor.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(batch_report_ctrl=None)
+        processor._performance_telemetry = lambda: SimpleNamespace(
+            snapshot=lambda: {}
+        )
+        processor._click_to_now_seconds = lambda: 1.0
+        processor._run_started_wall_text = lambda: "2026-11-17 00:00:00"
+        processor._page_outcomes = lambda _pages: [{
+            "source_unit_index": 0,
+            "image_name": "example_source.png",
+            "output_path": None,
+            "output_status": "unmeasured",
+            "quality_status": "failed",
+        }]
+
+        with tempfile.TemporaryDirectory() as temporary, mock.patch(
+            "modules.utils.paths.get_log_dir", return_value=temporary
+        ):
+            path = processor._write_run_report(
+                [object()],
+                output_summary={
+                    "input_count": 1,
+                    "output_count": 1,
+                    "fallback_count": 0,
+                    "fallbacks": [],
+                    "missing": [],
+                },
+                processing_status="completed",
+                cleanup_status="completed",
+            )
+            record = json.loads(Path(path).with_suffix(".json").read_text(encoding="utf-8"))
+
+        self.assertEqual(record["quality"]["status"], "failed")
+        self.assertEqual(record["terminal_status"], "failed")
+
     def test_both_files_are_written_and_readable(self) -> None:
         report = _report()
         with tempfile.TemporaryDirectory() as tmp:
@@ -191,6 +445,94 @@ class WriteRunReportTests(unittest.TestCase):
             json_path = Path(tmp) / written[0]
             restored = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual(restored["page_count"], 366)
+
+    def test_second_file_write_failure_rolls_back_partial_text_report(self) -> None:
+        from unittest import mock
+        from modules.utils import run_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = _report(run_id="partial-write")
+            start_path = start_run_report(
+                log_dir=tmp,
+                run_id="partial-write",
+                started_at_local=report["started_at_local"],
+                input_count=366,
+            )
+            original_json = Path(start_path).read_bytes()
+            atomic_write = run_report._atomic_write
+            calls = 0
+
+            def fail_second_write(path: str, content: str) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("synthetic JSON replacement failure")
+                atomic_write(path, content)
+
+            with mock.patch.object(run_report, "_atomic_write", side_effect=fail_second_write):
+                self.assertEqual(write_run_report(report, log_dir=tmp), "")
+
+            self.assertEqual(Path(start_path).read_bytes(), original_json)
+            self.assertEqual(list(Path(tmp).glob("*.txt")), [])
+
+    def test_keyboard_interrupt_on_second_write_rolls_back_then_propagates(self) -> None:
+        from unittest import mock
+        from modules.utils import run_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = _report(run_id="interrupt-write")
+            text_path = Path(write_run_report(report, log_dir=tmp))
+            json_path = text_path.with_suffix(".json")
+            original_text = text_path.read_bytes()
+            original_json = json_path.read_bytes()
+            updated_report = _report(run_id="interrupt-write", total_wall_sec=1700.0)
+            atomic_write = run_report._atomic_write
+            calls = 0
+
+            def interrupt_second_write(path: str, content: str) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise KeyboardInterrupt("synthetic interrupt")
+                atomic_write(path, content)
+
+            with mock.patch.object(
+                run_report, "_atomic_write", side_effect=interrupt_second_write
+            ):
+                with self.assertRaisesRegex(KeyboardInterrupt, "synthetic interrupt"):
+                    write_run_report(updated_report, log_dir=tmp)
+
+            self.assertEqual(text_path.read_bytes(), original_text)
+            self.assertEqual(json_path.read_bytes(), original_json)
+            self.assertEqual(list(Path(tmp).glob(".run-report-*")), [])
+
+    def test_keyboard_interrupt_remains_primary_if_rollback_fails(self) -> None:
+        from unittest import mock
+        from modules.utils import run_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = _report(run_id="interrupt-rollback")
+            write_run_report(report, log_dir=tmp)
+            updated_report = _report(run_id="interrupt-rollback", total_wall_sec=1700.0)
+            atomic_write = run_report._atomic_write
+            calls = 0
+
+            def interrupt_then_fail_rollback(path: str, content: str) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise KeyboardInterrupt("primary interrupt")
+                if calls >= 3:
+                    raise OSError("rollback failed")
+                atomic_write(path, content)
+
+            with mock.patch.object(
+                run_report, "_atomic_write", side_effect=interrupt_then_fail_rollback
+            ):
+                with self.assertRaisesRegex(KeyboardInterrupt, "primary interrupt"):
+                    write_run_report(updated_report, log_dir=tmp)
+
+            self.assertEqual(calls, 4)
 
     def test_an_unwritable_directory_does_not_raise(self) -> None:
         # 리포트는 진단 자료다. 못 써도 배치를 실패시키면 안 된다.

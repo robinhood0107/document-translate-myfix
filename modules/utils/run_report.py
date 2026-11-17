@@ -14,12 +14,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
 
-RUN_REPORT_SCHEMA_VERSION = 1
+RUN_REPORT_SCHEMA_VERSION = 2
 
 # 사람이 읽는 표에서 쓰는 단계 이름.
 STAGE_LABELS: dict[str, str] = {
@@ -160,32 +163,353 @@ def _operation_rows(telemetry: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def build_run_report(
     *,
-    telemetry: Mapping[str, Any],
-    total_wall_sec: float,
+    telemetry: Mapping[str, Any] | None,
+    total_wall_sec: float | None,
     page_outcomes: list[Mapping[str, Any]],
     output_summary: Mapping[str, Any],
     started_at_local: str = "",
+    run_id: str = "",
+    terminal_status: str = "unknown",
+    processing_status: str = "unknown",
+    report_status: str = "unknown",
+    cleanup_status: str = "unknown",
+    pipeline_cleanup_status: str = "unknown",
+    application_cleanup_status: str = "unknown",
+    archive_status: str = "not_applicable",
+    processing_error: Mapping[str, Any] | None = None,
+    cleanup_errors: list[Mapping[str, Any]] | None = None,
+    telemetry_reason_code: str = "telemetry_snapshot_unavailable",
 ) -> dict[str, Any]:
     """기계가 읽을 실행 리포트 한 덩어리."""
 
-    stage_rows = _stage_rows(telemetry)
-
-    page_count = int(output_summary.get("input_count", 0) or 0)
+    telemetry_data = dict(telemetry) if telemetry is not None else {}
+    stage_rows = _stage_rows(telemetry_data)
+    input_count = output_summary.get("input_count")
+    input_count_measured = isinstance(input_count, int) and not isinstance(
+        input_count, bool
+    )
+    page_count = max(0, input_count) if input_count_measured else None
+    review_page_count = (
+        sum(
+            item.get("quality_status") == "review_required"
+            or any(row.get("review_required") for row in item.get("block_failure_ledger", []))
+            for item in page_outcomes
+        )
+        if page_outcomes
+        else None
+    )
+    missing = output_summary.get("missing")
+    missing_count = len(missing) if isinstance(missing, list) else None
+    page_indexes_by_name: dict[str, list[int]] = {}
+    failed_units: set[int | tuple[str, int]] = set()
+    for index, item in enumerate(page_outcomes):
+        source_index = item.get("source_unit_index", index)
+        if isinstance(source_index, int) and not isinstance(source_index, bool):
+            page_indexes_by_name.setdefault(str(item.get("image_name") or ""), []).append(source_index)
+            if bool(item.get("failed_stage")) or item.get("quality_status") == "failed":
+                failed_units.add(source_index)
+    missing_indexes = output_summary.get("missing_source_unit_indices")
+    if isinstance(missing_indexes, list):
+        failed_units.update(
+            index
+            for index in missing_indexes
+            if isinstance(index, int) and not isinstance(index, bool)
+        )
+    elif isinstance(missing, list):
+        for index, item in enumerate(missing):
+            if isinstance(item, Mapping) and isinstance(item.get("source_unit_index"), int):
+                failed_units.add(item["source_unit_index"])
+                continue
+            name = str(item)
+            matches = page_indexes_by_name.get(name, [])
+            failed_units.add(matches[0] if len(matches) == 1 else ("missing", index))
+    failed_unit_count = (
+        len(failed_units)
+        if page_outcomes or missing_count is not None or isinstance(missing_indexes, list)
+        else None
+    )
+    fallbacks = output_summary.get("fallbacks")
+    source_fallback_indexes: set[int] = set()
+    source_fallback_names: set[str] = set()
+    source_fallback_unindexed_count = 0
+    for index, item in enumerate(fallbacks if isinstance(fallbacks, list) else []):
+        if not isinstance(item, Mapping) or item.get("kind") not in {"source", "source-reloaded"}:
+            continue
+        source_index = item.get("source_unit_index")
+        if isinstance(source_index, int) and not isinstance(source_index, bool):
+            source_fallback_indexes.add(source_index)
+            continue
+        name = str(item.get("image_name") or "")
+        matches = page_indexes_by_name.get(name, [])
+        if len(matches) == 1:
+            source_fallback_indexes.add(matches[0])
+        else:
+            source_fallback_names.add(name)
+            source_fallback_unindexed_count += 1
+    source_fallback_count = (
+        len(source_fallback_indexes) + source_fallback_unindexed_count
+        if isinstance(fallbacks, list)
+        else None
+    )
+    completed_page_count = (
+        sum(
+            item.get("quality_status") == "completed"
+            and item.get("output_status", "measured" if item.get("output_path") else "unmeasured")
+            == "measured"
+            and item.get("source_unit_index", index) not in source_fallback_indexes
+            and item.get("source_unit_index", index) not in failed_units
+            and str(item.get("image_name") or "") not in source_fallback_names
+            for index, item in enumerate(page_outcomes)
+        )
+        if page_outcomes
+        else None
+    )
+    output_count = output_summary.get("output_count")
+    output_count_measured = isinstance(output_count, int) and not isinstance(
+        output_count, bool
+    )
+    output = dict(output_summary)
+    output["measurement"] = {
+        "value": output_count if output_count_measured else None,
+        "unit": "source_pages",
+        "status": "measured" if output_count_measured else "unavailable",
+        "reason_code": None if output_count_measured else "output_reconciliation_not_observed",
+    }
+    output["measurement_status"] = output["measurement"]["status"]
+    output["measurement_reason_code"] = output["measurement"]["reason_code"]
+    unjudged_count = (
+        sum(
+            item.get("quality_status") not in {"completed", "failed", "review_required"}
+            for item in page_outcomes
+        )
+        if page_count is not None
+        else None
+    )
+    row_output_unmeasured = sum(
+        item.get("output_status", "measured" if item.get("output_path") else "unmeasured")
+        != "measured"
+        for item in page_outcomes
+    )
+    unmeasured_count = (
+        max(page_count - len(page_outcomes), 0) + row_output_unmeasured
+        if page_count is not None
+        else None
+    )
+    wall_time = (
+        round(float(total_wall_sec), 3)
+        if isinstance(total_wall_sec, (int, float)) and not isinstance(total_wall_sec, bool)
+        else None
+    )
+    quality_status = (
+        "failed"
+        if failed_unit_count or processing_status == "failed"
+        else "review_required"
+        if review_page_count
+        else "incomplete"
+        if processing_status in {"running", "cancelled", "interrupted", "paused"}
+        or page_count is None
+        or not output_count_measured
+        or bool(unjudged_count)
+        or bool(unmeasured_count)
+        or bool(source_fallback_count)
+        else "completed"
+    )
+    overall_terminal_status = terminal_status
+    if terminal_status == "completed":
+        overall_terminal_status = (
+            "failed"
+            if quality_status == "failed"
+            else "completed"
+            if quality_status == "completed"
+            else "incomplete"
+        )
     return {
         "schema_version": RUN_REPORT_SCHEMA_VERSION,
+        "run_id": run_id,
+        "terminal_status": overall_terminal_status,
+        "processing_status": processing_status,
+        "report_status": report_status,
+        "cleanup_status": cleanup_status,
+        "pipeline_cleanup_status": pipeline_cleanup_status,
+        "application_cleanup_status": application_cleanup_status,
+        "archive_status": archive_status,
+        "processing_error": dict(processing_error) if processing_error else None,
+        "cleanup_errors": [dict(item) for item in cleanup_errors or []],
         "started_at_local": started_at_local,
-        "total_wall_sec": round(float(total_wall_sec), 3),
-        "total_wall_text": format_hms(total_wall_sec),
+        "total_wall_sec": wall_time,
+        "total_wall_measurement": {
+            "value": wall_time,
+            "unit": "seconds",
+            "status": "measured" if wall_time is not None else "unavailable",
+            "reason_code": None if wall_time is not None else "wall_time_not_observed",
+        },
+        "total_wall_text": format_hms(wall_time) if wall_time is not None else "미측정",
         "page_count": page_count,
         "seconds_per_page": (
-            round(float(total_wall_sec) / page_count, 3) if page_count else None
+            round(wall_time / page_count, 3)
+            if page_count and wall_time is not None
+            else None
         ),
+        "telemetry": {
+            "value": telemetry_data if telemetry is not None else None,
+            "status": "collected" if telemetry is not None else "unavailable",
+            "reason_code": None if telemetry is not None else telemetry_reason_code,
+        },
+        "resource_collection": {
+            "status": (
+                "collected"
+                if isinstance(telemetry_data.get("resources"), Mapping)
+                and telemetry_data["resources"].get("sampling_enabled")
+                else "not_enabled"
+                if isinstance(telemetry_data.get("resources"), Mapping)
+                else "unavailable"
+            ),
+            "reason_code": (
+                "resource_sampling_disabled"
+                if isinstance(telemetry_data.get("resources"), Mapping)
+                and not telemetry_data["resources"].get("sampling_enabled")
+                else "resource_snapshot_unavailable"
+                if not isinstance(telemetry_data.get("resources"), Mapping)
+                else None
+            ),
+        },
         "stages": stage_rows,
-        "stage_work": _stage_work_rows(telemetry),
-        "operations": _operation_rows(telemetry),
-        "output": dict(output_summary),
+        "stage_work": _stage_work_rows(telemetry_data),
+        "operations": _operation_rows(telemetry_data),
+        "output": output,
+        "quality": {
+            "status": quality_status,
+            "review_page_count": review_page_count,
+            "failed_page_count": failed_unit_count,
+            "required_units": {
+                "value": page_count,
+                "unit": "source_pages",
+                "status": "measured" if input_count_measured else "unavailable",
+                "reason_code": None if input_count_measured else "input_count_not_observed",
+            },
+            "completed_units": {
+                "value": completed_page_count,
+                "unit": "source_pages",
+                "status": "measured" if page_outcomes else "unavailable",
+                "reason_code": None if page_outcomes else "page_outcomes_not_observed",
+            },
+            "review_units": {
+                "value": review_page_count,
+                "unit": "source_pages",
+                "status": "measured" if page_outcomes else "unavailable",
+                "reason_code": None if page_outcomes else "page_outcomes_not_observed",
+            },
+            "failed_units": {
+                "value": failed_unit_count,
+                "unit": "source_pages",
+                "status": "measured" if failed_unit_count is not None else "unavailable",
+                "reason_code": None if failed_unit_count is not None else "page_outcomes_not_observed",
+            },
+            "unjudged_units": {
+                "value": unjudged_count,
+                "unit": "source_pages",
+                "status": "measured" if unjudged_count is not None else "unavailable",
+                "reason_code": None if unjudged_count is not None else "input_count_not_observed",
+            },
+            "unmeasured_units": {
+                "value": unmeasured_count,
+                "unit": "source_pages",
+                "status": "measured" if unmeasured_count is not None else "unavailable",
+                "reason_code": None if unmeasured_count is not None else "input_count_not_observed",
+            },
+            "source_fallback_units": {
+                "value": source_fallback_count,
+                "unit": "source_pages",
+                "status": "measured" if source_fallback_count is not None else "unavailable",
+                "reason_code": None if source_fallback_count is not None else "fallbacks_not_observed",
+            },
+            "output_mapping": [
+                {
+                    "source_unit_index": item.get("source_unit_index", index),
+                    "image_name": item.get("image_name"),
+                    "output_path": item.get("output_path") or None,
+                    "status": item.get("quality_status", "unjudged"),
+                    "output_status": item.get(
+                        "output_status",
+                        "measured" if item.get("output_path") else "unmeasured",
+                    ),
+                    "fallback_kind": item.get("fallback_kind") or None,
+                }
+                for index, item in enumerate(page_outcomes)
+            ],
+            "output_mapping_status": "measured" if page_outcomes else "unavailable",
+            "output_mapping_reason_code": None if page_outcomes else "page_outcomes_not_observed",
+        },
         "pages": [dict(item) for item in page_outcomes],
     }
+
+
+def _report_base_name(report: Mapping[str, Any], run_id: str | None = None) -> str:
+    stamp = re.sub(
+        r"[^A-Za-z0-9_-]+",
+        "_",
+        str(report.get("started_at_local") or ""),
+    ).strip("_")[:64]
+    if not stamp:
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    selected_run_id = str(run_id or report.get("run_id") or "").strip()
+    if selected_run_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", selected_run_id):
+        raise ValueError("Invalid run report identifier.")
+    return f"run_{stamp}_{selected_run_id}" if selected_run_id else f"run_{stamp}"
+
+
+def _atomic_write(path: str, content: str) -> None:
+    directory = os.path.dirname(path) or "."
+    descriptor, temporary = tempfile.mkstemp(prefix=".run-report-", dir=directory)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def start_run_report(
+    *,
+    log_dir: str,
+    run_id: str,
+    started_at_local: str,
+    input_count: int,
+) -> str:
+    """시작 기록을 먼저 저장해 강제 종료된 실행을 성공으로 오인하지 않는다."""
+
+    report = build_run_report(
+        telemetry=None,
+        total_wall_sec=None,
+        page_outcomes=[],
+        output_summary={
+            "input_count": input_count,
+            "output_count": None,
+            "fallback_count": None,
+            "fallbacks": None,
+            "missing": None,
+        },
+        started_at_local=started_at_local,
+        run_id=run_id,
+        terminal_status="running",
+        processing_status="running",
+        report_status="running",
+        cleanup_status="not_started",
+        telemetry_reason_code="run_in_progress",
+    )
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, f"{_report_base_name(report, run_id)}.json")
+        _atomic_write(path, json.dumps(report, ensure_ascii=False, indent=2))
+        return path
+    except Exception:
+        logger.warning("Could not write the run report start record.", exc_info=True)
+        return ""
 
 
 def render_run_report_text(report: Mapping[str, Any]) -> str:
@@ -199,10 +523,53 @@ def render_run_report_text(report: Mapping[str, Any]) -> str:
         lines.append(f"시작: {report['started_at_local']}")
     lines.append(
         f"전체 소요: {report.get('total_wall_text', '-')} "
-        f"({format_minutes(float(report.get('total_wall_sec', 0.0) or 0.0))})"
+        + (
+            f"({format_minutes(float(report['total_wall_sec']))})"
+            if isinstance(report.get("total_wall_sec"), (int, float))
+            else ""
+        )
     )
-    page_count = int(report.get("page_count", 0) or 0)
-    lines.append(f"페이지: {page_count}장")
+    lines.append(
+        "종료: "
+        f"{report.get('terminal_status', 'unknown')} "
+        f"(처리 {report.get('processing_status', 'unknown')}, "
+        f"보고 {report.get('report_status', 'unknown')}, "
+        f"정리 {report.get('cleanup_status', 'unknown')})"
+    )
+    if "auto_export_status" in report:
+        completed_targets = report.get("auto_export_completed_targets") or []
+        selected_targets = report.get("auto_export_targets") or []
+        lines.append(
+            "TXT/MD 자동 내보내기: "
+            f"{report.get('auto_export_status', 'unknown')} "
+            f"({len(completed_targets)}/{len(selected_targets)})"
+            + (
+                f", 실패 {report['auto_export_failed_target']}"
+                if report.get("auto_export_failed_target")
+                else ""
+            )
+        )
+    page_count = report.get("page_count")
+    page_count_text = (
+        f"{page_count}장"
+        if isinstance(page_count, int) and not isinstance(page_count, bool)
+        else "미측정"
+    )
+    lines.append(f"페이지: {page_count_text}")
+    quality = report.get("quality") or {}
+    if quality.get("status") != "completed" or quality.get("review_page_count") or quality.get("failed_page_count"):
+        failed_count = quality.get("failed_page_count")
+        review_count = quality.get("review_page_count")
+        unjudged_count = quality.get("unjudged_units", {}).get("value")
+        unmeasured_count = quality.get("unmeasured_units", {}).get("value")
+        source_fallback_count = quality.get("source_fallback_units", {}).get("value")
+        lines.append(
+            f"품질 확인: 검토 필요 {review_count if review_count is not None else '미측정'}장, "
+            f"실패 {failed_count if failed_count is not None else '미측정'}장, "
+            f"미판정 {unjudged_count if unjudged_count is not None else '미측정'}장, "
+            f"미측정 {unmeasured_count if unmeasured_count is not None else '미측정'}장, "
+            f"원본 대체 {source_fallback_count if source_fallback_count is not None else '미측정'}장"
+        )
     per_page = report.get("seconds_per_page")
     if isinstance(per_page, (int, float)):
         lines.append(f"페이지당: {float(per_page):.2f}초")
@@ -210,8 +577,20 @@ def render_run_report_text(report: Mapping[str, Any]) -> str:
     output = report.get("output") or {}
     if isinstance(output, Mapping):
         lines.append("")
+        output_count_text = (
+            f"{output.get('output_count')}장"
+            if isinstance(output.get("output_count"), int)
+            and not isinstance(output.get("output_count"), bool)
+            else "미측정"
+        )
+        input_count = output.get("input_count")
+        input_count_text = (
+            f"{input_count}장"
+            if isinstance(input_count, int) and not isinstance(input_count, bool)
+            else "미측정"
+        )
         lines.append(
-            f"출력: {output.get('output_count', 0)}장 / 입력 {output.get('input_count', 0)}장"
+            f"출력: {output_count_text} / 입력 {input_count_text}"
         )
         fallbacks = output.get("fallbacks") or []
         if fallbacks:
@@ -299,7 +678,12 @@ def render_run_report_text(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_run_report(report: Mapping[str, Any], *, log_dir: str) -> str:
+def write_run_report(
+    report: Mapping[str, Any],
+    *,
+    log_dir: str,
+    run_id: str | None = None,
+) -> str:
     """리포트를 ``log_dir`` 에 JSON 과 텍스트로 쓴다. 경로를 돌려준다.
 
     쓰기에 실패해도 배치를 실패시키지 않는다. 리포트는 진단 자료이지 결과물이
@@ -308,15 +692,27 @@ def write_run_report(report: Mapping[str, Any], *, log_dir: str) -> str:
 
     try:
         os.makedirs(log_dir, exist_ok=True)
-        stamp = str(report.get("started_at_local") or "").replace(":", "-").replace(" ", "_")
-        if not stamp:
-            stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        json_path = os.path.join(log_dir, f"run_{stamp}.json")
-        text_path = os.path.join(log_dir, f"run_{stamp}.txt")
-        with open(json_path, "w", encoding="utf-8") as handle:
-            json.dump(report, handle, ensure_ascii=False, indent=2)
-        with open(text_path, "w", encoding="utf-8") as handle:
-            handle.write(render_run_report_text(report))
+        base_name = _report_base_name(report, run_id)
+        json_path = os.path.join(log_dir, f"{base_name}.json")
+        text_path = os.path.join(log_dir, f"{base_name}.txt")
+        previous_files = {
+            path: Path(path).read_bytes() if os.path.exists(path) else None
+            for path in (text_path, json_path)
+        }
+        try:
+            _atomic_write(text_path, render_run_report_text(report))
+            _atomic_write(json_path, json.dumps(report, ensure_ascii=False, indent=2))
+        except BaseException:
+            for path, previous in previous_files.items():
+                try:
+                    if previous is None:
+                        if os.path.exists(path):
+                            os.unlink(path)
+                    else:
+                        _atomic_write(path, previous.decode("utf-8"))
+                except BaseException:
+                    logger.error("Could not roll back partial run report at %s.", path, exc_info=True)
+            raise
         logger.info("Wrote the run report to %s", text_path)
         return text_path
     except Exception:

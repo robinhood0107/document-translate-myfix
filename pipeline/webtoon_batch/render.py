@@ -717,3 +717,4 @@ class RenderMixin:
                 "export_root": translated_dir,
             },
         )
+        self.main_page.register_batch_output(image_path, output_path)

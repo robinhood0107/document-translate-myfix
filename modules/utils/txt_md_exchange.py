@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import os
 import re
+import tempfile
 from typing import Iterable
 
 from modules.utils.correction_dictionary import apply_substitution_rules
@@ -39,8 +40,22 @@ def build_exchange_text(page_entries: Iterable[tuple[str, list[str]]]) -> str:
 
 def dump_exchange_text(save_path: str, page_entries: Iterable[tuple[str, list[str]]]) -> str:
     payload = build_exchange_text(page_entries)
-    with open(save_path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(payload)
+    destination = os.path.abspath(save_path)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{os.path.basename(destination)}.",
+        dir=os.path.dirname(destination),
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
     return save_path
 
 

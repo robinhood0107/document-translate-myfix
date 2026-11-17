@@ -4,7 +4,6 @@ import logging
 import os
 import shutil
 import tempfile
-import traceback
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -12,7 +11,6 @@ from PySide6 import QtCore, QtWidgets
 
 from app.projects.project_state import (
     close_state_store,
-    load_state_from_proj_file,
     save_state_to_proj_file,
 )
 from app.projects.project_types import (
@@ -1789,6 +1787,7 @@ class SeriesController(QtCore.QObject):
         was_cancelled: bool,
         failed: bool,
         was_paused: bool = False,
+        retry_allowed: bool = True,
     ) -> None:
         if not self.is_child_project_active():
             return
@@ -1875,7 +1874,8 @@ class SeriesController(QtCore.QObject):
                 int(series_settings.get("retry_count", 0) or 0),
             )
             if (
-                str(series_settings.get("queue_failure_policy")) == "retry"
+                retry_allowed
+                and str(series_settings.get("queue_failure_policy")) == "retry"
                 and retry_budget > 0
             ):
                 self._queue_retry_remaining[current_item_id] = retry_budget - 1

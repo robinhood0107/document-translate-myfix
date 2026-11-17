@@ -49,45 +49,54 @@ class ComicTranslatePipeline:
             self.ocr_handler
         )
 
-    def release_model_caches(self) -> None:
+    def release_model_caches(self, *, raise_on_failure: bool = False) -> None:
         """Best-effort release of cached model engines/sessions to reduce RSS.
 
         This trades some responsiveness for lower memory after batch runs.
         """
+        failures: list[Exception] = []
         # Drop handler-level caches
         try:
             self.block_detection.block_detector_cache = None
-        except Exception:
+        except Exception as exc:
+            failures.append(exc)
             pass
         try:
             self.inpainting.inpainter_cache = None
             self.inpainting.cached_inpainter_key = None
-        except Exception:
+        except Exception as exc:
+            failures.append(exc)
             pass
 
         # Drop factory-level engine caches (these often hold ONNX sessions)
         try:
             from modules.detection.factory import DetectionEngineFactory
             DetectionEngineFactory._engines.clear()
-        except Exception:
+        except Exception as exc:
+            failures.append(exc)
             pass
         try:
             from modules.ocr.factory import OCRFactory
             OCRFactory._engines.clear()
-        except Exception:
+        except Exception as exc:
+            failures.append(exc)
             pass
         try:
             from modules.translation.factory import TranslationFactory
             TranslationFactory._engines.clear()
-        except Exception:
+        except Exception as exc:
+            failures.append(exc)
             pass
 
         # Encourage Python-side cleanup; native allocators may still keep arenas.
         try:
             import gc
             gc.collect()
-        except Exception:
+        except Exception as exc:
+            failures.append(exc)
             pass
+        if raise_on_failure and failures:
+            raise failures[0]
 
     # Block detection methods (delegate to block_detection)
     def load_box_coords(self, blk_list):

@@ -6,7 +6,6 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import numpy as np
 from PIL import Image
@@ -121,9 +120,13 @@ class OutputReconciliationTests(unittest.TestCase):
         pages = [_page(f"{i:03d}.png", failed="OCR") for i in range(1, 5)]
         pages[1].output_path = recorder.existing_output("002.png")
 
-        processor._reconcile_page_outputs(pages, export_settings={})
+        summary = processor._reconcile_page_outputs(pages, export_settings={})
 
         self.assertEqual(recorder.exports, [("001.png", 0), ("003.png", 2), ("004.png", 3)])
+        self.assertEqual(
+            [item["source_unit_index"] for item in summary["fallbacks"]],
+            [0, 2, 3],
+        )
 
     def test_an_inpainted_page_falls_back_to_the_cleaned_image(self) -> None:
         recorder = self._recorder()
@@ -141,10 +144,11 @@ class OutputReconciliationTests(unittest.TestCase):
         processor = _processor(recorder)
         ctx = _page("011.png", failed="OCR", with_image=False)
 
-        processor._reconcile_page_outputs([ctx], export_settings={})
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
 
         self.assertEqual(ctx.output_fallback_kind, "source-reloaded")
         self.assertTrue(ctx.output_path.endswith("011.png"))
+        self.assertEqual(summary["fallbacks"][0]["source_unit_index"], 0)
 
     def test_the_fallback_reason_reaches_the_processing_summary(self) -> None:
         # 조용한 폴백은 조용한 누락만큼 나쁘다.
@@ -170,6 +174,7 @@ class OutputReconciliationTests(unittest.TestCase):
 
         self.assertEqual(summary["output_count"], 1)
         self.assertEqual(summary["missing"], ["020.png"])
+        self.assertEqual(summary["missing_source_unit_indices"], [0])
         self.assertEqual(len(recorder.preflight_errors), 1)
         title, details = recorder.preflight_errors[0]
         self.assertIn("출력 페이지 수", title)
