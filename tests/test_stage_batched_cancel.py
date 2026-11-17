@@ -614,6 +614,29 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._await_ocr_runtime.assert_not_called()
         processor._run_primary_ocr.assert_called_once()
 
+    def test_failed_project_ocr_result_is_not_checkpointed(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        page = StagePageContext(
+            image_path="example_source_page.png",
+            image_name="example_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            project_ocr_checkpoint_status="miss",
+            project_ocr_fingerprint="a" * 64,
+            project_ocr_identity={"engine": "PaddleOCR VL Spotting"},
+            failed_stage="ocr",
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.record_ocr_checkpoint"
+        ) as record:
+            processor._record_project_ocr_result(
+                page,
+                {"page_profile": {"failure_reason": "response_incomplete"}},
+            )
+
+        record.assert_not_called()
+
     def test_disabled_persistent_caches_skip_runtime_identity_probe(self) -> None:
         processor = self._processor(cancelled=False)
         runtime_manager = LocalOCRRuntimeManager()

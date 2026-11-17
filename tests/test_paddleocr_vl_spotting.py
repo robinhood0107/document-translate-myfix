@@ -10,6 +10,7 @@ from modules.ocr.result_contract import (
     OCR_STRATEGY_PADDLE_SPOTTING,
     PROCESSING_ACTION_REVIEW,
 )
+from modules.utils.exceptions import LocalServiceResponseError
 from modules.utils.textblock import TextBlock
 
 
@@ -92,6 +93,35 @@ class PaddleOCRVLSpottingEngineTests(unittest.TestCase):
             )
         )
 
+    def test_missing_or_null_finish_reason_remains_compatible(self) -> None:
+        content = _native_line(
+            "よし",
+            (100, 100, 300, 100, 300, 300, 100, 300),
+        )
+
+        for finish_reason in ("missing", None):
+            with self.subTest(finish_reason=finish_reason):
+                engine = PaddleOCRVLSpottingEngine()
+                blocks = [_block((100, 100, 300, 300), "block-a")]
+                response = _response(content)
+                if finish_reason == "missing":
+                    del response["choices"][0]["finish_reason"]
+                else:
+                    response["choices"][0]["finish_reason"] = None
+
+                with mock.patch.object(
+                    engine,
+                    "_send_request",
+                    return_value=response,
+                ) as send_request:
+                    engine.process_image(
+                        np.zeros((1000, 1000, 3), dtype=np.uint8),
+                        blocks,
+                    )
+
+                self.assertEqual(send_request.call_count, 1)
+                self.assertEqual(blocks[0].text, "よし")
+
     def test_length_response_gets_one_bounded_recovery_attempt(self) -> None:
         engine = PaddleOCRVLSpottingEngine()
         image = np.zeros((1000, 1000, 3), dtype=np.uint8)
@@ -129,6 +159,70 @@ class PaddleOCRVLSpottingEngineTests(unittest.TestCase):
         self.assertEqual(recovery_payload["repeat_last_n"], 4096)
         self.assertEqual([block.text for block in blocks], ["一", "二"])
         self.assertEqual(engine.last_page_profile["selected_attempt"], 1)
+
+    def test_two_parseable_length_responses_fail_without_applying_geometry(
+        self,
+    ) -> None:
+        engine = PaddleOCRVLSpottingEngine()
+        image = np.zeros((1000, 1000, 3), dtype=np.uint8)
+        blocks = [
+            _block((100, 100, 300, 300), "block-a"),
+            _block((600, 600, 900, 900), "block-b"),
+        ]
+        original_ids = [block.block_id for block in blocks]
+        original_boxes = [block.xyxy.tolist() for block in blocks]
+        first = "\n".join(
+            (
+                _native_line(
+                    "一",
+                    (100, 100, 300, 100, 300, 300, 100, 300),
+                ),
+                _native_line(
+                    "二",
+                    (600, 600, 900, 600, 900, 900, 600, 900),
+                ),
+            )
+        )
+        second = _native_line(
+            "一",
+            (100, 100, 300, 100, 300, 300, 100, 300),
+        )
+
+        with mock.patch.object(
+            engine,
+            "_send_request",
+            side_effect=(
+                _response(first, finish_reason="length"),
+                _response(second, finish_reason="length"),
+            ),
+        ) as send_request:
+            with self.assertRaisesRegex(
+                LocalServiceResponseError,
+                "finish_reason=length",
+            ):
+                engine.process_image(image, blocks)
+
+        self.assertEqual(send_request.call_count, 2)
+        self.assertEqual([block.block_id for block in blocks], original_ids)
+        self.assertEqual(
+            [block.xyxy.tolist() for block in blocks], original_boxes
+        )
+        self.assertEqual([block.text for block in blocks], ["", ""])
+        self.assertEqual([block.ocr_regions for block in blocks], [[], []])
+        self.assertEqual(
+            [region["text"] for region in engine.last_raw_regions],
+            ["一", "二"],
+        )
+        self.assertEqual(engine.last_page_profile["attempt_count"], 2)
+        self.assertEqual(engine.last_page_profile["selected_attempt"], 0)
+        self.assertEqual(engine.last_page_profile["page_status"], "error")
+        self.assertEqual(
+            [
+                attempt["finish_reason"]
+                for attempt in engine.last_page_profile["attempts"]
+            ],
+            ["length", "length"],
+        )
 
     def test_unmatched_detector_block_fails_closed_as_review(self) -> None:
         engine = PaddleOCRVLSpottingEngine()

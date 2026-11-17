@@ -37,6 +37,7 @@ from modules.ocr.common.result_contract import (
 from modules.utils.ocr_debug import (
     HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
     OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
+    PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION,
 )
 from modules.utils.device import get_providers, resolve_device
 from modules.utils.download import ModelDownloader, ModelID
@@ -714,6 +715,10 @@ def build_project_ocr_identity(
     if engine == "HunyuanOCR":
         identity["ocr_response_contract_version"] = (
             HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION
+        )
+    if engine == "PaddleOCR VL Spotting":
+        identity["ocr_response_contract_version"] = (
+            PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION
         )
     if str(policy.get("primary_ocr_engine", "")) == (
         "PaddleOCR VL Spotting"

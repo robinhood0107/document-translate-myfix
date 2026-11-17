@@ -54,6 +54,7 @@ from modules.ocr.persistent_cache import snapshot_raw_ocr_result
 from modules.utils.ocr_debug import (
     HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
     OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
+    PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION,
 )
 from modules.utils.download import ModelDownloader, ModelID, ModelSpec
 from modules.utils.textblock import TextBlock
@@ -545,6 +546,97 @@ class ProjectStageCheckpointTests(unittest.TestCase):
 
         self.assertEqual(identity["max_completion_tokens"], 3000)
         self.assertEqual(identity["request_timeout_sec"], 360)
+        self.assertEqual(
+            identity["ocr_response_contract_version"],
+            PADDLE_SPOTTING_OCR_RESPONSE_CONTRACT_VERSION,
+        )
+
+    def test_spotting_response_version_misses_old_checkpoint_and_hits_new(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            new_identity = build_project_ocr_identity(
+                detection_fingerprint="8" * 64,
+                runtime_identity={"runtime_fingerprint": "spotting-runtime"},
+                policy={
+                    "primary_ocr_engine": "PaddleOCR VL Spotting",
+                    "normalized_ocr_mode": "paddleocr_vl_spotting",
+                },
+                paddle_settings={
+                    "max_completion_tokens": 3000,
+                    "request_timeout_sec": 360,
+                },
+                source_lang_english="Japanese",
+            )
+            old_identity = dict(new_identity)
+            old_identity.pop("ocr_response_contract_version")
+            old_fingerprint = build_project_ocr_fingerprint(old_identity)
+            new_fingerprint = build_project_ocr_fingerprint(new_identity)
+            partial_block = self._blocks()[0]
+            partial_block.text = "partial"
+            partial_block.texts = ["partial"]
+            partial_block.ocr_status = "ok"
+            partial_raw = {
+                partial_block.block_id: snapshot_raw_ocr_result(partial_block)
+            }
+
+            self.assertTrue(
+                record_ocr_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=old_fingerprint,
+                    identity=old_identity,
+                    blocks=[partial_block],
+                    raw_results=partial_raw,
+                    attempt_count=2,
+                    engine_name="PaddleOCRVLSpottingEngine",
+                    page_profile={"attempts": [{"finish_reason": "length"}]},
+                )
+            )
+
+            fresh_blocks = self._blocks()
+            self.assertNotEqual(old_fingerprint, new_fingerprint)
+            self.assertIsNone(
+                lookup_ocr_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=new_fingerprint,
+                    identity=new_identity,
+                    detection_blocks=fresh_blocks,
+                )
+            )
+
+            complete_block = fresh_blocks[0]
+            complete_block.text = "complete"
+            complete_block.texts = ["complete"]
+            complete_block.ocr_status = "ok"
+            complete_raw = {
+                complete_block.block_id: snapshot_raw_ocr_result(complete_block)
+            }
+            self.assertTrue(
+                record_ocr_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=new_fingerprint,
+                    identity=new_identity,
+                    blocks=[complete_block],
+                    raw_results=complete_raw,
+                    attempt_count=2,
+                    engine_name="PaddleOCRVLSpottingEngine",
+                    page_profile={"attempts": [{"finish_reason": "stop"}]},
+                )
+            )
+            restored = lookup_ocr_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=new_fingerprint,
+                identity=new_identity,
+                detection_blocks=self._blocks(),
+            )
+            self.assertIsNotNone(restored)
+            assert restored is not None
+            self.assertEqual(restored.blocks[0].text, "complete")
 
     def test_translation_checkpoint_uses_ctpr_state_without_sidecar_copy(
         self,
