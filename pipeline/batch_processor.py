@@ -15,6 +15,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
 from modules.detection.processor import TextBlockDetector
+from modules.ocr.selection import resolve_ocr_engine
 from modules.ocr.common.result_contract import (
     PROCESSING_ACTION_TRANSLATE_INPAINT,
     finalize_ocr_processing_contract,
@@ -1541,7 +1542,16 @@ class BatchProcessor:
                 # Get ocr cache key for batch processing
                 ocr_model = settings_page.get_tool_selection('ocr')
                 device = resolve_device(settings_page.is_gpu_enabled())
-                cache_key = self.cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
+                cache_key = self.cache_manager._get_ocr_cache_key(
+                    image,
+                    source_lang,
+                    ocr_model,
+                    device,
+                    resolved_ocr_model=resolve_ocr_engine(
+                        ocr_model,
+                        source_lang_english,
+                    ),
+                )
                 try:
                     cache_status = "miss"
                     attempt_count = 0

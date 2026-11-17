@@ -18,6 +18,7 @@ from modules.utils.exceptions import (
 )
 from modules.utils.debug_artifacts import append_active_raw_response
 from modules.utils.ocr_debug import (
+    OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
     OCR_STATUS_EMPTY_INITIAL,
     OCR_STATUS_EMPTY_AFTER_RETRY,
     OCR_STATUS_OK,
@@ -246,8 +247,19 @@ class HunyuanOCREngine(OCREngine):
             self._mark_empty(blk, "Invalid OCR crop bounds.")
             return
 
-        text, descriptive_filtered, request_attempt_count = self._request_ocr_text(crop)
+        text, descriptive_filtered, request_attempt_count, failure_reason = (
+            self._request_ocr_text(crop)
+        )
         self._raise_if_cancelled()
+        if failure_reason:
+            blk.texts = []
+            blk.ocr_regions = []
+            self._mark_empty(
+                blk,
+                failure_reason,
+                attempt_count=request_attempt_count,
+            )
+            return
         cleaned = text
         if cleaned:
             set_block_ocr_diagnostics(
@@ -272,30 +284,46 @@ class HunyuanOCREngine(OCREngine):
                     attempt_count=request_attempt_count,
                 )
 
-    def _request_ocr_text(self, image: np.ndarray) -> tuple[str, bool, int]:
-        first_text = self._request_ocr_text_for_prompt(image, self.PROMPT)
-        first_candidate = self._extract_direct_candidate(first_text, self.PROMPT)
+    def _request_ocr_text(self, image: np.ndarray) -> tuple[str, bool, int, str]:
+        first_text, first_finish_reason = self._request_ocr_text_for_prompt(
+            image, self.PROMPT
+        )
+        if first_finish_reason == "length" and first_text:
+            return "", False, 1, OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+        first_candidate = (
+            self._extract_direct_candidate(first_text, self.PROMPT)
+            if first_finish_reason != "length"
+            else ""
+        )
         if first_candidate:
-            return first_candidate, False, 1
+            return first_candidate, False, 1, ""
 
         logger.warning("hunyuan_ocr non-ocr response detected; retrying with alternate OCR prompt")
         self._raise_if_cancelled()
 
-        retry_text = self._request_ocr_text_for_prompt(image, self.RETRY_PROMPT)
+        retry_text, retry_finish_reason = self._request_ocr_text_for_prompt(
+            image, self.RETRY_PROMPT
+        )
+        if retry_finish_reason == "length":
+            return "", True, 2, OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
         retry_candidate = self._extract_direct_candidate(retry_text, self.RETRY_PROMPT)
         if retry_candidate:
-            return retry_candidate, True, 2
+            return retry_candidate, True, 2, ""
 
         salvaged = self._salvage_text_from_descriptive_output(retry_text, self.RETRY_PROMPT)
         if not salvaged:
             salvaged = self._salvage_text_from_descriptive_output(first_text, self.PROMPT)
         if salvaged:
             logger.warning("hunyuan_ocr salvaged OCR text from non-ocr response")
-            return salvaged, True, 2
+            return salvaged, True, 2, ""
 
-        return "", True, 2
+        return "", True, 2, ""
 
-    def _request_ocr_text_for_prompt(self, image: np.ndarray, prompt: str) -> str:
+    def _request_ocr_text_for_prompt(
+        self,
+        image: np.ndarray,
+        prompt: str,
+    ) -> tuple[str, str]:
         data_url = self._image_data_url(image)
         payload = {
             # 관리형 라우터는 모델이 이미 적재돼 있어도 요청의 model 필드로만
@@ -359,7 +387,7 @@ class HunyuanOCREngine(OCREngine):
             )
         return data
 
-    def _extract_text_from_response(self, data: dict) -> str:
+    def _extract_text_from_response(self, data: dict) -> tuple[str, str]:
         error = data.get("error")
         if isinstance(error, dict):
             error_message = str(error.get("message", "") or f"Unknown {SERVICE_NAME} error.")
@@ -380,8 +408,9 @@ class HunyuanOCREngine(OCREngine):
         choice = choices[0] or {}
         message = choice.get("message") or {}
         content_text = self._extract_content_text(message.get("content"))
+        finish_reason = str(choice.get("finish_reason") or "").strip().lower()
 
-        return content_text
+        return content_text, finish_reason
 
     def _prepare_output_text(self, text: str) -> str:
         return self._normalize_output_text(self._clean_repeated_substrings(text))

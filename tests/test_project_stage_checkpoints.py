@@ -51,6 +51,10 @@ from app.projects.stage_checkpoints import (
     snapshot_project_translations,
 )
 from modules.ocr.persistent_cache import snapshot_raw_ocr_result
+from modules.utils.ocr_debug import (
+    HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
+    OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
+)
 from modules.utils.download import ModelDownloader, ModelID, ModelSpec
 from modules.utils.textblock import TextBlock
 
@@ -451,6 +455,76 @@ class ProjectStageCheckpointTests(unittest.TestCase):
 
         self.assertNotIn("max_completion_tokens", identity)
         self.assertNotIn("request_timeout_sec", identity)
+
+    def test_hunyuan_ocr_identity_versions_its_response_contract(self) -> None:
+        common = {
+            "detection_fingerprint": "6" * 64,
+            "runtime_identity": {"runtime_fingerprint": "hunyuan-runtime"},
+            "policy": {
+                "primary_ocr_engine": "HunyuanOCR",
+                "normalized_ocr_mode": "best_local",
+            },
+            "paddle_settings": {},
+            "source_lang_english": "Chinese",
+        }
+        identity = build_project_ocr_identity(**common)
+        legacy_identity = dict(identity)
+        legacy_identity.pop("ocr_response_contract_version")
+
+        self.assertEqual(
+            identity["ocr_response_contract_version"],
+            HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
+        )
+        self.assertNotEqual(
+            build_project_ocr_fingerprint(identity),
+            build_project_ocr_fingerprint(legacy_identity),
+        )
+
+    def test_truncated_hunyuan_result_is_not_recorded_as_project_checkpoint(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            block = self._blocks()[0]
+            block.text = ""
+            block.ocr_status = "empty_initial"
+            block.ocr_empty_reason = OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+            identity = build_project_ocr_identity(
+                detection_fingerprint="7" * 64,
+                runtime_identity={"runtime_fingerprint": "hunyuan-runtime"},
+                policy={
+                    "primary_ocr_engine": "HunyuanOCR",
+                    "normalized_ocr_mode": "best_local",
+                },
+                paddle_settings={},
+                source_lang_english="Chinese",
+            )
+            fingerprint = build_project_ocr_fingerprint(identity)
+
+            self.assertFalse(
+                record_ocr_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    blocks=[block],
+                    raw_results={
+                        block.block_id: snapshot_raw_ocr_result(block)
+                    },
+                    attempt_count=1,
+                    engine_name="HunyuanOCREngine",
+                    page_profile={},
+                )
+            )
+            self.assertIsNone(
+                lookup_ocr_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    detection_blocks=[self._blocks()[0]],
+                )
+            )
 
     def test_spotting_ocr_identity_includes_its_request_contract(
         self,

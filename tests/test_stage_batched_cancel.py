@@ -2544,6 +2544,7 @@ class StageSourceUnitReportingTests(unittest.TestCase):
         from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
         from modules.utils.ocr_debug import (
             OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER,
+            OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
             OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
         )
         from modules.utils.run_report import build_run_report
@@ -2581,11 +2582,17 @@ class StageSourceUnitReportingTests(unittest.TestCase):
             text_class="text_bubble",
             block_id="example-failed",
         )
+        hunyuan_failed = TextBlock(
+            text_bbox=np.asarray([42, 1, 50, 10]),
+            text_class="text_bubble",
+            block_id="example-hunyuan-failed",
+        )
         preserved.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
         skipped.ocr_empty_reason = OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER
         failed.ocr_empty_reason = OCR_EMPTY_REASON_NON_TEXT_RESPONSE
         failed.ocr_reject_reason = PaddleOCRVLEngine.TRUNCATED_OCR_REASON
-        blocks = [translated, preserved, skipped, failed]
+        hunyuan_failed.ocr_empty_reason = OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+        blocks = [translated, preserved, skipped, failed, hunyuan_failed]
         for block in blocks:
             block.ocr_status = "ok" if block is translated else "empty_initial"
             block.text = "example text" if block is translated else ""
@@ -2625,6 +2632,15 @@ class StageSourceUnitReportingTests(unittest.TestCase):
         self.assertEqual(units["example-failed"]["status"], "failed")
         self.assertEqual(units["example-failed"]["reason_code"], "ocr_truncated")
         self.assertEqual(units["example-failed"]["output_unit_ids"], [])
+        self.assertEqual(units["example-hunyuan-failed"]["status"], "failed")
+        self.assertEqual(
+            units["example-hunyuan-failed"]["reason_code"], "ocr_truncated"
+        )
+        self.assertEqual(
+            units["example-hunyuan-failed"]["semantic_quality_status"],
+            "unjudged",
+        )
+        self.assertEqual(units["example-hunyuan-failed"]["output_unit_ids"], [])
         self.assertEqual(
             units["example-failed"]["output_relation_status"], "unavailable"
         )

@@ -34,6 +34,10 @@ from modules.ocr.persistent_cache import (
 from modules.ocr.common.result_contract import (
     OCR_PROCESSING_CONTRACT_SCHEMA_VERSION,
 )
+from modules.utils.ocr_debug import (
+    HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
+    OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
+)
 from modules.utils.device import get_providers, resolve_device
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.textblock import TextBlock
@@ -692,11 +696,12 @@ def build_project_ocr_identity(
     paddle_settings: Mapping[str, Any],
     source_lang_english: str,
 ) -> dict[str, Any]:
+    engine = str(policy.get("primary_ocr_engine", ""))
     identity = {
         "schema_version": PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION,
         "detection_fingerprint": detection_fingerprint,
         "runtime": dict(runtime_identity),
-        "engine": str(policy.get("primary_ocr_engine", "")),
+        "engine": engine,
         "normalized_ocr_mode": str(policy.get("normalized_ocr_mode", "")),
         "source_language": source_lang_english,
         "max_new_tokens": int(paddle_settings.get("max_new_tokens", 0) or 0),
@@ -706,6 +711,10 @@ def build_project_ocr_identity(
         "visualize": bool(paddle_settings.get("visualize", False)),
         "postprocess_schema": OCR_POSTPROCESS_SCHEMA_VERSION,
     }
+    if engine == "HunyuanOCR":
+        identity["ocr_response_contract_version"] = (
+            HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION
+        )
     if str(policy.get("primary_ocr_engine", "")) == (
         "PaddleOCR VL Spotting"
     ):
@@ -750,6 +759,11 @@ def record_ocr_checkpoint(
             return False
         normalized = copy.deepcopy(dict(raw_result))
         validate_raw_ocr_result(normalized)
+        if (
+            str(normalized.get("empty_reason", "") or "")
+            == OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+        ):
+            return False
         retained_ids.append(block_id)
         ordered_raw.append(
             {
@@ -843,6 +857,11 @@ def lookup_ocr_checkpoint(
                 raise ValueError("OCR checkpoint payload is invalid.")
             normalized = copy.deepcopy(dict(result))
             validate_raw_ocr_result(normalized)
+            if (
+                str(normalized.get("empty_reason", "") or "")
+                == OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+            ):
+                return None
             block = detection_by_id[block_id]
             staged_results.append((block_id, block, normalized))
 

@@ -2071,6 +2071,7 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.source_lang,
                 engine_key,
                 device,
+                resolved_ocr_model=engine_key,
             )
             if engine_key
             not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
