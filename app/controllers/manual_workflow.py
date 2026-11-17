@@ -12,13 +12,13 @@ from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.detection.utils.content import get_inpaint_bboxes
 from modules.ocr.processor import OCRProcessor
+from modules.ocr.selection import resolve_ocr_engine
 from modules.rendering.render import pyside_word_wrap, is_vertical_block, get_best_render_area
 from modules.translation.processor import Translator
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
-from modules.utils.common_utils import is_close
 from modules.utils.device import resolve_device
 from modules.utils.inpaint_strokes import retain_non_manual_strokes
 from modules.utils.language_utils import get_language_code, is_no_space_lang
@@ -283,7 +283,19 @@ class ManualWorkflowController:
                         continue
                     source_lang = state.get("source_lang", source_lang_fallback)
                     ocr.initialize(self.main, source_lang)
-                    cache_key = cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
+                    cache_key = cache_manager._get_ocr_cache_key(
+                        image,
+                        source_lang,
+                        ocr_model,
+                        device,
+                        resolved_ocr_model=resolve_ocr_engine(
+                            ocr_model,
+                            self.main.lang_mapping.get(
+                                source_lang,
+                                source_lang,
+                            ),
+                        ),
+                    )
                     if cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
                         apply_ocr_result_dictionary(

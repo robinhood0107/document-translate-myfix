@@ -2,6 +2,11 @@ import hashlib
 import logging
 import copy
 
+from modules.utils.ocr_debug import (
+    HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
+    OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -9,6 +14,7 @@ class CacheManager:
     """Manages OCR and translation caching for the pipeline."""
 
     PADDLEOCR_VL_CACHE_VERSION = "paddleocr_vl_text_guard_v1"
+    HUNYUAN_OCR_CACHE_VERSION = HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION
     
     def __init__(self):
         self.ocr_cache = {}  # OCR results cache: {(image_hash, model_key, source_lang): {block_id: text}}
@@ -31,25 +37,51 @@ class CacheManager:
             # Take every 10th pixel to reduce computation while maintaining uniqueness
             sample_data = image[::10, ::10].tobytes()
             return hashlib.md5(sample_data).hexdigest()
-        except Exception as e:
+        except Exception:
             # Fallback: use the full image shape and first few bytes if sampling fails
             shape_str = str(image.shape) if hasattr(image, 'shape') else str(type(image))
             fallback_data = shape_str.encode() + str(image.dtype).encode() if hasattr(image, 'dtype') else b'fallback'
             return hashlib.md5(fallback_data).hexdigest()
 
-    def _get_ocr_cache_key(self, image, source_lang, ocr_model, device=None):
+    def _get_ocr_cache_key(
+        self,
+        image,
+        source_lang,
+        ocr_model,
+        device=None,
+        *,
+        resolved_ocr_model=None,
+    ):
         """Generate cache key for OCR results"""
         image_hash = self._generate_image_hash(image)
         if device is None:
             device = "unknown"
-        cache_version = self._default_ocr_cache_version(ocr_model)
+        cache_version = self._default_ocr_cache_version(
+            ocr_model,
+            resolved_ocr_model=resolved_ocr_model,
+        )
         if cache_version:
             return (image_hash, ocr_model, source_lang, device, cache_version)
         return (image_hash, ocr_model, source_lang, device)
 
     @classmethod
-    def _default_ocr_cache_version(cls, ocr_model) -> str:
+    def _default_ocr_cache_version(
+        cls,
+        ocr_model,
+        *,
+        resolved_ocr_model=None,
+    ) -> str:
         model_key = str(ocr_model or "").strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+        resolved_model_key = (
+            str(resolved_ocr_model or "")
+            .strip()
+            .lower()
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        )
+        if model_key == "hunyuanocr" or resolved_model_key == "hunyuanocr":
+            return cls.HUNYUAN_OCR_CACHE_VERSION
         if "paddleocr" in model_key and "vl" in model_key:
             return cls.PADDLEOCR_VL_CACHE_VERSION
         return ""
@@ -197,6 +229,13 @@ class CacheManager:
             "ocr_resize_scale": float(getattr(block, "ocr_resize_scale", 1.0) or 1.0),
         }
 
+    @staticmethod
+    def _is_truncated_ocr_result(block):
+        return (
+            str(getattr(block, "ocr_empty_reason", "") or "")
+            == OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+        )
+
     def _apply_cached_ocr_payload_to_block(self, block, payload):
         block.text = payload.get("text", "")
         block.texts = copy.deepcopy(payload.get("texts", [])) if isinstance(payload.get("texts"), list) else []
@@ -212,19 +251,28 @@ class CacheManager:
         """Cache OCR results for all blocks"""
         try:
             block_results = {}
+            truncated_seen = False
             # If we have separate processed blocks (with OCR results), use them for
             # payload values but use original blocks for stable IDs.
             if processed_blk_list is not None:
                 for original_blk, processed_blk in zip(blk_list, processed_blk_list):
+                    if self._is_truncated_ocr_result(processed_blk):
+                        truncated_seen = True
+                        continue
                     block_id = self._get_block_id(original_blk)
                     block_results[block_id] = self._build_ocr_cache_payload(processed_blk)
             else:
                 for blk in blk_list:
+                    if self._is_truncated_ocr_result(blk):
+                        truncated_seen = True
+                        continue
                     block_id = self._get_block_id(blk)
                     block_results[block_id] = self._build_ocr_cache_payload(blk)
             if block_results:
                 self.ocr_cache[cache_key] = block_results
                 logger.info(f"Cached OCR results for {len(block_results)} blocks")
+            elif truncated_seen:
+                self.ocr_cache.pop(cache_key, None)
             else:
                 logger.debug("No OCR blocks found; skipping OCR cache creation")
         except Exception as e:
@@ -234,6 +282,14 @@ class CacheManager:
     def update_ocr_cache_for_block(self, cache_key, block):
         """Update or add a single block's OCR result to the cache."""
         block_id = self._get_block_id(block)
+
+        if self._is_truncated_ocr_result(block):
+            cached_results = self.ocr_cache.get(cache_key)
+            if isinstance(cached_results, dict):
+                cached_results.pop(block_id, None)
+                if not cached_results:
+                    self.ocr_cache.pop(cache_key, None)
+            return
 
         if cache_key not in self.ocr_cache:
             self.ocr_cache[cache_key] = {}
@@ -246,7 +302,13 @@ class CacheManager:
         matched_id, result = self._find_matching_block_id(cache_key, block)
 
         if matched_id is not None:
-            return self._normalize_cached_ocr_payload(result)
+            payload = self._normalize_cached_ocr_payload(result)
+            if (
+                payload.get("empty_reason")
+                == OCR_EMPTY_REASON_HUNYUAN_TRUNCATED
+            ):
+                return None
+            return payload
 
         block_id = self._get_block_id(block)
         cached_results = self.ocr_cache.get(cache_key, {})
@@ -365,8 +427,11 @@ class CacheManager:
             return False
         
         for block in block_list:
-            cached_text = self._get_cached_text_for_block(cache_key, block)
-            if cached_text is None:  
+            payload = self._get_cached_ocr_payload_for_block(cache_key, block)
+            if (
+                payload is None
+                or payload.get("text") is None
+            ):
                 return False
         
         return True

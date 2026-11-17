@@ -4,6 +4,7 @@ from app.projects.stage_checkpoints import (
     invalidate_current_project_page_checkpoints,
 )
 from modules.ocr.processor import OCRProcessor
+from modules.ocr.selection import resolve_ocr_engine
 from modules.utils.correction_dictionary import apply_ocr_result_dictionary
 from modules.utils.device import resolve_device
 from modules.utils.ocr_quality import summarize_ocr_quality
@@ -83,10 +84,22 @@ class OCRHandler:
         if self.main_page.image_viewer.hasPhoto() and self.main_page.image_viewer.rectangles:
             image = self.main_page.image_viewer.get_image_array()
             ocr_model = self.main_page.settings_page.get_tool_selection('ocr')
+            source_lang_english = self.main_page.lang_mapping.get(
+                source_lang, source_lang
+            )
             device = resolve_device(
                 self.main_page.settings_page.is_gpu_enabled()
             )
-            cache_key = self.cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
+            cache_key = self.cache_manager._get_ocr_cache_key(
+                image,
+                source_lang,
+                ocr_model,
+                device,
+                resolved_ocr_model=resolve_ocr_engine(
+                    ocr_model,
+                    source_lang_english,
+                ),
+            )
             
             if single_block:
                 blk = self.pipeline.get_selected_block()

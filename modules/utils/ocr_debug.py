@@ -39,6 +39,8 @@ OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER = (
 OCR_EMPTY_REASON_SPOTTING_UNMATCHED = (
     "PaddleOCR VL Spotting did not map a native region to this detector block."
 )
+OCR_EMPTY_REASON_HUNYUAN_TRUNCATED = "ocr_response_truncated"
+HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION = "hunyuan_finish_reason_v1"
 UI_PANEL_MODE_PRESERVE_ORIGINAL = "preserve_original"
 UI_PANEL_MODE_PREVIEW = "ui_panel_mode_preview"
 UI_PANEL_MODE_BUBBLE_PANEL_TEXT = "bubble_panel_text_candidate"
@@ -55,6 +57,7 @@ OCR_REJECTED_EMPTY_REASONS = frozenset(
         OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
         OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER,
         OCR_EMPTY_REASON_SPOTTING_UNMATCHED,
+        OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
     }
 )
 
