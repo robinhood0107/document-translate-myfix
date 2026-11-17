@@ -182,6 +182,28 @@ def build_run_report(
 ) -> dict[str, Any]:
     """기계가 읽을 실행 리포트 한 덩어리."""
 
+    page_outcomes = [dict(item) for item in page_outcomes]
+    for item in page_outcomes:
+        source_units = item.get("source_units")
+        source_units = (
+            [row for row in source_units if isinstance(row, Mapping)]
+            if isinstance(source_units, list)
+            else []
+        )
+        if any(row.get("status") == "failed" for row in source_units):
+            item["quality_status"] = "failed"
+        elif item.get("quality_status") not in {"failed", "review_required"} and any(
+            row.get("status") == "unjudged"
+            and row.get("reason_code")
+            in {"review_required", "ocr_review_required", "ocr_rejected_empty"}
+            for row in source_units
+        ):
+            item["quality_status"] = "review_required"
+        elif item.get("quality_status") not in {"failed", "review_required"} and any(
+            row.get("status") == "unjudged" for row in source_units
+        ):
+            item["quality_status"] = "incomplete"
+
     telemetry_data = dict(telemetry) if telemetry is not None else {}
     stage_rows = _stage_rows(telemetry_data)
     input_count = output_summary.get("input_count")
@@ -300,6 +322,189 @@ def build_run_report(
         if isinstance(total_wall_sec, (int, float)) and not isinstance(total_wall_sec, bool)
         else None
     )
+    source_unit_mapping_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+    source_unit_mapping_unidentified: list[dict[str, Any]] = []
+    source_unit_mapping_pages_observed = 0
+    source_unit_mapping_pages_partial = 0
+    output_path_by_image_path = {
+        str(page.get("image_path")): page.get("output_path") or None
+        for page in page_outcomes
+        if isinstance(page.get("image_path"), str) and page.get("image_path")
+    }
+    source_unit_statuses = {
+        "translated",
+        "preserved",
+        "intentionally_skipped",
+        "failed",
+        "unjudged",
+    }
+    for page in page_outcomes:
+        units = page.get("source_units")
+        if (
+            page.get("source_unit_mapping_status")
+            not in {"observed", "partially_observed"}
+            or not isinstance(units, list)
+        ):
+            continue
+        source_unit_mapping_pages_observed += 1
+        if page.get("source_unit_mapping_status") == "partially_observed":
+            source_unit_mapping_pages_partial += 1
+        for unit in units:
+            if not isinstance(unit, Mapping):
+                source_unit_mapping_unidentified.append(
+                    {
+                        "source_image_path": page.get("image_path") or None,
+                        "source_image_name": page.get("image_name"),
+                        "source_unit_id": None,
+                        "status": "unjudged",
+                        "reason_code": "source_unit_record_invalid",
+                        "output_unit_ids": [],
+                        "output_group_ids": [],
+                        "output_units": [],
+                        "output_relation_status": "unavailable",
+                        "output_relation_reason_code": "source_unit_record_invalid",
+                        "semantic_quality_status": "unjudged",
+                    }
+                )
+                continue
+            source_unit_id = unit.get("source_unit_id")
+            source_unit_id = (
+                source_unit_id
+                if isinstance(source_unit_id, str) and source_unit_id
+                else None
+            )
+            source_image_path = unit.get("source_image_path")
+            if "source_image_path" not in unit:
+                source_image_path = page.get("image_path")
+            elif not isinstance(source_image_path, str) or not source_image_path:
+                source_image_path = None
+            source_image_name = unit.get("source_image_name")
+            source_image_name = (
+                source_image_name
+                if isinstance(source_image_name, str) and source_image_name
+                else os.path.basename(source_image_path)
+                if isinstance(source_image_path, str) and source_image_path
+                else None
+            )
+            status = unit.get("status")
+            if status not in source_unit_statuses:
+                status = "unjudged"
+            reason_code = unit.get("reason_code")
+            reason_code = (
+                reason_code
+                if isinstance(reason_code, str) and reason_code
+                else None
+            )
+            output_unit_ids = unit.get("output_unit_ids")
+            output_unit_ids = (
+                [value for value in output_unit_ids if isinstance(value, str) and value]
+                if isinstance(output_unit_ids, list)
+                else []
+            )
+            relation_status = unit.get("output_relation_status")
+            if relation_status not in {"observed", "unavailable"}:
+                relation_status = "observed" if output_unit_ids else "unavailable"
+            relation_reason = unit.get("output_relation_reason_code")
+            relation_reason = (
+                relation_reason
+                if isinstance(relation_reason, str) and relation_reason
+                else None
+            )
+            if relation_status == "unavailable" and relation_reason is None:
+                relation_reason = "output_relation_not_observed"
+            provided_output_units = unit.get("output_units")
+            output_units = [
+                {
+                    "output_unit_id": output["output_unit_id"],
+                    "output_page_image_path": output.get(
+                        "output_page_image_path"
+                    ) or None,
+                    "output_page_path": output.get("output_page_path")
+                    or output_path_by_image_path.get(
+                        str(output.get("output_page_image_path") or "")
+                    ),
+                    "output_fallback_kind": output.get("output_fallback_kind") or None,
+                }
+                for output in list(provided_output_units or [])
+                if isinstance(output, Mapping)
+                and isinstance(output.get("output_unit_id"), str)
+                and output.get("output_unit_id")
+            ] if isinstance(provided_output_units, list) and provided_output_units else [
+                {
+                    "output_unit_id": output_id,
+                    "output_page_image_path": page.get("image_path") or None,
+                    "output_page_path": page.get("output_path") or None,
+                    "output_fallback_kind": page.get("fallback_kind") or None,
+                }
+                for output_id in output_unit_ids
+            ]
+            output_unit_ids = list(
+                dict.fromkeys(
+                    output_unit_ids
+                    + [output["output_unit_id"] for output in output_units]
+                )
+            )
+            output_group_ids = unit.get("output_group_ids")
+            output_group_ids = (
+                list(
+                    dict.fromkeys(
+                        value
+                        for value in output_group_ids
+                        if isinstance(value, str) and value
+                    )
+                )
+                if isinstance(output_group_ids, list)
+                else []
+            )
+            entry = {
+                "source_image_path": source_image_path or None,
+                "source_image_name": source_image_name,
+                "source_unit_id": source_unit_id,
+                "status": status,
+                "reason_code": reason_code,
+                "output_unit_ids": output_unit_ids,
+                "output_group_ids": output_group_ids,
+                "output_units": output_units,
+                "output_relation_status": relation_status,
+                "output_relation_reason_code": relation_reason,
+                "semantic_quality_status": "unjudged",
+            }
+            if source_unit_id is None:
+                source_unit_mapping_unidentified.append(entry)
+                continue
+            identity = (source_image_path, source_unit_id)
+            existing = source_unit_mapping_by_identity.get(identity)
+            if existing is None:
+                source_unit_mapping_by_identity[identity] = entry
+                continue
+            for output in output_units:
+                if output not in existing["output_units"]:
+                    existing["output_units"].append(output)
+                if output["output_unit_id"] not in existing["output_unit_ids"]:
+                    existing["output_unit_ids"].append(output["output_unit_id"])
+            for group_id in output_group_ids:
+                if group_id not in existing["output_group_ids"]:
+                    existing["output_group_ids"].append(group_id)
+            if existing["status"] != status:
+                existing["status"] = "unjudged"
+                existing["reason_code"] = "source_unit_status_conflict"
+            elif existing["reason_code"] != reason_code:
+                existing["reason_code"] = "source_unit_reason_conflict"
+            if relation_status == "observed":
+                existing["output_relation_status"] = "observed"
+                existing["output_relation_reason_code"] = None
+    source_unit_mapping_entries = [
+        *source_unit_mapping_by_identity.values(),
+        *source_unit_mapping_unidentified,
+    ]
+    source_unit_mapping_status = (
+        "unavailable"
+        if not page_outcomes or source_unit_mapping_pages_observed == 0
+        else "observed"
+        if source_unit_mapping_pages_observed == len(page_outcomes)
+        and source_unit_mapping_pages_partial == 0
+        else "partially_observed"
+    )
     quality_status = (
         "failed"
         if failed_unit_count or processing_status == "failed"
@@ -377,6 +582,17 @@ def build_run_report(
         "stage_work": _stage_work_rows(telemetry_data),
         "operations": _operation_rows(telemetry_data),
         "output": output,
+        "source_unit_mapping": {
+            "status": source_unit_mapping_status,
+            "reason_code": (
+                None
+                if source_unit_mapping_status == "observed"
+                else "source_unit_mapping_not_fully_observed"
+            ),
+            "unit": "detected_text_blocks",
+            "semantic_quality_status": "unjudged",
+            "entries": source_unit_mapping_entries,
+        },
         "quality": {
             "status": quality_status,
             "review_page_count": review_page_count,

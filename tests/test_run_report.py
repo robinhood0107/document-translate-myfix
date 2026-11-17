@@ -87,6 +87,217 @@ class DurationFormatTests(unittest.TestCase):
 
 
 class BuildRunReportTests(unittest.TestCase):
+    def test_source_unit_processing_status_gates_page_quality(self) -> None:
+        shared = {
+            "source_unit_index": 0,
+            "image_path": "example_source_chapter/page-001.png",
+            "image_name": "page-001.png",
+            "output_path": "example_output/page-001.png",
+            "output_status": "measured",
+            "quality_status": "completed",
+            "source_unit_mapping_status": "observed",
+        }
+        output_summary = {
+            "input_count": 1,
+            "output_count": 1,
+            "fallback_count": 0,
+            "fallbacks": [],
+            "missing": [],
+        }
+        terminal = {
+            "terminal_status": "completed",
+            "processing_status": "completed",
+            "report_status": "completed",
+            "cleanup_status": "completed",
+        }
+        failed = build_run_report(
+            telemetry=None,
+            total_wall_sec=1.0,
+            page_outcomes=[
+                {
+                    **shared,
+                    "source_units": [
+                        {
+                            "source_unit_id": "example-truncated-unit",
+                            "status": "failed",
+                            "reason_code": "ocr_truncated",
+                            "semantic_quality_status": "unjudged",
+                        },
+                        {
+                            "source_unit_id": "example-translated-unit",
+                            "status": "translated",
+                            "semantic_quality_status": "unjudged",
+                        },
+                    ],
+                }
+            ],
+            output_summary=output_summary,
+            **terminal,
+        )
+        self.assertEqual(failed["quality"]["status"], "failed")
+        self.assertEqual(failed["terminal_status"], "failed")
+        self.assertEqual(failed["quality"]["required_units"]["value"], 1)
+        self.assertEqual(failed["quality"]["required_units"]["unit"], "source_pages")
+        self.assertEqual(failed["quality"]["failed_units"]["value"], 1)
+        self.assertEqual(failed["quality"]["failed_units"]["unit"], "source_pages")
+        self.assertEqual(failed["pages"][0]["quality_status"], "failed")
+
+        review = build_run_report(
+            telemetry=None,
+            total_wall_sec=1.0,
+            page_outcomes=[
+                {
+                    **shared,
+                    "source_units": [
+                        {
+                            "source_unit_id": "example-review-unit",
+                            "status": "unjudged",
+                            "reason_code": "ocr_review_required",
+                            "semantic_quality_status": "unjudged",
+                        }
+                    ],
+                }
+            ],
+            output_summary=output_summary,
+            **terminal,
+        )
+        self.assertEqual(review["quality"]["status"], "review_required")
+        self.assertEqual(review["quality"]["review_units"]["value"], 1)
+        self.assertEqual(review["terminal_status"], "incomplete")
+        self.assertEqual(review["pages"][0]["quality_status"], "review_required")
+
+        unobserved = build_run_report(
+            telemetry=None,
+            total_wall_sec=1.0,
+            page_outcomes=[
+                {
+                    **shared,
+                    "source_units": [
+                        {
+                            "source_unit_id": "example-unobserved-unit",
+                            "status": "unjudged",
+                            "reason_code": "translation_not_observed",
+                            "semantic_quality_status": "unjudged",
+                        }
+                    ],
+                }
+            ],
+            output_summary=output_summary,
+            **terminal,
+        )
+        self.assertEqual(unobserved["quality"]["status"], "incomplete")
+        self.assertEqual(unobserved["quality"]["unjudged_units"]["value"], 1)
+        self.assertEqual(unobserved["terminal_status"], "incomplete")
+
+        preserved_and_skipped = build_run_report(
+            telemetry=None,
+            total_wall_sec=1.0,
+            page_outcomes=[
+                {
+                    **shared,
+                    "source_units": [
+                        {
+                            "source_unit_id": "example-translated-unit",
+                            "status": "translated",
+                            "semantic_quality_status": "unjudged",
+                        },
+                        {
+                            "source_unit_id": "example-preserved-unit",
+                            "status": "preserved",
+                            "reason_code": "preserve_policy",
+                            "semantic_quality_status": "unjudged",
+                        },
+                        {
+                            "source_unit_id": "example-skipped-unit",
+                            "status": "intentionally_skipped",
+                            "reason_code": "embedded_ui_cluster",
+                            "semantic_quality_status": "unjudged",
+                        },
+                    ],
+                }
+            ],
+            output_summary=output_summary,
+            **terminal,
+        )
+        self.assertEqual(preserved_and_skipped["quality"]["status"], "completed")
+        self.assertEqual(preserved_and_skipped["quality"]["failed_units"]["value"], 0)
+        self.assertEqual(preserved_and_skipped["terminal_status"], "completed")
+
+    def test_source_unit_mapping_keeps_relations_and_operation_statuses_separate(self) -> None:
+        source_units = [
+            {
+                "source_unit_id": "source-a",
+                "status": "translated",
+                "reason_code": None,
+                "output_unit_ids": ["output-a", "output-b"],
+                "semantic_quality_status": "unjudged",
+            },
+            {
+                "source_unit_id": "source-b",
+                "status": "preserved",
+                "reason_code": "preserve_policy",
+                "output_unit_ids": ["output-b"],
+                "semantic_quality_status": "unjudged",
+            },
+            {
+                "source_unit_id": "source-c",
+                "status": "intentionally_skipped",
+                "reason_code": "embedded_ui_cluster",
+                "output_unit_ids": [],
+                "semantic_quality_status": "unjudged",
+            },
+            {
+                "source_unit_id": "source-d",
+                "status": "failed",
+                "reason_code": "ocr_truncated",
+                "output_unit_ids": [],
+                "semantic_quality_status": "unjudged",
+            },
+            {
+                "source_unit_id": "source-e",
+                "status": "unjudged",
+                "reason_code": None,
+                "output_unit_ids": [],
+                "semantic_quality_status": "unjudged",
+            },
+        ]
+        report = build_run_report(
+            telemetry=None,
+            total_wall_sec=None,
+            page_outcomes=[
+                {
+                    "source_unit_index": 0,
+                    "image_path": "C:/input/example.png",
+                    "image_name": "example.png",
+                    "output_path": "C:/output/example.png",
+                    "output_status": "measured",
+                    "quality_status": "unjudged",
+                    "source_unit_mapping_status": "observed",
+                    "source_units": source_units,
+                }
+            ],
+            output_summary={
+                "input_count": 1,
+                "output_count": 1,
+                "fallback_count": 0,
+                "fallbacks": [],
+                "missing": [],
+            },
+        )
+
+        mapping = report["source_unit_mapping"]
+        self.assertEqual(mapping["status"], "observed")
+        self.assertEqual(
+            [item["source_unit_id"] for item in mapping["entries"]],
+            ["source-a", "source-b", "source-c", "source-d", "source-e"],
+        )
+        self.assertEqual(mapping["entries"][0]["output_unit_ids"], ["output-a", "output-b"])
+        self.assertEqual(mapping["entries"][3]["status"], "failed")
+        self.assertEqual(mapping["entries"][3]["reason_code"], "ocr_truncated")
+        self.assertIsNone(mapping["entries"][4]["reason_code"])
+        self.assertEqual(report["quality"]["required_units"]["value"], 1)
+        self.assertEqual(report["quality"]["required_units"]["unit"], "source_pages")
+
     def test_terminal_report_preserves_telemetry_and_source_unit_outcomes(self) -> None:
         telemetry = {
             "status": "failed",
@@ -406,7 +617,7 @@ class WriteRunReportTests(unittest.TestCase):
         )
         processor._click_to_now_seconds = lambda: 1.0
         processor._run_started_wall_text = lambda: "2026-11-17 00:00:00"
-        processor._page_outcomes = lambda _pages: [{
+        processor._page_outcomes = lambda _pages, **_kwargs: [{
             "source_unit_index": 0,
             "image_name": "example_source.png",
             "output_path": None,

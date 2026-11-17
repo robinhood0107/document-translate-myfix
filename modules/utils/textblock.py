@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Any, List, Mapping, Tuple
 import numpy as np
 import copy
 import re
@@ -22,6 +22,158 @@ def ensure_text_block_id(block) -> str:
         block_id = new_text_block_id()
         setattr(block, "block_id", block_id)
     return block_id
+
+
+def text_block_identity_map(
+    block: Any,
+    *,
+    default_image_path: str | None = None,
+) -> dict[str, Any]:
+    block_id = ensure_text_block_id(block)
+    canonical_id = str(getattr(block, "canonical_block_id", "") or block_id)
+    diagnostics = getattr(block, "merge_split_diagnostics", {}) or {}
+    diagnostics = diagnostics if isinstance(diagnostics, Mapping) else {}
+    explicit_sources = diagnostics.get("source_units")
+    sources: list[dict[str, str | None]] = []
+    seen: set[tuple[str, str | None]] = set()
+
+    def add_source(source_id: Any, image_path: Any) -> None:
+        normalized_id = str(source_id or "").strip()
+        if not normalized_id:
+            return
+        normalized_path = (
+            image_path
+            if isinstance(image_path, str) and image_path
+            else None
+        )
+        key = (normalized_id, normalized_path)
+        if key in seen:
+            return
+        seen.add(key)
+        sources.append(
+            {"block_id": normalized_id, "image_path": normalized_path}
+        )
+
+    if isinstance(explicit_sources, list):
+        for source in explicit_sources:
+            if isinstance(source, Mapping):
+                add_source(source.get("block_id"), source.get("image_path"))
+    else:
+        add_source(block_id, default_image_path)
+
+    aliases = getattr(block, "duplicate_alias_block_ids", []) or []
+    if isinstance(aliases, list):
+        for alias_id in aliases:
+            add_source(alias_id, default_image_path)
+
+    return {
+        "output_unit_id": canonical_id,
+        "output_group_id": str(getattr(block, "compound_group_id", "") or "")
+        or None,
+        "source_units": sources,
+    }
+
+
+def text_block_source_output_rows(
+    blocks,
+    *,
+    default_image_path: str | None,
+    operation_statuses: Mapping[str, Mapping[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    rows: list[dict[str, Any]] = []
+    partially_observed = False
+    allowed_statuses = {
+        "translated",
+        "preserved",
+        "intentionally_skipped",
+        "failed",
+        "unjudged",
+    }
+    for block in list(blocks or []):
+        try:
+            identity = text_block_identity_map(
+                block,
+                default_image_path=default_image_path,
+            )
+        except (AttributeError, TypeError):
+            identity = {
+                "output_unit_id": None,
+                "output_group_id": None,
+                "source_units": [],
+            }
+            partially_observed = True
+        output_id = identity.get("output_unit_id")
+        output_id = output_id if isinstance(output_id, str) and output_id else None
+        group_id = identity.get("output_group_id")
+        operation = (
+            operation_statuses.get(output_id)
+            if output_id and isinstance(operation_statuses, Mapping)
+            else None
+        )
+        if isinstance(operation, Mapping):
+            status = operation.get("status", "unjudged")
+            reason_code = operation.get("reason_code")
+        elif str(getattr(block, "processing_action", "") or "") == "preserve":
+            status = "preserved"
+            reason_code = "processing_action_preserve"
+        elif str(getattr(block, "processing_action", "") or "") == "review":
+            status = "unjudged"
+            reason_code = "review_required"
+        else:
+            status = "unjudged"
+            reason_code = "operation_not_observed"
+        if status not in allowed_statuses:
+            status = "unjudged"
+            reason_code = "operation_status_not_observed"
+        source_units = identity.get("source_units")
+        if not isinstance(source_units, list) or not source_units:
+            source_units = [
+                {
+                    "block_id": None,
+                    "image_path": None,
+                }
+            ]
+            status = "unjudged"
+            reason_code = "source_lineage_not_observed"
+            partially_observed = True
+        for source_unit in source_units:
+            source_id = source_unit.get("block_id") if isinstance(source_unit, Mapping) else None
+            source_id = source_id if isinstance(source_id, str) and source_id else None
+            source_path = source_unit.get("image_path") if isinstance(source_unit, Mapping) else None
+            source_path = source_path if isinstance(source_path, str) and source_path else None
+            if source_id is None or source_path is None:
+                partially_observed = True
+            rows.append(
+                {
+                    "source_unit_id": source_id,
+                    "source_image_path": source_path,
+                    "status": status,
+                    "reason_code": reason_code,
+                    "output_unit_ids": [output_id] if output_id else [],
+                    "output_group_ids": [group_id] if group_id else [],
+                    "output_units": (
+                        [
+                            {
+                                "output_unit_id": output_id,
+                                "output_page_image_path": default_image_path,
+                                "output_fallback_kind": None,
+                            }
+                        ]
+                        if output_id
+                        else []
+                    ),
+                    "output_relation_status": (
+                        "observed" if output_id else "unavailable"
+                    ),
+                    "output_relation_reason_code": (
+                        None
+                        if output_id
+                        else "output_unit_identity_not_observed"
+                    ),
+                    "semantic_quality_status": "unjudged",
+                }
+            )
+    return rows, partially_observed
 
 class TextBlock(object):
     """

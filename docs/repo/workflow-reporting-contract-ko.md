@@ -30,6 +30,7 @@
 ## 품질과 자원 수치
 
 - 분모는 처리 블록 수가 아니라 원본에서 평가 대상으로 확정한 필수 source unit을 기준으로 한다. source와 결과의 대응, 누락·추가·중복·분할·합침, 오삭제, 실패, 미판정, 미측정을 각각 남긴다.
+- `source_unit_mapping`은 실행 중 감지해 관측한 TextBlock만 대상으로, canonical/alias/merge 계보와 실제 output ID의 다대다 관계를 기록한다. 상태는 `translated`, `preserved`, `intentionally_skipped`, `failed`, `unjudged`로 나누며, 의미 품질 미판정과 미관측(`null`과 사유)을 처리 실패와 구분한다. 실제 처리 실패·검토 필요·미완료는 정상 완료로 집계하지 않고 재시도 대상과 자동 내보내기 허용 판정에 반영한다. 글자가 없는 fallback은 이미지 보존만 뜻하며 렌더 성공으로 보지 않는다.
 - 번역·OCR·렌더 결과를 선택할 때는 필수 내용 보존과 원본 대응을 먼저 확인한다. 품질과 처리 성능은 서로 다른 축으로 기록하고 Pareto 선택을 설명한다. 블록 수는 진단 수치일 뿐 품질의 유일한 점수나 분모가 아니다.
 - 메모리 점검에는 측정 대상과 시각, process RSS 현재·최대값과 sample 수, GPU별 VRAM·util sample, CPU 또는 WSL swap 사용 여부, 정리 뒤 관측 결과를 적는다. 계측이 꺼졌거나 지원되지 않으면 0 대신 `null`과 상태·source·이유를 남긴다.
 - 제품 코드에서 기존 Factory, Adapter, Command 경로와 resource lifecycle을 먼저 확인하고 재사용한다. 보고·순위·preset·raw 결과 처리는 제품 business logic에 넣지 않는다.

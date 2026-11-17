@@ -125,6 +125,10 @@ _INPAINT_BLOCK_STATE_FIELDS = (
 
 _DETECTION_BLOCK_FIELDS = (
     "block_id",
+    "canonical_block_id",
+    "duplicate_alias_block_ids",
+    "compound_group_id",
+    "merge_split_diagnostics",
     "xyxy",
     "segm_pts",
     "bubble_xyxy",
@@ -531,6 +535,37 @@ def _block_from_detection_record(value: Any) -> TextBlock:
         raise ValueError("Detection checkpoint block has invalid coordinates.")
     if not isinstance(getattr(block, "text_class", ""), str):
         raise ValueError("Detection checkpoint block has an invalid class.")
+    if not isinstance(getattr(block, "canonical_block_id", ""), str) or not getattr(
+        block, "canonical_block_id", ""
+    ):
+        raise ValueError("Detection checkpoint block has an invalid canonical ID.")
+    aliases = getattr(block, "duplicate_alias_block_ids", None)
+    if (
+        not isinstance(aliases, list)
+        or any(not isinstance(alias, str) or not alias for alias in aliases)
+        or len(set(aliases)) != len(aliases)
+    ):
+        raise ValueError("Detection checkpoint block has invalid alias IDs.")
+    if not isinstance(getattr(block, "compound_group_id", ""), str):
+        raise ValueError("Detection checkpoint block has an invalid group ID.")
+    merge_split = getattr(block, "merge_split_diagnostics", None)
+    if not isinstance(merge_split, Mapping):
+        raise ValueError("Detection checkpoint block has invalid lineage data.")
+    source_units = merge_split.get("source_units")
+    if source_units is not None and (
+        not isinstance(source_units, list)
+        or any(
+            not isinstance(unit, Mapping)
+            or not isinstance(unit.get("block_id"), str)
+            or not unit.get("block_id")
+            or (
+                unit.get("image_path") is not None
+                and not isinstance(unit.get("image_path"), str)
+            )
+            for unit in source_units
+        )
+    ):
+        raise ValueError("Detection checkpoint block has invalid source units.")
     return block
 
 

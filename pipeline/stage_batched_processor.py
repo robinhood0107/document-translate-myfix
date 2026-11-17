@@ -63,6 +63,9 @@ from modules.ocr.persistent_cache import (
     snapshot_raw_ocr_result,
 )
 from modules.ocr.common.result_contract import (
+    PROCESSING_ACTION_PRESERVE,
+    PROCESSING_ACTION_REVIEW,
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
     canonicalize_exact_duplicate_blocks,
     finalize_ocr_processing_contracts,
     select_translate_inpaint_blocks,
@@ -118,6 +121,9 @@ from modules.utils.image_utils import (
 from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, language_codes
 from modules.utils.ocr_debug import (
+    OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER,
+    OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
+    OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
     all_empty_blocks_are_rejected,
     drop_embedded_ui_ocr_blocks,
     drop_rejected_empty_ocr_blocks,
@@ -132,7 +138,11 @@ from pipeline.inpaint_cleanup_job import (
 )
 from modules.utils.run_report import build_run_report, write_run_report
 from modules.utils.text_normalization import RENDER_NORMALIZABLE_GLYPHS
-from modules.utils.textblock import ensure_text_block_id, sort_blk_list
+from modules.utils.textblock import (
+    ensure_text_block_id,
+    sort_blk_list,
+    text_block_identity_map,
+)
 from modules.utils.translator_utils import get_raw_text, get_raw_translation
 
 from .batch_processor import BatchProcessor
@@ -187,6 +197,9 @@ class StagePageContext:
     project_render_fingerprint: str = ""
     project_render_checkpoint_status: str = "disabled"
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
+    source_unit_outcomes: dict[str, dict[str, Any]] | None = None
+    source_unit_processing_ids: dict[str, list[str]] = field(default_factory=dict)
+    source_unit_mapping_reason_code: str | None = None
     ocr_canonicalization_summary: dict[str, Any] = field(
         default_factory=dict
     )
@@ -2044,6 +2057,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._raise_if_cancelled()
 
     def _run_primary_ocr(self, ctx: StagePageContext, policy: dict[str, Any]) -> dict[str, Any]:
+        self._record_source_unit_roster(ctx)
         settings_page = self.main_page.settings_page
         source_lang_english = self._source_lang_english(ctx.source_lang)
         source_lang_code = language_codes.get(source_lang_english, "en")
@@ -2245,6 +2259,97 @@ class StageBatchedProcessor(BatchProcessor):
         ctx.ocr_processing_summary = finalize_ocr_processing_contracts(
             routed_blocks
         )
+        self._record_source_output_relations(
+            ctx,
+            routed_blocks,
+            output_observed=False,
+        )
+        rejected_ids = set()
+        for block in rejected_empty_blocks:
+            try:
+                rejected_ids.add(ensure_text_block_id(block))
+            except (AttributeError, TypeError):
+                ctx.source_unit_mapping_reason_code = "block_identity_not_observed"
+        embedded_ui_ids = set()
+        for block in embedded_ui_blocks:
+            try:
+                embedded_ui_ids.add(ensure_text_block_id(block))
+            except (AttributeError, TypeError):
+                ctx.source_unit_mapping_reason_code = "block_identity_not_observed"
+        for block in routed_blocks:
+            try:
+                block_id = ensure_text_block_id(block)
+            except (AttributeError, TypeError):
+                ctx.source_unit_mapping_reason_code = "block_identity_not_observed"
+                continue
+            empty_reason = str(getattr(block, "ocr_empty_reason", "") or "")
+            text_class = str(getattr(block, "text_class", "") or "")
+            if (
+                block_id in embedded_ui_ids
+                or empty_reason == OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER
+            ):
+                self._set_source_unit_status(
+                    ctx,
+                    block_id,
+                    "intentionally_skipped",
+                    "embedded_ui_cluster",
+                )
+            elif block_id in rejected_ids:
+                if empty_reason == OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE or (
+                    text_class == "text_free"
+                    and empty_reason == OCR_EMPTY_REASON_NON_TEXT_RESPONSE
+                ):
+                    self._set_source_unit_status(
+                        ctx,
+                        block_id,
+                        "preserved",
+                        "text_free_ocr_review",
+                    )
+                else:
+                    reason_code = (
+                        "ocr_truncated"
+                        if empty_reason
+                        == PaddleOCRVLEngine.TRUNCATED_OCR_REASON
+                        or str(getattr(block, "ocr_reject_reason", "") or "")
+                        == PaddleOCRVLEngine.TRUNCATED_OCR_REASON
+                        else "ocr_empty"
+                    )
+                    self._set_source_unit_status(
+                        ctx,
+                        block_id,
+                        "failed",
+                        reason_code,
+                    )
+            elif str(getattr(block, "processing_action", "") or "") == (
+                PROCESSING_ACTION_PRESERVE
+            ):
+                self._set_source_unit_status(
+                    ctx,
+                    block_id,
+                    "preserved",
+                    str(
+                        getattr(block, "processing_decision_source", "")
+                        or "processing_action_preserve"
+                    ),
+                )
+            elif str(getattr(block, "processing_action", "") or "") == (
+                PROCESSING_ACTION_REVIEW
+            ):
+                self._set_source_unit_status(
+                    ctx,
+                    block_id,
+                    "unjudged",
+                    "ocr_review_required",
+                )
+            elif str(getattr(block, "processing_action", "") or "") == (
+                PROCESSING_ACTION_TRANSLATE_INPAINT
+            ):
+                self._set_source_unit_status(
+                    ctx,
+                    block_id,
+                    "unjudged",
+                    "translation_not_observed",
+                )
         page_profile = dict(page_profile or {})
         page_profile["ocr_processing_contract"] = dict(
             ctx.ocr_processing_summary
@@ -2386,8 +2491,184 @@ class StageBatchedProcessor(BatchProcessor):
             ctx.project_ocr_checkpoint_status = "stored"
 
     @staticmethod
+    def _add_source_unit_outcome(
+        ctx: StagePageContext,
+        source_unit_id: object,
+        source_image_path: str | None,
+    ) -> None:
+        unit_id = str(source_unit_id or "").strip()
+        if not unit_id:
+            return
+        if ctx.source_unit_outcomes is None:
+            ctx.source_unit_outcomes = {}
+        row = ctx.source_unit_outcomes.setdefault(
+            unit_id,
+            {
+                "source_unit_id": unit_id,
+                "source_image_path": source_image_path,
+                "source_image_name": (
+                    os.path.basename(source_image_path)
+                    if source_image_path
+                    else None
+                ),
+                "status": "unjudged",
+                "reason_code": "operation_not_observed",
+                "output_unit_ids": [],
+                "output_group_ids": [],
+                "output_relation_status": "unavailable",
+                "output_relation_reason_code": "output_relation_not_observed",
+                "semantic_quality_status": "unjudged",
+            },
+        )
+        if source_image_path and row.get("source_image_path") is None:
+            row["source_image_path"] = source_image_path
+            row["source_image_name"] = os.path.basename(source_image_path)
+
+    @staticmethod
+    def _record_source_unit_roster(ctx: StagePageContext) -> None:
+        if ctx.source_unit_outcomes is not None or ctx.failed_stage:
+            return
+        ctx.source_unit_outcomes = {}
+        for block in list(ctx.blk_list or []):
+            try:
+                identity = text_block_identity_map(
+                    block,
+                    default_image_path=ctx.image_path,
+                )
+            except (AttributeError, TypeError):
+                ctx.source_unit_mapping_reason_code = (
+                    "block_identity_not_observed"
+                )
+                continue
+            source_units = identity["source_units"]
+            if not source_units:
+                ctx.source_unit_mapping_reason_code = (
+                    "source_lineage_not_observed"
+                )
+            for source_unit in source_units:
+                StageBatchedProcessor._add_source_unit_outcome(
+                    ctx,
+                    source_unit["block_id"],
+                    source_unit["image_path"],
+                )
+
+    @staticmethod
+    def _record_source_output_relations(
+        ctx: StagePageContext,
+        blocks: list[Any],
+        *,
+        output_observed: bool = True,
+    ) -> None:
+        if ctx.source_unit_outcomes is None:
+            return
+        for block in list(blocks or []):
+            try:
+                identity = text_block_identity_map(
+                    block,
+                    default_image_path=ctx.image_path,
+                )
+            except (AttributeError, TypeError):
+                ctx.source_unit_mapping_reason_code = (
+                    "block_identity_not_observed"
+                )
+                continue
+            output_id = str(identity["output_unit_id"] or "")
+            group_id = identity.get("output_group_id")
+            source_units = identity["source_units"]
+            if not source_units:
+                ctx.source_unit_mapping_reason_code = (
+                    "source_lineage_not_observed"
+                )
+            for source_unit in source_units:
+                source_id = str(source_unit.get("block_id") or "").strip()
+                if not source_id:
+                    continue
+                StageBatchedProcessor._add_source_unit_outcome(
+                    ctx,
+                    source_id,
+                    source_unit.get("image_path"),
+                )
+                row = ctx.source_unit_outcomes[source_id]
+                if not output_observed:
+                    processing_ids = ctx.source_unit_processing_ids.setdefault(
+                        source_id,
+                        [],
+                    )
+                    if output_id and output_id not in processing_ids:
+                        processing_ids.append(output_id)
+                    continue
+                output_ids = row["output_unit_ids"]
+                if output_id not in output_ids:
+                    output_ids.append(output_id)
+                if group_id:
+                    group_ids = row.setdefault("output_group_ids", [])
+                    if group_id not in group_ids:
+                        group_ids.append(group_id)
+                row["output_relation_status"] = "observed"
+                row["output_relation_reason_code"] = None
+
+    @staticmethod
+    def _set_source_unit_status(
+        ctx: StagePageContext,
+        block_id: str,
+        status: str,
+        reason_code: str | None = None,
+    ) -> None:
+        if ctx.source_unit_outcomes is None:
+            return
+        for source_unit_id, row in ctx.source_unit_outcomes.items():
+            if (
+                source_unit_id == block_id
+                or block_id in row.get("output_unit_ids", [])
+                or block_id
+                in ctx.source_unit_processing_ids.get(source_unit_id, [])
+            ):
+                row["status"] = status
+                row["reason_code"] = reason_code
+                row["semantic_quality_status"] = "unjudged"
+
+    @staticmethod
+    def _record_source_unit_translation_results(
+        ctx: StagePageContext,
+        expected_blocks: list[Any],
+        translated_blocks: list[Any],
+    ) -> None:
+        translated_by_id = {
+            ensure_text_block_id(block): block
+            for block in list(translated_blocks or [])
+        }
+        for block in list(expected_blocks or []):
+            block_id = ensure_text_block_id(block)
+            translated = translated_by_id.get(block_id)
+            if translated is None:
+                StageBatchedProcessor._set_source_unit_status(
+                    ctx,
+                    block_id,
+                    "unjudged",
+                    "translation_result_identity_not_observed",
+                )
+                continue
+            translated_value = getattr(translated, "translation", "") or getattr(
+                translated,
+                "rich_text",
+                "",
+            )
+            has_translation = (
+                any(str(value or "").strip() for value in translated_value)
+                if isinstance(translated_value, (list, tuple))
+                else bool(str(translated_value or "").strip())
+            )
+            StageBatchedProcessor._set_source_unit_status(
+                ctx,
+                block_id,
+                "translated" if has_translation else "failed",
+                None if has_translation else "translation_output_missing",
+            )
+
+    @staticmethod
     def _canonicalize_ocr_inputs(pages: list[StagePageContext]) -> None:
         for ctx in pages:
+            StageBatchedProcessor._record_source_unit_roster(ctx)
             if ctx.failed_stage or ctx.no_text_detected or not ctx.blk_list:
                 continue
             canonical_blocks, summary = canonicalize_exact_duplicate_blocks(
@@ -2399,6 +2680,11 @@ class StageBatchedProcessor(BatchProcessor):
             )
             ctx.blk_list = canonical_blocks
             ctx.ocr_canonicalization_summary = summary
+            StageBatchedProcessor._record_source_output_relations(
+                ctx,
+                canonical_blocks,
+                output_observed=False,
+            )
             duplicate_count = int(summary.get("duplicate_alias_count", 0) or 0)
             if duplicate_count:
                 logger.info(
@@ -3743,11 +4029,39 @@ class StageBatchedProcessor(BatchProcessor):
         gemma_runtime_required = False
         planning_started_at = time.perf_counter()
         for ctx in pages:
+            self._record_source_unit_roster(ctx)
+            self._record_source_output_relations(
+                ctx,
+                ctx.blk_list,
+                output_observed=False,
+            )
             if ctx.failed_stage or ctx.no_text_detected:
                 continue
             ctx.translation_blocks = select_translate_inpaint_blocks(
                 ctx.blk_list
             )
+            for block in ctx.blk_list:
+                block_id = ensure_text_block_id(block)
+                action = str(
+                    getattr(block, "processing_action", "") or ""
+                )
+                if action == PROCESSING_ACTION_PRESERVE:
+                    self._set_source_unit_status(
+                        ctx,
+                        block_id,
+                        "preserved",
+                        str(
+                            getattr(block, "processing_decision_source", "")
+                            or "processing_action_preserve"
+                        ),
+                    )
+                elif action == PROCESSING_ACTION_REVIEW:
+                    self._set_source_unit_status(
+                        ctx,
+                        block_id,
+                        "unjudged",
+                        "review_required",
+                    )
             if not ctx.translation_blocks:
                 ctx.project_translation_checkpoint_status = "skipped"
                 ctx.project_translation_fingerprint = (
@@ -3954,6 +4268,11 @@ class StageBatchedProcessor(BatchProcessor):
                         raise RuntimeError(
                             "Translation checkpoint returned empty JSON."
                         )
+                    self._record_source_unit_translation_results(
+                        ctx,
+                        ctx.translation_blocks,
+                        ctx.translation_blocks,
+                    )
                     continue
                 except Exception as exc:
                     self._mark_page_failed(
@@ -4009,7 +4328,7 @@ class StageBatchedProcessor(BatchProcessor):
                         "block_count": len(ctx.translation_blocks),
                     },
                 ):
-                    _, translation_cache_status = translator.translate_with_cache_manager(
+                    translated_blocks, translation_cache_status = translator.translate_with_cache_manager(
                         ctx.translation_blocks,
                         ctx.image,
                         extra_context,
@@ -4088,10 +4407,39 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 if (not raw_text_obj) or (not translated_text_obj):
                     raise RuntimeError("Translator returned empty JSON.")
+                self._record_source_unit_translation_results(
+                    ctx,
+                    ctx.translation_blocks,
+                    translated_blocks,
+                )
                 self._raise_if_cancelled()
             except OperationCancelledError:
                 raise
             except Exception as exc:
+                failure_kind = str(
+                    getattr(exc, "block_failure_kind", "") or ""
+                )
+                failed_block_ids = {
+                    str(block_id)
+                    for block_id in list(getattr(exc, "block_ids", []) or [])
+                    if str(block_id)
+                }
+                for block in ctx.translation_blocks:
+                    block_id = ensure_text_block_id(block)
+                    if block_id in failed_block_ids:
+                        self._set_source_unit_status(
+                            ctx,
+                            block_id,
+                            "failed",
+                            failure_kind or "translation_failed",
+                        )
+                    else:
+                        self._set_source_unit_status(
+                            ctx,
+                            block_id,
+                            "unjudged",
+                            "translation_failure_without_unit_attribution",
+                        )
                 self._mark_page_failed(
                     ctx,
                     index=index,
@@ -4927,29 +5275,83 @@ class StageBatchedProcessor(BatchProcessor):
             return max(time.monotonic() - float(run_started), 0.0)
         return 0.0
 
-    def _page_outcomes(self, pages: list[StagePageContext]) -> list[dict[str, Any]]:
-        return [
-            {
-                "source_unit_index": index,
-                "image_path": ctx.image_path,
-                "image_name": ctx.image_name,
-                "output_path": ctx.output_path,
-                "output_status": "measured" if ctx.output_path else "unmeasured",
-                "fallback_kind": ctx.output_fallback_kind,
-                "failed_stage": ctx.failed_stage,
-                "failed_reason": ctx.failed_reason,
-                "no_text_detected": bool(ctx.no_text_detected),
-                "block_count": len(ctx.blk_list or []),
-                "quality_status": (
-                    "failed"
-                    if ctx.failed_stage
-                    else "completed"
-                    if ctx.output_path
-                    else "unjudged"
-                ),
-            }
-            for index, ctx in enumerate(pages)
-        ]
+    def _page_outcomes(
+        self,
+        pages: list[StagePageContext],
+        *,
+        processing_status: str = "unknown",
+    ) -> list[dict[str, Any]]:
+        outcomes = []
+        for index, ctx in enumerate(pages):
+            if ctx.source_unit_outcomes is not None:
+                for row in ctx.source_unit_outcomes.values():
+                    row["output_unit_ids"] = []
+                    row["output_group_ids"] = []
+                    row["output_relation_status"] = "unavailable"
+                    row["output_relation_reason_code"] = (
+                        "output_relation_not_observed"
+                    )
+            if ctx.output_path and not ctx.output_fallback_kind:
+                self._record_source_output_relations(ctx, ctx.blk_list)
+            source_units = None
+            source_unit_mapping_status = "unavailable"
+            if ctx.source_unit_outcomes is not None:
+                source_unit_mapping_status = (
+                    "partially_observed"
+                    if ctx.source_unit_mapping_reason_code
+                    else "observed"
+                )
+                source_units = []
+                for unit in ctx.source_unit_outcomes.values():
+                    row = dict(unit)
+                    if row.get("status") == "unjudged" and row.get(
+                        "reason_code"
+                    ) in {
+                        "operation_not_observed",
+                        "translation_not_observed",
+                    }:
+                        row["reason_code"] = (
+                            "page_failure_without_unit_attribution"
+                            if ctx.failed_stage
+                            else "run_cancelled_before_unit_outcome"
+                            if processing_status
+                            in {"cancelled", "interrupted", "paused"}
+                            else row.get("reason_code")
+                        )
+                    source_units.append(row)
+            outcomes.append(
+                {
+                    "source_unit_index": index,
+                    "image_path": ctx.image_path,
+                    "image_name": ctx.image_name,
+                    "output_path": ctx.output_path,
+                    "output_status": "measured" if ctx.output_path else "unmeasured",
+                    "fallback_kind": ctx.output_fallback_kind,
+                    "failed_stage": ctx.failed_stage,
+                    "failed_reason": ctx.failed_reason,
+                    "no_text_detected": bool(ctx.no_text_detected),
+                    "block_count": len(ctx.blk_list or []),
+                    "source_unit_mapping_status": source_unit_mapping_status,
+                    "source_unit_mapping_reason_code": (
+                        ctx.source_unit_mapping_reason_code
+                        if ctx.source_unit_mapping_reason_code
+                        else None
+                        if source_unit_mapping_status == "observed"
+                        else "source_unit_roster_not_observed"
+                    ),
+                    "source_units": source_units,
+                    "quality_status": (
+                        "failed"
+                        if ctx.failed_stage
+                        else "incomplete"
+                        if ctx.output_fallback_kind
+                        else "completed"
+                        if ctx.output_path
+                        else "unjudged"
+                    ),
+                }
+            )
+        return outcomes
 
     def _write_run_report(
         self,
@@ -4978,7 +5380,10 @@ class StageBatchedProcessor(BatchProcessor):
         report = build_run_report(
             telemetry=telemetry,
             total_wall_sec=self._click_to_now_seconds(),
-            page_outcomes=self._page_outcomes(pages),
+            page_outcomes=self._page_outcomes(
+                pages,
+                processing_status=processing_status,
+            ),
             output_summary=output_summary,
             started_at_local=self._run_started_wall_text(),
             terminal_status=terminal_status,
