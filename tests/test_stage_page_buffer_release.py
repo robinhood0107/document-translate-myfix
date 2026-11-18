@@ -66,6 +66,10 @@ class PageBufferReleaseTests(unittest.TestCase):
 
     def test_release_frees_every_full_resolution_array(self) -> None:
         ctx = _loaded_page()
+        ctx.paddleocr_cache_plan = SimpleNamespace(
+            jobs=[{"prepared_crop": np.zeros((16, 16, 3), dtype=np.uint8)}]
+        )
+        ctx.paddleocr_cache_engine = object()
 
         ctx.release_page_buffers()
 
@@ -74,6 +78,8 @@ class PageBufferReleaseTests(unittest.TestCase):
         self.assertIsNone(ctx.raw_mask)
         self.assertIsNone(ctx.mask)
         self.assertEqual(ctx.patches, [])
+        self.assertIsNone(ctx.paddleocr_cache_plan)
+        self.assertIsNone(ctx.paddleocr_cache_engine)
         # mask_details 는 같은 마스크를 다시 참조한다. 비우지 않으면 위에서
         # 놓아준 배열이 그대로 살아남는다.
         self.assertEqual(ctx.mask_details, {})

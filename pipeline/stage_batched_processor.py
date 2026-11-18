@@ -163,6 +163,10 @@ _SOURCE_IMAGE_FAILURE_REASONS = frozenset(
 )
 
 
+class _OCRRuntimeIdentityChangedError(RuntimeError):
+    pass
+
+
 @dataclass
 class StagePageContext:
     image_path: str
@@ -264,10 +268,12 @@ class StagePageContext:
             "mask",
             "project_ocr_hit",
             "precomputed_mask_details",
+            "paddleocr_cache_plan",
         ):
             value = getattr(self, name, None)
             released += _approximate_buffer_bytes(value)
             setattr(self, name, None)
+        self.paddleocr_cache_engine = None
         released += _approximate_buffer_bytes(self.patches)
         self.patches = []
         # `mask_details` 는 raw/final 마스크를 그대로 다시 참조한다. 비우지 않으면
@@ -1159,10 +1165,17 @@ class StageBatchedProcessor(BatchProcessor):
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
             return
         engine_key = str(policy["primary_ocr_engine"])
-        # A non-empty project cache may contain a page-local OCR hit that can be
-        # known only after detection restores the exact ordered blocks. Defer in
-        # that case to preserve the all-hit zero-runtime contract. A brand-new,
-        # empty sidecar cannot contain a hit, so keep the cold-path overlap.
+        settings_page = self.main_page.settings_page
+        persistent_cache_requested = bool(
+            engine_key == "PaddleOCR VL"
+            and settings_page.get_paddleocr_vl_settings().get(
+                "persistent_cache_enabled",
+                True,
+            )
+        )
+        if not cache_miss_confirmed and persistent_cache_requested:
+            return
+
         project_store = getattr(self, "_project_checkpoint_store", None)
         if (
             not cache_miss_confirmed
@@ -1190,23 +1203,6 @@ class StageBatchedProcessor(BatchProcessor):
                     "will be resolved after cache lookup.",
                     exc_info=True,
                 )
-                return
-        settings_page = self.main_page.settings_page
-        if (
-            not cache_miss_confirmed
-            and engine_key == "PaddleOCR VL"
-            and bool(
-                settings_page.get_paddleocr_vl_settings().get(
-                    "persistent_cache_enabled",
-                    True,
-                )
-            )
-        ):
-            store = self._get_paddleocr_cache_store()
-            stats = store.stats()
-            if bool(stats.get("enabled", False)) and int(
-                stats.get("item_count", 0) or 0
-            ) > 0:
                 return
         service = self._ocr_runtime_service_name(engine_key)
         self._start_prewarm(
@@ -2221,6 +2217,29 @@ class StageBatchedProcessor(BatchProcessor):
             ):
                 if paddle_plan is not None and not paddle_plan.requires_runtime:
                     self._await_ocr_runtime(policy)
+                    runtime_manager = getattr(
+                        self.main_page,
+                        "local_ocr_runtime_manager",
+                        None,
+                    )
+                    if isinstance(runtime_manager, LocalOCRRuntimeManager):
+                        try:
+                            actual_identity = runtime_manager.get_ocr_cache_identity(
+                                engine_key,
+                                settings_page,
+                            )
+                        except OperationCancelledError:
+                            raise
+                        except Exception as exc:
+                            raise _OCRRuntimeIdentityChangedError(
+                                "ocr_runtime_identity_changed_after_page"
+                            ) from exc
+                        actual_identity = dict(actual_identity or {}) or None
+                        if actual_identity != self._paddleocr_cache_identity:
+                            raise _OCRRuntimeIdentityChangedError(
+                                "ocr_runtime_identity_changed_after_page"
+                            )
+                        self._paddleocr_cache_identity = actual_identity
                 retry_plan = paddle_engine.prepare_persistent_cache(
                     ctx.image,
                     ctx.blk_list,
@@ -2746,6 +2765,7 @@ class StageBatchedProcessor(BatchProcessor):
                 )
             )
         )
+        defer_project_checkpoint_lookup = persistent_cache_requested
         cache_identity_required = bool(
             persistent_cache_requested
             or getattr(self, "_project_checkpoint_store", None) is not None
@@ -2763,12 +2783,19 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 settings_page,
             )
-            if runtime_identity is not None:
+            if runtime_identity is not None and not defer_project_checkpoint_lookup:
                 self._prepare_project_ocr_hits(
                     pages,
                     policy,
                     runtime_identity,
                 )
+
+        def clear_project_ocr_lookup(ctx: StagePageContext) -> None:
+            ctx.project_ocr_identity = {}
+            ctx.project_ocr_fingerprint = ""
+            ctx.project_ocr_hit = None
+            ctx.project_ocr_checkpoint_status = "disabled"
+
         def has_project_miss() -> bool:
             return any(
                 not ctx.failed_stage
@@ -2779,18 +2806,13 @@ class StageBatchedProcessor(BatchProcessor):
             )
 
         requires_runtime = has_project_miss()
-        if (
-            persistent_cache_requested
-            and runtime_identity is not None
-            and requires_runtime
-        ):
-            requires_runtime = self._prepare_paddleocr_cache_plans(
-                pages,
-                policy,
-                runtime_identity,
-            )
-        if requires_runtime:
+        runtime_started = False
+        defer_runtime_until_cache_miss = bool(
+            persistent_cache_requested and runtime_identity is not None
+        )
+        if requires_runtime and not defer_runtime_until_cache_miss:
             self._await_ocr_runtime(policy)
+            runtime_started = True
         if (
             cache_identity_required
             and engine_key
@@ -2803,18 +2825,36 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 settings_page,
             )
-            if runtime_identity is not None:
+            if runtime_identity is not None and not defer_project_checkpoint_lookup:
                 self._prepare_project_ocr_hits(
                     pages,
                     policy,
                     runtime_identity,
                 )
-                if persistent_cache_requested and has_project_miss():
-                    self._prepare_paddleocr_cache_plans(
-                        pages,
-                        policy,
-                        runtime_identity,
-                    )
+
+        processed_runtime_identity: dict[str, Any] | None = None
+        processed_page_indices: set[int] = set()
+
+        def fail_closed_runtime_identity_drift() -> None:
+            reason = "ocr_runtime_identity_changed_after_page"
+            for affected_index, affected_ctx in enumerate(pages):
+                if affected_ctx.failed_stage:
+                    continue
+                if (
+                    affected_index not in processed_page_indices
+                    and not affected_ctx.blk_list
+                    and affected_ctx.project_ocr_hit is None
+                ):
+                    continue
+                self._mark_page_failed(
+                    affected_ctx,
+                    index=affected_index,
+                    total_images=total_images,
+                    stage="ocr",
+                    reason=reason,
+                    detail="",
+                    extra=dict(affected_ctx.page_ocr_metrics or {}),
+                )
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -2850,11 +2890,90 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
             )
             try:
+                if defer_project_checkpoint_lookup and runtime_identity is not None:
+                    ctx_project_runtime = dict(
+                        ctx.project_ocr_identity.get("runtime") or {}
+                    )
+                    if (
+                        (ctx.project_ocr_identity or ctx.project_ocr_hit is not None)
+                        and ctx_project_runtime != runtime_identity
+                    ):
+                        clear_project_ocr_lookup(ctx)
+                    self._prepare_project_ocr_hits(
+                        [ctx],
+                        policy,
+                        runtime_identity,
+                    )
+                if (
+                    ctx.project_ocr_hit is None
+                    and persistent_cache_requested
+                    and runtime_identity is not None
+                    and ctx.blk_list
+                ):
+                    page_requires_runtime = self._prepare_paddleocr_cache_plans(
+                        [ctx],
+                        policy,
+                        runtime_identity,
+                        index_offset=index,
+                        total_images=total_images,
+                    )
+                    if ctx.failed_stage:
+                        continue
+                    if page_requires_runtime and not runtime_started:
+                        self._await_ocr_runtime(policy)
+                        runtime_started = True
+                        if isinstance(runtime_manager, LocalOCRRuntimeManager):
+                            actual_identity = runtime_manager.get_ocr_cache_identity(
+                                engine_key,
+                                settings_page,
+                            )
+                            actual_identity = dict(actual_identity or {}) or None
+                            if actual_identity != runtime_identity:
+                                if (
+                                    processed_runtime_identity is not None
+                                    and processed_runtime_identity != actual_identity
+                                ):
+                                    fail_closed_runtime_identity_drift()
+                                    break
+                                runtime_identity = actual_identity
+                                self._paddleocr_cache_identity = (
+                                    dict(runtime_identity)
+                                    if runtime_identity is not None
+                                    else None
+                                )
+                                for pending_ctx in pages[index:]:
+                                    pending_ctx.paddleocr_cache_plan = None
+                                    pending_ctx.paddleocr_cache_engine = None
+                                    clear_project_ocr_lookup(pending_ctx)
+                                if runtime_identity is not None:
+                                    self._prepare_project_ocr_hits(
+                                        [ctx],
+                                        policy,
+                                        runtime_identity,
+                                    )
+                                    if ctx.failed_stage:
+                                        continue
+                                    if ctx.project_ocr_hit is None:
+                                        self._prepare_paddleocr_cache_plans(
+                                            [ctx],
+                                            policy,
+                                            runtime_identity,
+                                            index_offset=index,
+                                            total_images=total_images,
+                                        )
+                                        if ctx.failed_stage:
+                                            continue
                 try:
+                    page_had_ocr_input = bool(ctx.blk_list) or (
+                        ctx.project_ocr_hit is not None
+                    )
                     result = self._run_primary_ocr(ctx, policy)
                 finally:
                     self._release_source_image(ctx)
                 self._raise_if_cancelled()
+                if persistent_cache_requested and runtime_identity is not None and page_had_ocr_input:
+                    processed_runtime_identity = dict(runtime_identity)
+                    processed_page_indices.add(index)
                 quality = result["quality"]
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
                 if not ctx.blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
@@ -2923,6 +3042,9 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                     **ctx.page_ocr_metrics,
                 )
+            except _OCRRuntimeIdentityChangedError:
+                fail_closed_runtime_identity_drift()
+                break
             except OperationCancelledError:
                 raise
             except Exception as exc:
@@ -2936,6 +3058,9 @@ class StageBatchedProcessor(BatchProcessor):
                     detail="" if reason in _SOURCE_IMAGE_FAILURE_REASONS else None,
                     extra=dict(ctx.page_ocr_metrics or {}),
                 )
+            finally:
+                ctx.paddleocr_cache_plan = None
+                ctx.paddleocr_cache_engine = None
 
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
             self._shutdown_runtime_with_retry(
@@ -2953,6 +3078,9 @@ class StageBatchedProcessor(BatchProcessor):
         pages: list[StagePageContext],
         policy: dict[str, Any],
         runtime_identity: dict[str, Any],
+        *,
+        index_offset: int = 0,
+        total_images: int | None = None,
     ) -> bool:
         settings_page = self.main_page.settings_page
         store = self._get_paddleocr_cache_store()
@@ -2960,8 +3088,9 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_identity = dict(runtime_identity)
 
         requires_runtime = False
-        total_images = len(pages)
-        for index, ctx in enumerate(pages):
+        total_images = len(pages) if total_images is None else total_images
+        for local_index, ctx in enumerate(pages):
+            index = index_offset + local_index
             self._raise_if_cancelled()
             if (
                 ctx.failed_stage
