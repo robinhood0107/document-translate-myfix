@@ -31,6 +31,7 @@ from modules.utils.exceptions import OperationCancelledError
 class StageBatchedCancellationTests(unittest.TestCase):
     def _processor(self, *, cancelled: bool) -> StageBatchedProcessor:
         processor = object.__new__(StageBatchedProcessor)
+        processor._released_page_buffer_bytes = 0
         processor.main_page = SimpleNamespace(
             is_current_task_cancelled=lambda: cancelled,
             settings_page=object(),
@@ -43,6 +44,38 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         with self.assertRaises(OperationCancelledError):
             processor._raise_if_cancelled()
+
+    def test_internal_source_failure_keeps_existing_skip_message(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.image_ctrl = SimpleNamespace(
+            update_processing_summary=mock.Mock(),
+            mark_processing_stage=mock.Mock(),
+        )
+        processor.main_page.image_skipped = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._release_page_buffers = mock.Mock()
+        page = StagePageContext(
+            image_path="example_source.png",
+            image_name="example_source.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+        )
+
+        processor._mark_page_failed(
+            page,
+            index=0,
+            total_images=1,
+            stage="inpaint",
+            reason="source_changed_after_detect",
+            detail="",
+        )
+
+        self.assertEqual(page.failed_reason, "source_changed_after_detect")
+        processor.main_page.image_skipped.emit.assert_called_once_with(
+            "example_source.png",
+            "inpaint",
+            "",
+        )
 
     def test_detect_stage_stops_before_processing_page_when_cancelled(self) -> None:
         processor = self._processor(cancelled=True)
@@ -462,6 +495,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
         processor.main_page.image_ctrl = SimpleNamespace(
             mark_processing_stage=mock.Mock(),
+            update_processing_summary=mock.Mock(),
         )
         processor._paddleocr_cache_store = None
         processor._paddleocr_cache_identity = None
@@ -783,7 +817,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
         )
         processor._persist_detect_state.assert_called_once()
 
-    def test_disabled_project_checkpoint_skips_full_image_hash(self) -> None:
+    def test_detect_records_source_hash_without_project_checkpoint(self) -> None:
         processor = self._processor(cancelled=False)
         detector = SimpleNamespace(
             detect=mock.Mock(
@@ -842,15 +876,19 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         with mock.patch(
             "pipeline.stage_batched_processor.decoded_image_sha256",
+            return_value="source-identity",
         ) as decoded_hash, mock.patch(
             "pipeline.stage_batched_processor.build_detection_identity",
         ) as build_identity:
             processor._detect_all([page])
 
-        decoded_hash.assert_not_called()
+        decoded_hash.assert_called_once()
         build_identity.assert_not_called()
         detector.detect.assert_called_once()
         self.assertEqual(page.detection_checkpoint_status, "disabled")
+        self.assertEqual(page.source_decoded_sha256, "source-identity")
+        self.assertEqual(page.source_pixel_count, 20 * 20)
+        self.assertIsNone(page.image)
 
     def test_paddle_cache_hit_applies_current_dictionary_once(self) -> None:
         processor = self._processor(cancelled=False)

@@ -154,6 +154,13 @@ from .runtime_resource_arbiter import (
 )
 
 logger = logging.getLogger(__name__)
+_SOURCE_IMAGE_FAILURE_REASONS = frozenset(
+    {
+        "source_identity_missing_after_detect",
+        "source_reload_failed",
+        "source_changed_after_detect",
+    }
+)
 
 
 @dataclass
@@ -167,6 +174,7 @@ class StagePageContext:
     export_token: str = ""
     export_root: str = ""
     image: Any | None = None
+    source_pixel_count: int = 0
     blk_list: list[Any] = field(default_factory=list)
     precomputed_mask_details: dict[str, Any] | None = None
     detector_key: str = ""
@@ -266,6 +274,14 @@ class StagePageContext:
         # 위에서 놓아준 배열이 그대로 살아남는다.
         released += _approximate_buffer_bytes(self.mask_details)
         self.mask_details = {}
+        self.released_buffer_bytes += released
+        return released
+
+    def release_source_image(self) -> int:
+        """원본 이미지 참조만 놓고 감지·체크포인트 정보를 보존한다."""
+
+        released = _approximate_buffer_bytes(self.image)
+        self.image = None
         self.released_buffer_bytes += released
         return released
 
@@ -1804,7 +1820,11 @@ class StageBatchedProcessor(BatchProcessor):
             reason=reason,
             **(extra or {}),
         )
-        self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
+        self.main_page.image_skipped.emit(
+            ctx.image_path,
+            stage,
+            detail if detail is not None else reason,
+        )
         # 실패한 페이지는 이후 스테이지가 모두 건너뛴다. 픽셀 데이터를 계속 붙들고
         # 있으면 한 페이지의 실패가 남은 배치 전체의 메모리를 갉아먹는다.
         self._release_page_buffers(ctx)
@@ -1853,19 +1873,20 @@ class StageBatchedProcessor(BatchProcessor):
                     ensure_path_materialized(ctx.image_path)
                     ctx.image = imk.read_image(ctx.image_path)
 
+            ctx.source_pixel_count = int(ctx.image.shape[0]) * int(
+                ctx.image.shape[1]
+            )
+            with self._measure_performance(
+                stage="detect",
+                operation="decoded_hash",
+                workload={"page_pixel_count": ctx.source_pixel_count},
+            ):
+                ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
+
             source_lang_english = self._source_lang_english(ctx.source_lang)
             detection_hit = None
             detection_identity = None
             if checkpoint_store is not None:
-                with self._measure_performance(
-                    stage="detect",
-                    operation="decoded_hash",
-                    workload={
-                        "page_pixel_count": int(ctx.image.shape[0])
-                        * int(ctx.image.shape[1]),
-                    },
-                ):
-                    ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
                 ctx.project_checkpoint_page_key = project_checkpoint_page_key(
                     self.main_page,
                     ctx.image_path,
@@ -2009,6 +2030,7 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings=export_settings,
                     preferred_path=detector_overlay_path,
                 )
+                self._release_source_image(ctx)
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -2058,8 +2080,10 @@ class StageBatchedProcessor(BatchProcessor):
                 **ctx.page_ocr_metrics,
             )
             self._raise_if_cancelled()
+            self._release_source_image(ctx)
 
     def _run_primary_ocr(self, ctx: StagePageContext, policy: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_source_image(ctx)
         self._record_source_unit_roster(ctx)
         settings_page = self.main_page.settings_page
         source_lang_english = self._source_lang_english(ctx.source_lang)
@@ -2826,7 +2850,10 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
             )
             try:
-                result = self._run_primary_ocr(ctx, policy)
+                try:
+                    result = self._run_primary_ocr(ctx, policy)
+                finally:
+                    self._release_source_image(ctx)
                 self._raise_if_cancelled()
                 quality = result["quality"]
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
@@ -2899,12 +2926,14 @@ class StageBatchedProcessor(BatchProcessor):
             except OperationCancelledError:
                 raise
             except Exception as exc:
+                reason = str(exc)
                 self._mark_page_failed(
                     ctx,
                     index=index,
                     total_images=total_images,
                     stage="ocr",
-                    reason=str(exc),
+                    reason=reason,
+                    detail="" if reason in _SOURCE_IMAGE_FAILURE_REASONS else None,
                     extra=dict(ctx.page_ocr_metrics or {}),
                 )
 
@@ -2949,6 +2978,7 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 continue
             try:
+                self._ensure_source_image(ctx)
                 source_lang_english = self._source_lang_english(ctx.source_lang)
                 source_lang_code = language_codes.get(source_lang_english, "en")
                 for blk in ctx.blk_list:
@@ -2984,14 +3014,18 @@ class StageBatchedProcessor(BatchProcessor):
             except OperationCancelledError:
                 raise
             except Exception as exc:
+                reason = str(exc)
                 self._mark_page_failed(
                     ctx,
                     index=index,
                     total_images=total_images,
                     stage="ocr",
-                    reason=str(exc),
+                    reason=reason,
+                    detail="" if reason in _SOURCE_IMAGE_FAILURE_REASONS else None,
                     extra=dict(ctx.page_ocr_metrics or {}),
                 )
+            finally:
+                self._release_source_image(ctx)
         return requires_runtime
 
     def _get_paddleocr_cache_store(self) -> OCRPersistentResultCache:
@@ -3242,6 +3276,25 @@ class StageBatchedProcessor(BatchProcessor):
             self._raise_if_cancelled()
             self._drain_render_futures(block=False)
             if ctx.failed_stage:
+                continue
+            try:
+                self._ensure_source_image(ctx)
+            except OperationCancelledError:
+                raise
+            except Exception as exc:
+                reason = str(exc)
+                self._mark_page_failed(
+                    ctx,
+                    index=index,
+                    total_images=total_images,
+                    stage="inpaint",
+                    reason=reason,
+                    detail="" if reason in _SOURCE_IMAGE_FAILURE_REASONS else None,
+                    extra={
+                        **ctx.page_ocr_metrics,
+                        **ctx.page_translation_metrics,
+                    },
+                )
                 continue
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 3, 10, False, stage_name='inpaint-all')
@@ -4327,19 +4380,23 @@ class StageBatchedProcessor(BatchProcessor):
                     self._await_gemma_runtime()
                     gemma_runtime_started = True
             try:
-                with self._measure_performance(
-                    stage="translate",
-                    operation="inference_and_cache",
-                    workload={
-                        "block_count": len(ctx.translation_blocks),
-                    },
-                ):
-                    translated_blocks, translation_cache_status = translator.translate_with_cache_manager(
-                        ctx.translation_blocks,
-                        ctx.image,
-                        extra_context,
-                        self.cache_manager,
-                    )
+                source_image = self._ensure_source_image(ctx)
+                try:
+                    with self._measure_performance(
+                        stage="translate",
+                        operation="inference_and_cache",
+                        workload={
+                            "block_count": len(ctx.translation_blocks),
+                        },
+                    ):
+                        translated_blocks, translation_cache_status = translator.translate_with_cache_manager(
+                            ctx.translation_blocks,
+                            source_image,
+                            extra_context,
+                            self.cache_manager,
+                        )
+                finally:
+                    self._release_source_image(ctx)
                 self._sample_performance_resources("gemma_request_end")
                 self._raise_if_cancelled()
                 with self._measure_performance(
@@ -4452,6 +4509,11 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     stage="translation",
                     reason=str(exc),
+                    detail=(
+                        ""
+                        if str(exc) in _SOURCE_IMAGE_FAILURE_REASONS
+                        else None
+                    ),
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
 
@@ -4773,6 +4835,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
         self.emit_progress(index, total_images, 9, 10, False, stage_name='render-all')
         self._raise_if_cancelled()
+        self._release_page_buffers(ctx)
 
     def _finish_render_page_bookkeeping(
         self,
@@ -4913,6 +4976,43 @@ class StageBatchedProcessor(BatchProcessor):
             self._released_page_buffer_bytes / (1024 * 1024),
         )
 
+    def _release_source_image(self, ctx: StagePageContext) -> None:
+        """원본 배열 참조만 놓고 페이지 버퍼 해제량에 기록한다."""
+
+        released = ctx.release_source_image()
+        if released <= 0:
+            return
+        self._released_page_buffer_bytes += released
+        logger.debug(
+            "Released %.1f MiB of source image for %s (run total %.1f MiB).",
+            released / (1024 * 1024),
+            ctx.image_name,
+            self._released_page_buffer_bytes / (1024 * 1024),
+        )
+
+    def _ensure_source_image(self, ctx: StagePageContext) -> Any:
+        """감지 시점과 같은 디코드 이미지가 필요할 때 다시 읽는다."""
+
+        if ctx.image is not None:
+            return ctx.image
+        if not ctx.source_decoded_sha256:
+            raise RuntimeError("source_identity_missing_after_detect")
+
+        try:
+            image = self.main_page.image_ctrl.load_image(ctx.image_path)
+            if image is None:
+                ensure_path_materialized(ctx.image_path)
+                image = imk.read_image(ctx.image_path)
+        except Exception as exc:
+            raise RuntimeError("source_reload_failed") from exc
+        if image is None:
+            raise RuntimeError("source_reload_failed")
+        if decoded_image_sha256(image) != ctx.source_decoded_sha256:
+            raise RuntimeError("source_changed_after_detect")
+
+        ctx.image = image
+        return image
+
     def _record_stage_memory_telemetry(
         self,
         stage: str,
@@ -5015,12 +5115,10 @@ class StageBatchedProcessor(BatchProcessor):
             if candidate is not None:
                 return candidate, kind
         try:
-            reloaded = self.main_page.image_ctrl.load_image(ctx.image_path)
-            if reloaded is None:
-                reloaded = imk.read_image(ctx.image_path)
+            reloaded = self._ensure_source_image(ctx)
         except Exception:
             logger.warning(
-                "Could not reload %s for the fallback export.",
+                "Could not reload the verified source for fallback export %s.",
                 ctx.image_name,
                 exc_info=True,
             )
@@ -5176,6 +5274,7 @@ class StageBatchedProcessor(BatchProcessor):
                     register = getattr(report, "register_batch_success", None)
                     if callable(register):
                         register(ctx.image_path)
+                self._release_page_buffers(ctx)
                 continue
             if ctx.output_path:
                 logger.warning(
@@ -5770,16 +5869,10 @@ class StageBatchedProcessor(BatchProcessor):
                 service="detector",
             ):
                 self._detect_all(pages, policy)
-            source_pixels = 0
-            for ctx in pages:
-                image = getattr(ctx, "image", None)
-                if image is None:
-                    continue
-                image_array = np.asarray(image)
-                if image_array.ndim >= 2:
-                    source_pixels += int(image_array.shape[0]) * int(
-                        image_array.shape[1]
-                    )
+            source_pixels = sum(
+                max(0, int(getattr(ctx, "source_pixel_count", 0) or 0))
+                for ctx in pages
+            )
             detected_blocks = sum(
                 len(getattr(ctx, "blk_list", []) or []) for ctx in pages
             )

@@ -12,6 +12,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.projects.stage_checkpoints import decoded_image_sha256  # noqa: E402
 from pipeline.stage_batched_processor import (  # noqa: E402
     StageBatchedProcessor,
     StagePageContext,
@@ -96,6 +97,32 @@ class OutputReconciliationTests(unittest.TestCase):
 
     def _recorder(self) -> _Recorder:
         return _Recorder(self.out_dir)
+
+    def test_existing_output_releases_page_buffers_after_success_recording(self) -> None:
+        recorder = self._recorder()
+        processor = _processor(recorder)
+        ctx = _page("cached.png")
+        ctx.inpaint_input_img = np.ones((8, 8, 3), dtype=np.uint8)
+        ctx.raw_mask = np.zeros((8, 8), dtype=np.uint8)
+        ctx.mask = np.full((8, 8), 255, dtype=np.uint8)
+        ctx.mask_details = {"final_mask": ctx.mask}
+        ctx.patches = [{"cleaned": np.zeros((2, 2, 3), dtype=np.uint8)}]
+        ctx.source_decoded_sha256 = "source-identity"
+        output_path = recorder.existing_output("cached.png")
+        ctx.output_path = output_path
+
+        summary = processor._reconcile_page_outputs([ctx], export_settings={})
+
+        self.assertEqual(summary["output_count"], 1)
+        self.assertEqual(ctx.output_path, output_path)
+        self.assertEqual(ctx.source_decoded_sha256, "source-identity")
+        self.assertIsNone(ctx.image)
+        self.assertIsNone(ctx.inpaint_input_img)
+        self.assertEqual(ctx.mask_pixel_count, 8 * 8)
+        self.assertIsNone(ctx.raw_mask)
+        self.assertIsNone(ctx.mask)
+        self.assertEqual(ctx.mask_details, {})
+        self.assertEqual(ctx.patches, [])
 
     def test_a_failed_page_still_produces_a_file(self) -> None:
         # 366장 입력에서 347장만 나오던 동작이 정확히 이 지점이었다.
@@ -240,6 +267,9 @@ class OutputReconciliationTests(unittest.TestCase):
         recorder = self._recorder()
         processor = _processor(recorder)
         ctx = _page("011.png", failed="OCR", with_image=False)
+        ctx.source_decoded_sha256 = decoded_image_sha256(
+            np.zeros((8, 8, 3), dtype=np.uint8)
+        )
 
         summary = processor._reconcile_page_outputs([ctx], export_settings={})
 
