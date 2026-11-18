@@ -19,11 +19,13 @@ from PySide6 import QtCore, QtWidgets
 
 import imkit as imk
 
+from app.projects.stage_checkpoints import decoded_image_sha256
 from modules.rendering.render import TextRenderingSettings
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.textblock import TextBlock
 from pipeline.render_pool import QtRenderPool
 from pipeline.render_worker import RenderJobInput, run_render_job
+from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 
 
 def _nonuniform_image(height: int = 48, width: int = 72) -> np.ndarray:
@@ -137,6 +139,51 @@ class RenderWorkerPurityTests(unittest.TestCase):
 
         self.assertFalse(called["format"])
         self.assertFalse(called["area"])
+
+    def test_reloaded_source_produces_the_same_render_pixels(self) -> None:
+        source = _nonuniform_image()
+        original = source.copy()
+        reloaded_source = source.copy()
+        processor = StageBatchedProcessor.__new__(StageBatchedProcessor)
+        processor._released_page_buffer_bytes = 0
+        processor.main_page = mock.Mock()
+        processor.main_page.image_ctrl.load_image.return_value = reloaded_source
+        ctx = StagePageContext(
+            image_path="example_source.png",
+            image_name="example_source.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=source.copy(),
+            source_decoded_sha256=decoded_image_sha256(source),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            retained_job = _job(
+                tmp_dir,
+                image=ctx.image.copy(),
+                inpaint_input_img=ctx.image.copy(),
+                no_text_detected=True,
+                output_path=os.path.join(tmp_dir, "retained.png"),
+            )
+            processor._release_source_image(ctx)
+            reloaded = processor._ensure_source_image(ctx)
+            reloaded_job = _job(
+                tmp_dir,
+                image=reloaded,
+                inpaint_input_img=reloaded.copy(),
+                no_text_detected=True,
+                output_path=os.path.join(tmp_dir, "reloaded.png"),
+            )
+
+            retained_result = run_render_job(retained_job)
+            reloaded_result = run_render_job(reloaded_job)
+
+            retained_pixels = imk.read_image(retained_result.final_output_path)
+            reloaded_pixels = imk.read_image(reloaded_result.final_output_path)
+
+        np.testing.assert_array_equal(retained_pixels, reloaded_pixels)
+        np.testing.assert_array_equal(reloaded, original)
+        np.testing.assert_array_equal(source, original)
 
     def test_translate_inpaint_block_produces_text_item_and_render_event(self) -> None:
         block = TextBlock(
