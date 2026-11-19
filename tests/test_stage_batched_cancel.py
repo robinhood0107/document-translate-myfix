@@ -597,6 +597,8 @@ class StageBatchedCancellationTests(unittest.TestCase):
                 "normalized_ocr_mode": "best_local",
             },
             identity,
+            index_offset=0,
+            total_images=1,
         )
         processor._await_ocr_runtime.assert_not_called()
         processor._run_primary_ocr.assert_called_once()

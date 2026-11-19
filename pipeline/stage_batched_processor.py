@@ -333,11 +333,20 @@ class _PendingRenderJob:
 
     future: Future
     ctx: StagePageContext
+    buffer_bytes: int
     index: int
     total_images: int
     file_on_display: bool
     output_root: str
     started_monotonic: float
+
+
+class _PriorRenderBookkeepingError(Exception):
+    """이전 렌더 후처리 실패와 원래 예외를 유지한다."""
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__(str(original))
 
 
 class StageBatchedProcessor(BatchProcessor):
@@ -3215,7 +3224,7 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_loaded = False
         try:
             runtime_loaded = self._inpaint_pages(pages)
-        except BaseException:
+        except BaseException as exc:
             if runtime_loaded or active_pages:
                 try:
                     self._release_inpainter_before_render(
@@ -3228,6 +3237,8 @@ class StageBatchedProcessor(BatchProcessor):
                         "aborted inpaint stage.",
                         exc_info=True,
                     )
+            if isinstance(exc, _PriorRenderBookkeepingError):
+                raise exc.original.with_traceback(exc.original.__traceback__)
             raise
         if runtime_loaded:
             self._release_inpainter_before_render(pages)
@@ -3742,6 +3753,8 @@ class StageBatchedProcessor(BatchProcessor):
                     "miss" if checkpoint_store is not None else "disabled"
                 )
                 pending.append((index, ctx, inpaint_blocks))
+            except _PriorRenderBookkeepingError:
+                raise
             except OperationCancelledError:
                 raise
             except Exception as exc:
@@ -3956,6 +3969,8 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     export_settings=export_settings,
                 )
+            except _PriorRenderBookkeepingError:
+                raise
             except OperationCancelledError:
                 raise
             except Exception as exc:
@@ -4790,6 +4805,41 @@ class StageBatchedProcessor(BatchProcessor):
         self._render_context_cache = cached
         return cached
 
+    def _wait_for_render_capacity(self, incoming_buffer_bytes: int) -> None:
+        """미완료 렌더 입력 배열 추정치를 워커 수와 RAM 예산으로 제한한다."""
+        max_pending = max(2, self._render_worker_count())
+        while self._pending_render_jobs:
+            self._raise_if_cancelled()
+            try:
+                buffer_budget = int(psutil.virtual_memory().available) // 2
+            except Exception:
+                buffer_budget = 0
+            pending_bytes = sum(job.buffer_bytes for job in self._pending_render_jobs)
+            if (
+                len(self._pending_render_jobs) < max_pending
+                and pending_bytes + incoming_buffer_bytes <= buffer_budget
+            ):
+                return
+
+            pending_by_future = {
+                job.future: job for job in self._pending_render_jobs
+            }
+            done, _ = wait(
+                set(pending_by_future),
+                timeout=0.2,
+                return_when=FIRST_COMPLETED,
+            )
+            self._raise_if_cancelled()
+            for future in done:
+                pending = pending_by_future[future]
+                self._pending_render_jobs.remove(pending)
+                try:
+                    self._resolve_render_future(pending)
+                except OperationCancelledError:
+                    raise
+                except Exception as exc:
+                    raise _PriorRenderBookkeepingError(exc) from exc
+
     def _submit_or_inline_render(
         self,
         ctx: StagePageContext,
@@ -4855,6 +4905,24 @@ class StageBatchedProcessor(BatchProcessor):
                     )
                     return
 
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            self._mark_page_failed(
+                ctx,
+                index=index,
+                total_images=total_images,
+                stage="render",
+                reason=str(exc),
+                extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
+            )
+            return
+
+        render_buffer_bytes = _approximate_buffer_bytes(
+            (ctx.image, ctx.inpaint_input_img, ctx.mask, ctx.patches)
+        )
+        self._wait_for_render_capacity(render_buffer_bytes)
+        try:
             strict_render_symbols = should_use_strict_render_symbols(trg_lng_cd)
             output_path, output_root, output_format = self._reserve_render_output_path(
                 ctx,
@@ -4901,6 +4969,7 @@ class StageBatchedProcessor(BatchProcessor):
                 _PendingRenderJob(
                     future=future,
                     ctx=ctx,
+                    buffer_bytes=render_buffer_bytes,
                     index=index,
                     total_images=total_images,
                     file_on_display=file_on_display,
