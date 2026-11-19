@@ -11,11 +11,14 @@ import numpy as np
 
 from modules.translation.llm.custom_local_gemma import CustomLocalGemmaTranslation
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
+from modules.translation.factory import TranslationFactory
+from modules.translation.llm.gpt import GPTTranslation
 from modules.translation.processor import Translator
 from modules.translation.translation_memory import TranslationMemoryStore
 from modules.utils.correction_dictionary import apply_translation_result_dictionary
 from modules.utils.textblock import TextBlock
 from pipeline.cache_manager import CacheManager
+from pipeline.translation_handler import TranslationHandler
 
 
 class _Settings:
@@ -51,6 +54,49 @@ class _Settings:
     @staticmethod
     def get_translation_result_dictionary_rules() -> list[dict]:
         return []
+
+
+class _CustomServiceSettings:
+    class _UI:
+        def __init__(self) -> None:
+            self.uppercase_checkbox = SimpleNamespace(isChecked=lambda: False)
+
+        @staticmethod
+        def tr(value: str) -> str:
+            return value
+
+    def __init__(self, model: str, endpoint: str) -> None:
+        self.ui = self._UI()
+        self.credentials = {
+            "api_key": "",
+            "api_url": endpoint,
+            "model": model,
+        }
+
+    def get_tool_selection(self, tool: str) -> str:
+        return "Custom Service" if tool == "translator" else "default"
+
+    def get_credentials(self, _service: str) -> dict[str, str]:
+        return dict(self.credentials)
+
+    @staticmethod
+    def get_llm_settings() -> dict[str, object]:
+        return {"image_input_enabled": False, "extra_context": ""}
+
+    @staticmethod
+    def is_gpu_enabled() -> bool:
+        return False
+
+    @staticmethod
+    def get_translation_result_dictionary_rules() -> list[dict]:
+        return [
+            {
+                "keyword": "cat",
+                "sub": "cat!",
+                "use_reg": False,
+                "case_sens": True,
+            }
+        ]
 
 
 def _response(translation: str) -> dict:
@@ -202,6 +248,8 @@ class TranslationProcessorMemoryTests(unittest.TestCase):
         translator._local_gemma_runtime_manager = None
         translator.source_lang = "Japanese"
         translator.target_lang = "Korean"
+        translator.source_lang_en = "Japanese"
+        translator.target_lang_en = "Korean"
         translator.translator_key = "GPT-4.1"
         translator.engine = SimpleNamespace()
         translate_call_count = 0
@@ -248,6 +296,183 @@ class TranslationProcessorMemoryTests(unittest.TestCase):
         self.assertEqual(second_status, "hit")
         self.assertEqual(first_blocks[0].translation, "cat!")
         self.assertEqual(second_blocks[0].translation, "cat!")
+
+    def test_persistent_memory_bypasses_legacy_cache_manager(self) -> None:
+        translator = object.__new__(Translator)
+        translator._local_gemma_runtime_manager = object()
+        translator.engine = SimpleNamespace(translation_cache_status="persistent-hit")
+        blocks = [self._block()]
+        image = np.zeros((8, 8, 3), dtype=np.uint8)
+        translator.translate = mock.Mock(return_value=blocks)
+        cache_manager = mock.Mock()
+
+        translated, status = translator.translate_with_cache_manager(
+            blocks,
+            image,
+            "context",
+            cache_manager,
+        )
+
+        self.assertIs(translated, blocks)
+        self.assertEqual(status, "persistent-hit")
+        translator.translate.assert_called_once_with(blocks, image, "context")
+        cache_manager._get_translation_cache_key.assert_not_called()
+
+    def test_non_gemma_cache_uses_frozen_engine_identity_and_current_rules(self) -> None:
+        settings = _CustomServiceSettings("model-a", "https://first.example.invalid/v1")
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+        )
+        cache_manager = CacheManager()
+        image = np.zeros((8, 8, 3), dtype=np.uint8)
+        dispatched: list[tuple[str, str, str, str]] = []
+
+        def mock_provider(engine, *_args):
+            dispatched.append(
+                (
+                    engine.model,
+                    engine.api_base_url,
+                    engine.source_lang,
+                    engine.target_lang,
+                )
+            )
+            return json.dumps({"block_0": "cat"})
+
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
+        ):
+            first_translator = Translator(main_page, "Japanese", "Korean")
+            settings.credentials.update(
+                model="model-b",
+                api_url="https://second.example.invalid/v1",
+            )
+
+            first_blocks = [self._block()]
+            _, first_status = first_translator.translate_with_cache_manager(
+                first_blocks,
+                image,
+                "context",
+                cache_manager,
+            )
+            apply_translation_result_dictionary(
+                first_blocks,
+                settings.get_translation_result_dictionary_rules(),
+            )
+
+            second_translator = Translator(main_page, "Japanese", "Korean")
+            second_blocks = [self._block()]
+            _, second_status = second_translator.translate_with_cache_manager(
+                second_blocks,
+                image,
+                "context",
+                cache_manager,
+            )
+            apply_translation_result_dictionary(
+                second_blocks,
+                settings.get_translation_result_dictionary_rules(),
+            )
+
+            repeated_blocks = [self._block()]
+            _, repeated_status = second_translator.translate_with_cache_manager(
+                repeated_blocks,
+                image,
+                "context",
+                cache_manager,
+            )
+            apply_translation_result_dictionary(
+                repeated_blocks,
+                settings.get_translation_result_dictionary_rules(),
+            )
+
+        self.assertEqual(first_status, "refreshed")
+        self.assertEqual(second_status, "refreshed")
+        self.assertEqual(repeated_status, "hit")
+        self.assertEqual(
+            dispatched,
+            [
+                ("model-a", "https://first.example.invalid/v1", "Japanese", "Korean"),
+                ("model-b", "https://second.example.invalid/v1", "Japanese", "Korean"),
+            ],
+        )
+        self.assertEqual(first_blocks[0].translation, "cat!")
+        self.assertEqual(second_blocks[0].translation, "cat!")
+        self.assertEqual(repeated_blocks[0].translation, "cat!")
+        self.assertNotIn("model-a", repr(cache_manager.translation_cache))
+        self.assertNotIn("model-b", repr(cache_manager.translation_cache))
+        self.assertNotIn("example.invalid", repr(cache_manager.translation_cache))
+
+    def test_selected_block_cache_uses_engine_identity(self) -> None:
+        settings = _CustomServiceSettings("model-a", "https://first.example.invalid/v1")
+        image = np.zeros((8, 8, 3), dtype=np.uint8)
+        block = self._block()
+        source_combo = SimpleNamespace(value="日本語")
+        source_combo.currentText = lambda: source_combo.value
+        target_combo = SimpleNamespace(value="한국어")
+        target_combo.currentText = lambda: target_combo.value
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={
+                "日本語": "Japanese",
+                "한국어": "Korean",
+                "Japanese": "Japanese",
+                "Korean": "Korean",
+            },
+            s_combo=source_combo,
+            t_combo=target_combo,
+            image_viewer=SimpleNamespace(
+                hasPhoto=lambda: True,
+                get_image_array=lambda: image,
+            ),
+            blk_list=[block],
+            curr_img_idx=0,
+            image_files=[],
+        )
+        cache_manager = CacheManager()
+        pipeline = SimpleNamespace(get_selected_block=lambda: block)
+        handler = TranslationHandler(main_page, cache_manager, pipeline)
+        dispatched: list[tuple[str, str, str, str]] = []
+
+        def mock_provider(engine, *_args):
+            dispatched.append(
+                (
+                    engine.model,
+                    engine.api_base_url,
+                    engine.source_lang,
+                    engine.target_lang,
+                )
+            )
+            return json.dumps({"block_0": "cat"})
+
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
+        ):
+            handler.translate_image(single_block=True)
+            self.assertEqual(block.translation, "cat!")
+
+            block.translation = ""
+            settings.credentials.update(
+                model="model-b",
+                api_url="https://second.example.invalid/v1",
+            )
+            handler.translate_image(single_block=True)
+            self.assertEqual(block.translation, "cat!")
+
+            block.translation = ""
+            source_combo.value = "Japanese"
+            target_combo.value = "Korean"
+            handler.translate_image(single_block=True)
+            self.assertEqual(block.translation, "cat!")
+
+        self.assertEqual(
+            dispatched,
+            [
+                ("model-a", "https://first.example.invalid/v1", "Japanese", "Korean"),
+                ("model-b", "https://second.example.invalid/v1", "Japanese", "Korean"),
+            ],
+        )
 
 
 if __name__ == "__main__":

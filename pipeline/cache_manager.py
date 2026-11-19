@@ -323,12 +323,27 @@ class CacheManager:
             return None
         return payload.get("text", "")
 
-    def _get_translation_cache_key(self, image, source_lang, target_lang, translator_key, extra_context):
+    def _get_translation_cache_key(
+        self,
+        image,
+        source_lang,
+        target_lang,
+        translator_key,
+        extra_context,
+        translation_identity=None,
+    ):
         """Generate cache key for translation results"""
         image_hash = self._generate_image_hash(image)
         # Include extra_context in cache key since it affects translation results
         context_hash = hashlib.md5(extra_context.encode()).hexdigest() if extra_context else "no_context"
-        return (image_hash, translator_key, source_lang, target_lang, context_hash)
+        return (
+            image_hash,
+            translator_key,
+            source_lang,
+            target_lang,
+            context_hash,
+            translation_identity,
+        )
 
     def _is_translation_cached(self, cache_key):
         """Check if translation results are cached for this image/translator/language combination"""

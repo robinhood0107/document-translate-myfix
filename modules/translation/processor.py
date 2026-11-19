@@ -60,6 +60,11 @@ class Translator:
             self.target_lang_en,
             self.translator_key
         )
+        self.translation_cache_identity = getattr(
+            self.engine,
+            "_factory_cache_key",
+            None,
+        )
         
         # Track engine type for method dispatching
         self.is_llm_engine = isinstance(self.engine, LLMTranslation)
@@ -216,10 +221,11 @@ class Translator:
 
         cache_key = cache_manager._get_translation_cache_key(
             image,
-            self.source_lang,
-            self.target_lang,
+            self.source_lang_en,
+            self.target_lang_en,
             self.translator_key,
             extra_context,
+            getattr(self, "translation_cache_identity", None),
         )
         if cache_manager._can_serve_all_blocks_from_translation_cache(
             cache_key,

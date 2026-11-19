@@ -92,10 +92,11 @@ class TranslationHandler:
                 if not translator.uses_persistent_translation_memory:
                     legacy_cache_key = self.cache_manager._get_translation_cache_key(
                         image,
-                        source_lang,
-                        target_lang,
-                        translator_key,
+                        translator.source_lang_en,
+                        translator.target_lang_en,
+                        translator.translator_key,
                         extra_context,
+                        translator.translation_cache_identity,
                     )
                     cached_translation = (
                         self.cache_manager._get_cached_translation_for_block(
