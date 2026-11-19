@@ -1,4 +1,5 @@
 from typing import Any
+import json
 import numpy as np
 from abc import abstractmethod
 import base64
@@ -9,9 +10,8 @@ from ..base import LLMTranslation
 from ...ocr.selection import resolve_ocr_engine
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import (
-    build_translation_input_json,
+    build_translation_input_request,
     get_raw_text,
-    normalize_text_for_translation,
     set_texts_from_json,
 )
 
@@ -60,7 +60,14 @@ class BaseLLMTranslation(LLMTranslation):
         self.top_p = 0.95
         self.max_tokens = 5000
         
-    def translate(self, blk_list: list[TextBlock], image: np.ndarray, extra_context: str) -> list[TextBlock]:
+    def translate(
+        self,
+        blk_list: list[TextBlock],
+        image: np.ndarray,
+        extra_context: str,
+        *,
+        prepared_translation_request: tuple[str, tuple[int, ...], str] | None = None,
+    ) -> list[TextBlock]:
         """
         Translate text blocks using LLM.
         
@@ -72,7 +79,21 @@ class BaseLLMTranslation(LLMTranslation):
         Returns:
             List of updated TextBlock objects with translations
         """
-        _, translation_input_json = self._build_translation_input_payloads(blk_list)
+        prepared_request = (
+            prepared_translation_request
+            if prepared_translation_request is not None
+            else self._prepare_translation_input_request(
+                blk_list,
+                include_blank=False,
+            )
+        )
+        _, translation_input_json = self._build_translation_input_payloads(
+            blk_list,
+            prepared_request=prepared_request,
+        )
+        if not prepared_request[1]:
+            return blk_list
+
         system_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
         user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{translation_input_json}"
         
@@ -84,7 +105,11 @@ class BaseLLMTranslation(LLMTranslation):
                 entire_translated_text,
             )
         try:
-            updated_count = set_texts_from_json(blk_list, entire_translated_text)
+            updated_count = set_texts_from_json(
+                blk_list,
+                entire_translated_text,
+                request_indices=prepared_request[1],
+            )
         except Exception:
             logger.exception(
                 "translation response parse failed (%s). raw_content=%s",
@@ -111,33 +136,47 @@ class BaseLLMTranslation(LLMTranslation):
             return ""
         return resolve_ocr_engine(ocr_mode, self.source_lang)
 
-    def _build_translation_input_payloads(self, blk_list: list[TextBlock]) -> tuple[str, str]:
+    def _prepare_translation_input_request(
+        self,
+        blk_list: list[TextBlock],
+        *,
+        include_blank: bool = True,
+    ) -> tuple[str, tuple[int, ...], str]:
         source_lang_code = self.get_language_code(self.source_lang) or (self.source_lang or "")
         ocr_engine = self._resolved_ocr_engine()
-        raw_json = get_raw_text(blk_list)
-        normalized_json = build_translation_input_json(
+        normalized_json, request_indices = build_translation_input_request(
             blk_list,
             source_lang_code,
             ocr_engine=ocr_engine,
+            include_blank=include_blank,
         )
+        return normalized_json, request_indices, ocr_engine
+
+    def _build_translation_input_payloads(
+        self,
+        blk_list: list[TextBlock],
+        *,
+        prepared_request: tuple[str, tuple[int, ...], str] | None = None,
+    ) -> tuple[str, str]:
+        if prepared_request is None:
+            prepared_request = self._prepare_translation_input_request(blk_list)
+        raw_json = get_raw_text(blk_list)
+        normalized_json, _request_indices, ocr_engine = prepared_request
         self.last_translation_input_raw_json = raw_json
         self.last_translation_input_normalized_json = normalized_json
 
+        raw_payload = json.loads(raw_json)
+        normalized_payload = json.loads(normalized_json)
         changed_blocks = sum(
             1
-            for blk in blk_list
-            if normalize_text_for_translation(
-                getattr(blk, "text", ""),
-                source_lang_code,
-                ocr_engine=ocr_engine,
-            )
-            != str(getattr(blk, "text", "") or "")
+            for block_key, normalized_text in normalized_payload.items()
+            if raw_payload.get(block_key) != normalized_text
         )
         if changed_blocks:
             logger.info(
                 "translation input normalized (%s): source_lang=%s ocr_engine=%s changed_blocks=%d total_blocks=%d",
                 self.translation_mode_label,
-                source_lang_code,
+                self.get_language_code(self.source_lang) or (self.source_lang or ""),
                 ocr_engine or "",
                 changed_blocks,
                 len(blk_list),

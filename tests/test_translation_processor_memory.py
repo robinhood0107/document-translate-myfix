@@ -18,9 +18,11 @@ from PySide6 import QtCore, QtWidgets
 from app.controllers.batch_report import BatchReportController
 from app.controllers.image import ImageStateController
 
+from modules.ocr.selection import OCR_MODE_MANGALMM, OCR_MODE_PADDLE_VL
 from modules.translation.llm.custom_local_gemma import CustomLocalGemmaTranslation
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.factory import TranslationFactory
+from modules.translation.llm.custom_service import CustomServiceTranslation
 from modules.translation.llm.gpt import GPTTranslation
 from modules.translation.microsoft import MicrosoftTranslation
 from modules.translation.processor import Translator
@@ -296,6 +298,7 @@ class TranslationProcessorMemoryTests(unittest.TestCase):
         translator.target_lang_en = "Korean"
         translator.translator_key = "GPT-4.1"
         translator.engine = SimpleNamespace()
+        translator.is_llm_engine = False
         translate_call_count = 0
 
         def translate(blocks, _image, _extra_context):
@@ -838,6 +841,684 @@ class MicrosoftTranslationResponseContractTests(unittest.TestCase):
         self.assertEqual(page.failed_stage, "")
         processor._persist_translation_state.assert_called_once()
 
+
+class LLMTranslationResponseContractTests(unittest.TestCase):
+    @staticmethod
+    def _block(
+        text: str,
+        translation: str,
+        index: int,
+        *,
+        action: str = "translate_inpaint",
+        semantic_role: str = "dialogue_bubble",
+    ) -> TextBlock:
+        block = TextBlock(
+            text_bbox=np.asarray([index * 10, 0, index * 10 + 8, 8]),
+            text=text,
+            block_id=f"example-block-{index}",
+            text_class="text_bubble",
+            processing_action=action,
+            semantic_role=semantic_role,
+        )
+        block.translation = translation
+        return block
+
+    def _translator(self) -> Translator:
+        settings = _CustomServiceSettings(
+            "example-model",
+            "https://example.invalid/v1",
+        )
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+        )
+        translator = Translator(main_page, "Japanese", "Korean")
+        self.assertIsInstance(translator.engine, CustomServiceTranslation)
+        return translator
+
+    @staticmethod
+    def _handler(blocks: list[TextBlock], cache_manager: CacheManager):
+        settings = _CustomServiceSettings(
+            "example-model",
+            "https://example.invalid/v1",
+        )
+        source = SimpleNamespace(value="日本語")
+        source.currentText = lambda: source.value
+        target = SimpleNamespace(value="한국어")
+        target.currentText = lambda: target.value
+        image = np.zeros((4, 4, 3), dtype=np.uint8)
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={
+                "日本語": "Japanese",
+                "한국어": "Korean",
+                "Japanese": "Japanese",
+                "Korean": "Korean",
+            },
+            s_combo=source,
+            t_combo=target,
+            image_viewer=SimpleNamespace(
+                hasPhoto=lambda: True,
+                get_image_array=lambda: image,
+            ),
+            blk_list=blocks,
+            curr_img_idx=0,
+            image_files=[],
+        )
+        handler = TranslationHandler(
+            main_page,
+            cache_manager,
+            SimpleNamespace(get_selected_block=lambda: blocks[1]),
+        )
+        return handler
+
+    def _run_stage(self, blocks: list[TextBlock], response: str):
+        settings = _CustomServiceSettings(
+            "example-model",
+            "https://example.invalid/v1",
+        )
+        image_ctrl = SimpleNamespace(
+            update_processing_summary=mock.Mock(),
+            mark_processing_stage=mock.Mock(),
+        )
+        image_skipped = SimpleNamespace(emit=mock.Mock())
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+            local_translation_runtime_manager=None,
+            image_ctrl=image_ctrl,
+            image_skipped=image_skipped,
+            is_current_task_cancelled=lambda: False,
+        )
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = main_page
+        processor.cache_manager = CacheManager()
+        processor._project_checkpoint_store = None
+        processor._inpainter_release_gate = {"required": False, "observed": True}
+        processor._record_performance_detail = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor._released_page_buffer_bytes = 0
+        processor._sample_performance_resources = mock.Mock()
+        processor._translation_benchmark_metrics = mock.Mock(return_value={})
+        processor._measure_performance = lambda **_kwargs: nullcontext()
+        processor.emit_progress = mock.Mock()
+        page = StagePageContext(
+            image_path="example_source_page.png",
+            image_name="example_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((4, 4, 3), dtype=np.uint8),
+            blk_list=blocks,
+        )
+        prompts: list[str] = []
+
+        def mock_provider(_engine, user_prompt, _system_prompt, _image):
+            self.assertIsInstance(_engine, CustomServiceTranslation)
+            prompts.append(user_prompt)
+            return response
+
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
+        ):
+            processor._translate_all([page])
+        return processor, page, image_ctrl, prompts
+
+    @staticmethod
+    def _request_payload(user_prompt: str) -> dict:
+        return json.loads(user_prompt.rsplit("Translate this:\n", 1)[1])
+
+    def test_partial_response_is_rejected_before_page_cache_or_publication(self) -> None:
+        blocks = [
+            self._block("source-0", "old-0", 0),
+            self._block("source-1", "old-1", 1),
+            self._block(
+                "protected source",
+                "keep target",
+                2,
+                action="preserve",
+                semantic_role="decorative",
+            ),
+        ]
+        processor, page, image_ctrl, prompts = self._run_stage(
+            blocks,
+            '{"block_0": "fresh-0"}',
+        )
+
+        self.assertEqual(self._request_payload(prompts[0]), {
+            "block_0": "source-0",
+            "block_1": "source-1",
+        })
+        self.assertEqual(page.failed_stage, "translation")
+        self.assertEqual(page.failed_reason, "Invalid translation response")
+        self.assertEqual(
+            [block.translation for block in blocks],
+            ["old-0", "old-1", "keep target"],
+        )
+        self.assertEqual(processor.cache_manager.translation_cache, {})
+        processor._persist_translation_state.assert_not_called()
+        self.assertEqual(
+            page.source_unit_outcomes["example-block-0"]["status"],
+            "failed",
+        )
+        self.assertEqual(
+            page.source_unit_outcomes["example-block-0"]["reason_code"],
+            "translation_response_missing_ids",
+        )
+        self.assertEqual(
+            page.source_unit_outcomes["example-block-1"]["status"],
+            "failed",
+        )
+        self.assertEqual(
+            page.source_unit_outcomes["example-block-2"]["status"],
+            "preserved",
+        )
+        self.assertEqual(
+            image_ctrl.mark_processing_stage.call_args.args[:3],
+            ("example_source_page.png", "translation", "failed"),
+        )
+
+    def test_structural_response_faults_are_distinct_and_atomic(self) -> None:
+        cases = (
+            (
+                "missing",
+                '{"block_0": "fresh-0"}',
+                "translation_response_missing_ids",
+            ),
+            (
+                "duplicate",
+                '{"block_0": "first", "block_0": "second", "block_1": "fresh-1"}',
+                "translation_response_duplicate_ids",
+            ),
+            (
+                "unexpected",
+                '{"block_0": "fresh-0", "block_1": "fresh-1", "block_2": "extra"}',
+                "translation_response_unexpected_ids",
+            ),
+            (
+                "mixed IDs",
+                '{"block_0": "fresh-0", "block_2": "extra"}',
+                "translation_response_id_mismatch",
+            ),
+            ("empty body", "", "translation_response_empty"),
+            ("empty object", "{}", "translation_response_empty"),
+            (
+                "nonstring body",
+                {"block_0": "fresh-0", "block_1": "fresh-1"},
+                "translation_response_invalid_content",
+            ),
+            (
+                "truncated",
+                '{"block_0": "fresh-0", "block_1": "fresh-1"',
+                "translation_response_truncated",
+            ),
+            (
+                "truncated string",
+                '{"block_0": "fresh-0}',
+                "translation_response_truncated",
+            ),
+            (
+                "invalid JSON",
+                '{"block_0": }',
+                "translation_response_invalid_json",
+            ),
+        )
+        for name, response, failure_kind in cases:
+            with self.subTest(response=name):
+                blocks = [
+                    self._block("source-0", "old-0", 0),
+                    self._block("source-1", "old-1", 1),
+                ]
+                translator = self._translator()
+                image = np.zeros((4, 4, 3), dtype=np.uint8)
+                cache_manager = CacheManager()
+                with mock.patch.object(
+                    GPTTranslation,
+                    "_perform_translation",
+                    return_value=response,
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "^Invalid translation response$",
+                    ) as caught:
+                        translator.translate_with_cache_manager(
+                            blocks,
+                            image,
+                            "",
+                            cache_manager,
+                        )
+
+                self.assertEqual(
+                    getattr(caught.exception, "block_failure_kind", ""),
+                    failure_kind,
+                )
+                self.assertEqual(
+                    getattr(caught.exception, "block_ids", []),
+                    ["example-block-0", "example-block-1"],
+                )
+                if name == "mixed IDs":
+                    self.assertEqual(
+                        caught.exception.missing_response_keys,
+                        ["block_1"],
+                    )
+                    self.assertEqual(
+                        caught.exception.unexpected_response_keys,
+                        ["block_2"],
+                    )
+                elif name == "duplicate":
+                    self.assertEqual(
+                        caught.exception.duplicate_response_keys,
+                        ["block_0"],
+                    )
+                self.assertEqual(
+                    [block.translation for block in blocks],
+                    ["old-0", "old-1"],
+                )
+                self.assertEqual(cache_manager.translation_cache, {})
+
+    def test_full_and_selected_handler_requests_keep_separate_cache_scopes(self) -> None:
+        full_payload = {
+            "block_0": "source-0",
+            "block_1": "source-1",
+        }
+        selected_payload = {"block_0": "source-1"}
+
+        def run_sequence(selected_first: bool) -> None:
+            blocks = [
+                self._block("source-0", "keep-0", 0),
+                self._block("source-1", "", 1),
+            ]
+            cache_manager = CacheManager()
+            handler = self._handler(blocks, cache_manager)
+            prompts: list[dict] = []
+
+            def mock_provider(_engine, user_prompt, _system_prompt, _image):
+                payload = self._request_payload(user_prompt)
+                prompts.append(payload)
+                return json.dumps(
+                    {key: f"fresh-{source}" for key, source in payload.items()}
+                )
+
+            with (
+                mock.patch.object(TranslationFactory, "_engines", {}),
+                mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
+            ):
+                if selected_first:
+                    handler.translate_image(single_block=True)
+                    self.assertEqual(blocks[0].translation, "keep-0")
+                    self.assertEqual(blocks[1].translation, "fresh-source-1")
+                    stored = next(iter(cache_manager.translation_cache.values()))
+                    self.assertEqual(
+                        set(stored),
+                        {cache_manager._get_block_id(blocks[1])},
+                    )
+                    blocks[1].translation = ""
+                    handler.translate_image(single_block=True)
+                    self.assertEqual(len(prompts), 1)
+                    handler.translate_image(single_block=False)
+                else:
+                    handler.translate_image(single_block=False)
+                    blocks[0].translation = "keep-0"
+                    blocks[1].translation = ""
+                    handler.translate_image(single_block=True)
+                    self.assertEqual(blocks[0].translation, "keep-0")
+
+            self.assertEqual(
+                prompts,
+                [selected_payload, full_payload]
+                if selected_first
+                else [full_payload, selected_payload],
+            )
+            self.assertEqual(
+                blocks[0].translation,
+                "fresh-source-0" if selected_first else "keep-0",
+            )
+            self.assertEqual(blocks[1].translation, "fresh-source-1")
+
+        run_sequence(selected_first=True)
+        run_sequence(selected_first=False)
+
+    def test_invalid_required_values_are_atomic_and_not_cached(self) -> None:
+        cases = (
+            ("none", None),
+            ("empty", ""),
+            ("whitespace", " \t "),
+            ("dictionary", {"translation": "nested"}),
+            ("list", ["nested"]),
+            ("number", 17),
+        )
+        for name, invalid_value in cases:
+            with self.subTest(value=name):
+                blocks = [
+                    self._block("source-0", "old-0", 0),
+                    self._block("source-1", "old-1", 1),
+                ]
+                translator = self._translator()
+                cache_manager = CacheManager()
+                response = json.dumps(
+                    {"block_0": "fresh-0", "block_1": invalid_value}
+                )
+                with mock.patch.object(
+                    GPTTranslation,
+                    "_perform_translation",
+                    return_value=response,
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "^Invalid translation response$",
+                    ) as caught:
+                        translator.translate_with_cache_manager(
+                            blocks,
+                            np.zeros((4, 4, 3), dtype=np.uint8),
+                            "",
+                            cache_manager,
+                        )
+
+                self.assertEqual(
+                    getattr(caught.exception, "block_failure_kind", ""),
+                    "translation_response_invalid_values",
+                )
+                self.assertEqual(
+                    getattr(caught.exception, "invalid_response_keys", []),
+                    ["block_1"],
+                )
+                self.assertEqual(
+                    [block.translation for block in blocks],
+                    ["old-0", "old-1"],
+                )
+                self.assertEqual(cache_manager.translation_cache, {})
+
+    def test_invalid_later_value_fails_stage_without_publishing_partial_result(self) -> None:
+        blocks = [
+            self._block("source-0", "old-0", 0),
+            self._block("source-1", "old-1", 1),
+            self._block(
+                "protected source",
+                "keep target",
+                2,
+                action="preserve",
+                semantic_role="decorative",
+            ),
+        ]
+        processor, page, _image_ctrl, _prompts = self._run_stage(
+            blocks,
+            '{"block_0": "fresh-0", "block_1": null}',
+        )
+
+        self.assertEqual(page.failed_stage, "translation")
+        self.assertEqual(page.failed_reason, "Invalid translation response")
+        self.assertEqual(
+            [block.translation for block in blocks],
+            ["old-0", "old-1", "keep target"],
+        )
+        self.assertEqual(processor.cache_manager.translation_cache, {})
+        processor._persist_translation_state.assert_not_called()
+        self.assertEqual(
+            page.source_unit_outcomes["example-block-1"]["reason_code"],
+            "translation_response_invalid_values",
+        )
+
+    def test_normalization_empty_required_text_fails_without_request_or_publication(self) -> None:
+        blocks = [
+            self._block("source-0", "old-0", 0),
+            self._block("\u200b", "old-1", 1),
+            self._block(
+                "protected source",
+                "keep target",
+                2,
+                action="preserve",
+                semantic_role="decorative",
+            ),
+        ]
+        processor, page, _image_ctrl, prompts = self._run_stage(
+            blocks,
+            '{"block_0": "fresh-0", "block_1": "fresh-1"}',
+        )
+
+        self.assertEqual(prompts, [])
+        self.assertEqual(page.failed_stage, "translation")
+        self.assertEqual(page.failed_reason, "Invalid translation response")
+        self.assertEqual(
+            [block.translation for block in blocks],
+            ["old-0", "old-1", "keep target"],
+        )
+        self.assertEqual(processor.cache_manager.translation_cache, {})
+        processor._persist_translation_state.assert_not_called()
+        self.assertEqual(
+            page.source_unit_outcomes["example-block-1"]["reason_code"],
+            "translation_input_empty_after_normalization",
+        )
+
+    def test_raw_blank_target_is_preserved_without_provider_request(self) -> None:
+        blocks = [self._block("", "keep target", 0)]
+        translator = self._translator()
+        cache_manager = CacheManager()
+
+        with mock.patch.object(
+            GPTTranslation,
+            "_perform_translation",
+        ) as provider:
+            translated, _status = translator.translate_with_cache_manager(
+                blocks,
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                "",
+                cache_manager,
+            )
+
+        provider.assert_not_called()
+        self.assertIs(translated, blocks)
+        self.assertEqual(blocks[0].translation, "keep target")
+        self.assertEqual(cache_manager.translation_cache, {})
+
+    def test_unprepared_llm_dispatch_keeps_three_argument_engine_signature(self) -> None:
+        calls: list[tuple[list[TextBlock], np.ndarray, str]] = []
+
+        def translate(blocks, image, extra_context):
+            calls.append((blocks, image, extra_context))
+            return blocks
+
+        translator = object.__new__(Translator)
+        translator.settings = SimpleNamespace(
+            get_llm_settings=lambda: {"image_input_enabled": False},
+            is_gpu_enabled=lambda: False,
+            get_tool_selection=lambda _tool: "default",
+        )
+        translator.translator_key = "Custom Service"
+        translator.is_llm_engine = True
+        translator._local_gemma_runtime_manager = None
+        translator.engine = SimpleNamespace(translate=translate)
+        blocks = [self._block("source", "old", 0)]
+        image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+        result = translator.translate(blocks, image, "context")
+
+        self.assertIs(result, blocks)
+        self.assertEqual(calls, [(blocks, image, "context")])
+
+    def test_gemma_blank_chunk_keeps_legacy_positional_request_keys(self) -> None:
+        engine = CustomLocalGemmaTranslation()
+        engine.source_lang = "Japanese"
+        engine.target_lang = "Korean"
+        blocks = [
+            self._block("", "old-0", 0),
+            self._block("source-1", "old-1", 1),
+        ]
+        captured: list[dict] = []
+
+        def mock_request(_system_prompt, user_prompt, *, expected_keys=None, request_mode=""):
+            captured.append(
+                {
+                    "payload": json.loads(user_prompt),
+                    "expected_keys": expected_keys,
+                    "request_mode": request_mode,
+                }
+            )
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps(
+                                {"block_0": None, "block_1": "fresh-1"}
+                            )
+                        },
+                    }
+                ]
+            }
+
+        with mock.patch.object(engine, "_request_translation", side_effect=mock_request):
+            engine._translate_chunk(
+                blocks,
+                "",
+                prompt_profile=engine.prompt_profile,
+            )
+
+        self.assertEqual(
+            captured[0]["payload"],
+            {"block_0": "", "block_1": "source-1"},
+        )
+        self.assertEqual(captured[0]["expected_keys"], ["block_0", "block_1"])
+        self.assertEqual(blocks[1].translation, "fresh-1")
+
+    def test_ocr_mode_change_after_cache_miss_keeps_prepared_request_snapshot(self) -> None:
+        settings = _CustomServiceSettings(
+            "example-model",
+            "https://example.invalid/v1",
+        )
+        settings.ocr_mode = OCR_MODE_PADDLE_VL
+        get_tool_selection = settings.get_tool_selection
+        settings.get_tool_selection = lambda tool: (
+            settings.ocr_mode if tool == "ocr" else get_tool_selection(tool)
+        )
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+        )
+        blocks = [self._block("⌒テ✺スト︸", "old", 0)]
+        cache_manager = CacheManager()
+        prompts: list[dict] = []
+
+        def mock_provider(_engine, user_prompt, _system_prompt, _image):
+            prompts.append(self._request_payload(user_prompt))
+            return '{"block_0": "fresh"}'
+
+        original_cache_check = cache_manager._can_serve_all_blocks_from_translation_cache
+        flip_on_first_miss = True
+
+        def flip_ocr_after_miss(cache_key, requested_blocks):
+            nonlocal flip_on_first_miss
+            if flip_on_first_miss:
+                settings.ocr_mode = OCR_MODE_MANGALMM
+                flip_on_first_miss = False
+                return False
+            return original_cache_check(cache_key, requested_blocks)
+
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
+            mock.patch.object(
+                cache_manager,
+                "_can_serve_all_blocks_from_translation_cache",
+                side_effect=flip_ocr_after_miss,
+            ),
+        ):
+            translator = Translator(main_page, "Japanese", "Korean")
+            translator.translate_with_cache_manager(
+                blocks,
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                "",
+                cache_manager,
+            )
+            translator.translate_with_cache_manager(
+                blocks,
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                "",
+                cache_manager,
+            )
+
+        self.assertEqual(
+            prompts,
+            [
+                {"block_0": "⌒テ✺スト︸"},
+                {"block_0": "テスト"},
+            ],
+        )
+        self.assertEqual(len(cache_manager.translation_cache), 2)
+
+    def test_complete_response_completes_page_and_caches_required_blocks(self) -> None:
+        blocks = [
+            self._block("source-0", "old-0", 0),
+            self._block("source-1", "old-1", 1),
+            self._block(
+                "protected source",
+                "keep target",
+                2,
+                action="preserve",
+                semantic_role="decorative",
+            ),
+        ]
+        processor, page, _image_ctrl, _prompts = self._run_stage(
+            blocks,
+            '{"block_0": "fresh-0", "block_1": "fresh-1"}',
+        )
+
+        self.assertEqual(page.failed_stage, "")
+        self.assertEqual(
+            [block.translation for block in blocks],
+            ["fresh-0", "fresh-1", "keep target"],
+        )
+        self.assertEqual(
+            sum(len(results) for results in processor.cache_manager.translation_cache.values()),
+            2,
+        )
+        processor._persist_translation_state.assert_called_once()
+
+    def test_success_maps_only_selected_nonblank_request_blocks(self) -> None:
+        blocks = [
+            self._block("", "keep blank target", 0),
+            self._block("selectedsource", "old target", 1),
+        ]
+        translator = self._translator()
+        prompts: list[str] = []
+        cache_manager = CacheManager()
+
+        def mock_provider(_engine, user_prompt, _system_prompt, _image):
+            prompts.append(user_prompt)
+            return '{"block_1": " fresh target "}'
+
+        with mock.patch.object(
+            GPTTranslation,
+            "_perform_translation",
+            mock_provider,
+        ):
+            _translated, first_status = translator.translate_with_cache_manager(
+                blocks,
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                "",
+                cache_manager,
+            )
+            blocks[0].translation = "user edit"
+            _translated, second_status = translator.translate_with_cache_manager(
+                blocks,
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                "",
+                cache_manager,
+            )
+
+        self.assertEqual(first_status, "refreshed")
+        self.assertEqual(second_status, "hit")
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(
+            self._request_payload(prompts[0]),
+            {"block_1": "selectedsource"},
+        )
+        self.assertEqual(
+            [block.translation for block in blocks],
+            ["user edit", " fresh target "],
+        )
 
 if __name__ == "__main__":
     unittest.main()

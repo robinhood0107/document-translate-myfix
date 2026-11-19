@@ -1,6 +1,5 @@
 import base64
 import json
-import logging
 import re
 import jieba
 import janome.tokenizer
@@ -14,9 +13,6 @@ from .text_normalization import (
     normalize_decorative_ocr_text,
     remove_invisible_format_chars,
 )
-
-logger = logging.getLogger(__name__)
-
 
 MODEL_MAP = {
     "Custom Service": "",
@@ -69,16 +65,63 @@ def normalize_text_for_translation(text, source_lang, *, ocr_engine=None) -> str
     return canonicalize_ellipsis_runs(normalized)
 
 
-def build_translation_input_json(blk_list: list[TextBlock], source_lang, *, ocr_engine=None):
+def _invalid_translation_response(kind: str, blocks: list[TextBlock]) -> ValueError:
+    error = ValueError("Invalid translation response")
+    error.block_failure_kind = kind
+    error.block_ids = [
+        str(block_id)
+        for block in blocks
+        if (block_id := getattr(block, "block_id", ""))
+    ]
+    return error
+
+
+def build_translation_input_request(
+    blk_list: list[TextBlock],
+    source_lang,
+    *,
+    ocr_engine=None,
+    include_blank: bool = True,
+) -> tuple[str, tuple[int, ...]]:
     payload = {}
+    request_indices = []
     for idx, blk in enumerate(blk_list):
-        block_key = f"block_{idx}"
-        payload[block_key] = normalize_text_for_translation(
-            getattr(blk, "text", ""),
+        source_text = str(getattr(blk, "text", "") or "")
+        if not include_blank and not source_text.strip():
+            continue
+        normalized_text = normalize_text_for_translation(
+            source_text,
             source_lang,
             ocr_engine=ocr_engine,
         )
-    return json.dumps(payload, ensure_ascii=False, indent=4)
+        if not include_blank and not normalized_text.strip():
+            error = _invalid_translation_response(
+                "translation_input_empty_after_normalization",
+                [blk],
+            )
+            error.invalid_input_keys = [f"block_{idx}"]
+            raise error
+        payload[f"block_{idx}"] = normalized_text
+        request_indices.append(idx)
+    return (
+        json.dumps(payload, ensure_ascii=False, indent=4),
+        tuple(request_indices),
+    )
+
+
+def build_translation_input_json(
+    blk_list: list[TextBlock],
+    source_lang,
+    *,
+    ocr_engine=None,
+    include_blank: bool = True,
+) -> str:
+    return build_translation_input_request(
+        blk_list,
+        source_lang,
+        ocr_engine=ocr_engine,
+        include_blank=include_blank,
+    )[0]
 
 def get_raw_translation(blk_list: list[TextBlock]):
     rw_translations_dict = {}
@@ -90,42 +133,138 @@ def get_raw_translation(blk_list: list[TextBlock]):
     
     return raw_translations_json
 
+
 def extract_json_object(json_string: str) -> dict:
     match = re.search(r"\{[\s\S]*\}", json_string)
     if not match:
         raise ValueError("Translator response did not contain a JSON object.")
 
-    translation_dict = json.loads(match.group(0))
+    def reject_duplicate_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise _DuplicateJsonKeyError(key)
+            result[key] = value
+        return result
+
+    translation_dict = json.loads(
+        match.group(0),
+        object_pairs_hook=reject_duplicate_keys,
+    )
     if not isinstance(translation_dict, dict):
         raise ValueError("Translator response JSON was not an object.")
 
     return translation_dict
 
-def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
-    translation_dict = extract_json_object(json_string)
 
-    updated_count = 0
-    missing_keys = []
-    for idx, blk in enumerate(blk_list):
-        block_key = f"block_{idx}"
-        if block_key in translation_dict:
-            value = translation_dict[block_key]
-            blk.translation = value if isinstance(value, str) or value is None else str(value)
-            updated_count += 1
-        else:
-            missing_keys.append(block_key)
+class _DuplicateJsonKeyError(ValueError):
+    pass
 
-    if missing_keys:
-        logger.warning(
-            "translator response missing %d expected block key(s): %s",
-            len(missing_keys),
-            ", ".join(missing_keys[:10]),
+
+def set_texts_from_json(
+    blk_list: list[TextBlock],
+    json_string: str,
+    *,
+    request_indices: tuple[int, ...] | None = None,
+):
+    if request_indices is None:
+        request_indices = tuple(range(len(blk_list)))
+    expected_blocks = {
+        f"block_{idx}": blk_list[idx]
+        for idx in request_indices
+    }
+    if not expected_blocks:
+        return 0
+
+    if not isinstance(json_string, str):
+        raise _invalid_translation_response(
+            "translation_response_invalid_content",
+            list(expected_blocks.values()),
         )
 
-    if updated_count == 0:
-        raise ValueError("Translator response JSON did not contain any expected block keys.")
+    if not json_string.strip():
+        raise _invalid_translation_response(
+            "translation_response_empty",
+            list(expected_blocks.values()),
+        )
 
-    return updated_count
+    try:
+        translation_dict = extract_json_object(json_string)
+    except _DuplicateJsonKeyError as exc:
+        error = _invalid_translation_response(
+            "translation_response_duplicate_ids",
+            list(expected_blocks.values()),
+        )
+        error.duplicate_response_keys = [str(exc)]
+        raise error from exc
+    except json.JSONDecodeError as exc:
+        raw_response = str(json_string or "")
+        kind = (
+            "translation_response_truncated"
+            if raw_response.count("{") > raw_response.count("}")
+            or exc.msg.startswith("Unterminated string")
+            else "translation_response_invalid_json"
+        )
+        raise _invalid_translation_response(
+            kind,
+            list(expected_blocks.values()),
+        ) from exc
+    except ValueError as exc:
+        raw_response = str(json_string or "")
+        if raw_response.count("{") > raw_response.count("}"):
+            kind = "translation_response_truncated"
+        else:
+            kind = "translation_response_invalid_json"
+        raise _invalid_translation_response(
+            kind,
+            list(expected_blocks.values()),
+        ) from exc
+
+    if not translation_dict:
+        raise _invalid_translation_response(
+            "translation_response_empty",
+            list(expected_blocks.values()),
+        )
+
+    expected_keys = set(expected_blocks)
+    response_keys = set(translation_dict)
+    missing_keys = expected_keys - response_keys
+    unexpected_keys = response_keys - expected_keys
+    if missing_keys or unexpected_keys:
+        if missing_keys and unexpected_keys:
+            kind = "translation_response_id_mismatch"
+        elif missing_keys:
+            kind = "translation_response_missing_ids"
+        else:
+            kind = "translation_response_unexpected_ids"
+        error = _invalid_translation_response(
+            kind,
+            list(expected_blocks.values()),
+        )
+        error.missing_response_keys = sorted(missing_keys)
+        error.unexpected_response_keys = sorted(unexpected_keys)
+        raise error
+
+    invalid_values = [
+        key
+        for key in expected_blocks
+        if not isinstance(translation_dict[key], str)
+        or not translation_dict[key].strip()
+    ]
+    if invalid_values:
+        error = _invalid_translation_response(
+            "translation_response_invalid_values",
+            list(expected_blocks.values()),
+        )
+        error.invalid_response_keys = invalid_values
+        raise error
+
+    for idx, blk in enumerate(blk_list):
+        block_key = f"block_{idx}"
+        if block_key in expected_blocks:
+            blk.translation = translation_dict[block_key]
+
+    return len(expected_blocks)
 
 def set_upper_case(blk_list: list[TextBlock], upper_case: bool):
     for blk in blk_list:
