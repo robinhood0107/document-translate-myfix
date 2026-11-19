@@ -11,6 +11,7 @@ from modules.ocr.mit48_assets import (
     MIT48_CTC_MODEL_IDENTITY,
     MIT48_RUNTIME_IDENTITY,
 )
+from modules.utils.decoded_image import decoded_image_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,7 @@ class CacheManager:
 
     def _generate_image_hash(self, image):
         """Generate a hash for the image to use as cache key"""
-        try:
-            # Use a small portion of the image data to generate hash for efficiency
-            # Take every 10th pixel to reduce computation while maintaining uniqueness
-            sample_data = image[::10, ::10].tobytes()
-            return hashlib.md5(sample_data).hexdigest()
-        except Exception:
-            # Fallback: use the full image shape and first few bytes if sampling fails
-            shape_str = str(image.shape) if hasattr(image, 'shape') else str(type(image))
-            fallback_data = shape_str.encode() + str(image.dtype).encode() if hasattr(image, 'dtype') else b'fallback'
-            return hashlib.md5(fallback_data).hexdigest()
+        return decoded_image_sha256(image)
 
     def _get_ocr_cache_key(
         self,
