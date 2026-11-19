@@ -41,6 +41,7 @@ from modules.utils.ocr_debug import (
 )
 from modules.utils.device import get_providers, resolve_device
 from modules.utils.download import ModelDownloader, ModelID
+from modules.utils.decoded_image import decoded_image_sha256
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
     INPAINT_RETRY_POLICY_VERSION,
@@ -229,22 +230,6 @@ def _canonical_json(value: Any) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
-
-
-def decoded_image_sha256(image: np.ndarray) -> str:
-    contiguous = np.ascontiguousarray(image)
-    digest = hashlib.sha256()
-    digest.update(str(contiguous.dtype).encode("ascii", errors="strict"))
-    digest.update(b"\0")
-    digest.update(
-        ",".join(str(int(item)) for item in contiguous.shape).encode(
-            "ascii",
-            errors="strict",
-        )
-    )
-    digest.update(b"\0")
-    digest.update(contiguous.tobytes(order="C"))
-    return digest.hexdigest()
 
 
 def project_checkpoint_page_key(main_page: Any, image_path: str) -> str:

@@ -344,6 +344,49 @@ class TranslationProcessorMemoryTests(unittest.TestCase):
         self.assertEqual(first_blocks[0].translation, "cat!")
         self.assertEqual(second_blocks[0].translation, "cat!")
 
+    def test_non_gemma_legacy_cache_misses_when_decoded_image_changes(self) -> None:
+        translator = object.__new__(Translator)
+        translator._local_gemma_runtime_manager = None
+        translator.source_lang = "Japanese"
+        translator.target_lang = "Korean"
+        translator.source_lang_en = "Japanese"
+        translator.target_lang_en = "Korean"
+        translator.translator_key = "GPT-4.1"
+        translator.engine = SimpleNamespace()
+        translator.is_llm_engine = False
+        translate_call_count = 0
+
+        def translate(blocks, _image, _extra_context):
+            nonlocal translate_call_count
+            translate_call_count += 1
+            for block in blocks:
+                block.translation = "cat"
+            return blocks
+
+        translator.translate = translate
+        cache_manager = CacheManager()
+        image = np.zeros((20, 20, 3), dtype=np.uint8)
+        changed = image.copy()
+        changed[1, 1, 0] = 1
+
+        _, first_status = translator.translate_with_cache_manager(
+            [self._block()],
+            image,
+            "context",
+            cache_manager,
+        )
+        second_blocks, second_status = translator.translate_with_cache_manager(
+            [self._block()],
+            changed,
+            "context",
+            cache_manager,
+        )
+
+        self.assertEqual(translate_call_count, 2)
+        self.assertEqual(first_status, "refreshed")
+        self.assertEqual(second_status, "refreshed")
+        self.assertEqual(second_blocks[0].translation, "cat")
+
     def test_persistent_memory_bypasses_legacy_cache_manager(self) -> None:
         translator = object.__new__(Translator)
         translator._local_gemma_runtime_manager = object()

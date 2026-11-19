@@ -44,6 +44,54 @@ def _run_responses(responses: list[dict], *, stale_result: bool = False):
 
 
 class HunyuanOCRTruncationTests(unittest.TestCase):
+    def test_ocr_cache_keys_use_full_decoded_image_identity(self) -> None:
+        image = np.zeros((20, 20, 3), dtype=np.uint8)
+        unchanged = image.copy()
+        changed = image.copy()
+        changed[1, 1, 0] = 1
+        block = TextBlock(
+            text_bbox=np.asarray([2, 3, 10, 11], dtype=np.int32),
+            text="cached text",
+            block_id="synthetic-block",
+        )
+        cache = CacheManager()
+        cache_key = cache._get_ocr_cache_key(image, "English", "Default", "cpu")
+        cache._cache_ocr_results(cache_key, [block])
+
+        self.assertEqual(
+            cache_key,
+            cache._get_ocr_cache_key(unchanged, "English", "Default", "cpu"),
+        )
+        self.assertTrue(
+            cache._can_serve_all_blocks_from_ocr_cache(
+                cache._get_ocr_cache_key(unchanged, "English", "Default", "cpu"),
+                [block],
+            )
+        )
+        self.assertFalse(
+            cache._can_serve_all_blocks_from_ocr_cache(
+                cache._get_ocr_cache_key(changed, "English", "Default", "cpu"),
+                [block],
+            )
+        )
+
+        strided_source = np.repeat(np.repeat(image, 2, axis=0), 2, axis=1)
+        strided = strided_source[::2, ::2]
+        self.assertFalse(strided.flags.c_contiguous)
+        self.assertEqual(
+            cache_key,
+            cache._get_ocr_cache_key(strided, "English", "Default", "cpu"),
+        )
+        self.assertNotEqual(
+            cache_key,
+            cache._get_ocr_cache_key(
+                image.reshape(10, 40, 3),
+                "English",
+                "Default",
+                "cpu",
+            ),
+        )
+
     def test_length_response_does_not_publish_partial_text(self) -> None:
         sender, block, before_bbox = _run_responses(
             [_response("partial OCR text", " LENGTH ")],

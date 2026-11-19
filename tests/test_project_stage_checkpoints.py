@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import hashlib
 import tempfile
+import tracemalloc
 import unittest
 from unittest import mock
 
@@ -182,6 +183,55 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             decoded_image_sha256(base),
             decoded_image_sha256(np.zeros((5, 4, 3), dtype=np.uint8)),
         )
+
+    def test_decoded_image_hash_preserves_checkpoint_bytes_for_strided_arrays(self) -> None:
+        image = np.arange(24, dtype=np.uint8).reshape(2, 4, 3)
+
+        self.assertEqual(
+            decoded_image_sha256(image),
+            "249ae46b60a53547614ac47df75a330b89031ab40c99d9aa4db9de0dac7a51af",
+        )
+        self.assertEqual(
+            decoded_image_sha256(image[:, ::2, :]),
+            "39f5f074fe8406afcf3dc9c0a8c35714ee4893d498c032a512dccaeded235720",
+        )
+
+    def test_decoded_image_hash_matches_legacy_bytes_without_duplicate_copy(self) -> None:
+        arrays = [
+            np.arange(24, dtype=np.uint8).reshape(2, 4, 3),
+            np.arange(60, dtype=np.int16).reshape(4, 5, 3)[::2, 1::2, :],
+            np.arange(12, dtype=">u2").reshape(2, 2, 3),
+            np.zeros((0, 3, 2), dtype=np.uint8),
+            np.zeros((2, 0), dtype=np.int32),
+        ]
+
+        for image in arrays:
+            contiguous = np.ascontiguousarray(image)
+            expected = hashlib.sha256(
+                str(contiguous.dtype).encode("ascii", errors="strict")
+                + b"\0"
+                + ",".join(str(int(item)) for item in contiguous.shape).encode(
+                    "ascii",
+                    errors="strict",
+                )
+                + b"\0"
+                + contiguous.tobytes(order="C")
+            ).hexdigest()
+            self.assertEqual(decoded_image_sha256(image), expected)
+
+        image = np.zeros((512, 1024, 3), dtype=np.uint8)
+        strided = image[:, ::2, :]
+        for candidate, max_peak in (
+            (image, image.nbytes // 2),
+            (strided, strided.nbytes * 3 // 2),
+        ):
+            tracemalloc.start()
+            try:
+                decoded_image_sha256(candidate)
+                _current, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertLess(peak, max_peak)
 
     def test_detection_round_trip_preserves_order_class_and_mask(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
