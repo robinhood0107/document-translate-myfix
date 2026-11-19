@@ -8,6 +8,7 @@ from unittest import mock
 
 from scripts import windows_install_state
 from modules.utils import windows_installation
+from modules.utils.download import FULL_ONLY_APPLICATION_MODELS, application_model_profile
 
 
 class WindowsInstallStateTests(unittest.TestCase):
@@ -145,9 +146,18 @@ class WindowsInstallStateTests(unittest.TestCase):
             windows_install_state.command_preflight(args)
         docker.assert_not_called()
 
-    def test_full_preflight_validates_the_full_application_profile(self) -> None:
+    def test_legacy_full_preflight_validates_only_the_declared_model_seal(self) -> None:
         payload = self._payload()
         payload["provisioned_tier"] = "full"
+        legacy_full_ids = {
+            model_id.value
+            for model_id in application_model_profile("full")
+            if model_id not in FULL_ONLY_APPLICATION_MODELS
+        }
+        payload["application_models"] = [
+            {"id": model_id, "files": [{"path": f"models/{model_id}/model.bin", "bytes": 1, "mtime_ns": 1}]}
+            for model_id in sorted(legacy_full_ids)
+        ]
         args = argparse.Namespace(
             runtime="cuda13",
             requirements="requirements-cuda13.txt",
@@ -168,10 +178,22 @@ class WindowsInstallStateTests(unittest.TestCase):
         ):
             windows_install_state.command_preflight(args)
 
-        validate_models.assert_called_once_with(
-            payload,
-            profile="full",
-            allow_digest_fallback=True,
+        self.assertEqual(
+            [call.kwargs["model_ids"] for call in validate_models.call_args_list],
+            [
+                {model_id.value}
+                for model_id in windows_install_state.ModelID
+                if model_id.value in legacy_full_ids
+            ],
+        )
+        self.assertTrue(
+            all(call.args[0] is payload for call in validate_models.call_args_list)
+        )
+        self.assertTrue(
+            all(
+                call.kwargs["allow_digest_fallback"] is True
+                for call in validate_models.call_args_list
+            )
         )
 
     def test_image_identity_drift_fails_instead_of_repairing(self) -> None:

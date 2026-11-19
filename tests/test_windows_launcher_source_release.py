@@ -35,6 +35,18 @@ RUNTIME_SPEC.loader.exec_module(runtime_verifier)
 
 
 class WindowsLauncherSourceReleaseTests(unittest.TestCase):
+    def test_mit48_runtime_modules_fit_the_existing_source_bundle_allowlist(self) -> None:
+        for path in (
+            "modules/ocr/mit48_assets.py",
+            "modules/ocr/mit48_engine.py",
+            "modules/ocr/mit48_worker.py",
+            "modules/utils/download.py",
+            "modules/utils/windows_installation.py",
+            "scripts/windows_install_state.py",
+        ):
+            with self.subTest(path=path):
+                release._validate_allowed_file(path)
+
     def test_allowlist_contains_runtime_and_excludes_dev_assets(self) -> None:
         entries = release.list_release_entries(ROOT, "HEAD")
         paths = {entry.path for entry in entries}

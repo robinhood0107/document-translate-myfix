@@ -50,9 +50,10 @@ The non-interactive setup prepares:
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf` (about 13.58 GiB)
 
-`setup_full.bat` and `setup_full_cuda13.bat` add MangaLMM and PaddleOCR VL
-Spotting to that list. The core tier is a subset of the full tier, so running
-`setup.bat` after `setup_full.bat` does not discard the extra volumes.
+`setup_full.bat` and `setup_full_cuda13.bat` add MangaLMM, PaddleOCR VL Spotting,
+and MIT 48px AR/CTC models, dictionaries, and runtime source. MIT 48px is an
+explicit OCR choice. Running core setup afterward preserves verified full-tier
+assets and volumes.
 
 Docker model sources are reused from `models\managed-runtime-sources` under
 the installation folder. Interrupted downloads resume on the
@@ -87,8 +88,9 @@ run_comic_cuda13.bat
 The run launchers verify the venv and atomic install state, export the exact
 setup-selected llama.cpp image, and start the application. They never install,
 download, pull, create, or reseal anything. Missing core state requires the
-matching setup BAT; missing MangaLMM/Spotting state requires setup_full before
-page processing starts.
+matching setup BAT. If the selected MangaLMM, Spotting, or MIT 48px AR/CTC OCR
+is missing required setup state, run the matching `setup_full` BAT before page
+processing.
 
 Before creating a container, the CUDA13 launcher still compares the image's
 `NVIDIA_REQUIRE_CUDA` value with the driver compatibility version. After setup,

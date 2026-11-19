@@ -55,7 +55,10 @@ from app.projects.stage_checkpoints import (
 )
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
-from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.ocr.local_runtime import (
+    LocalOCRRuntimeManager,
+    NativeOCRWorkerReleaseError,
+)
 from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
 from modules.ocr.persistent_cache import (
     OCRPersistentResultCache,
@@ -151,9 +154,11 @@ from .render_worker import RenderJobInput, RenderJobResult, run_render_job
 from .runtime_resource_arbiter import (
     RuntimeModelState,
     RuntimeResourceArbiter,
+    shared_runtime_resource_arbiter,
 )
 
 logger = logging.getLogger(__name__)
+_NATIVE_WORKER_OCR_KEYS = frozenset({"MIT 48px AR", "MIT 48px CTC"})
 _SOURCE_IMAGE_FAILURE_REASONS = frozenset(
     {
         "source_identity_missing_after_detect",
@@ -487,7 +492,9 @@ class StageBatchedProcessor(BatchProcessor):
         self._gemma_prefetch_job: Future | None = None
         self._ocr_container_prewarm_job: Future | None = None
         self._prewarm_cancel_event = threading.Event()
-        self._runtime_resource_arbiter_instance = RuntimeResourceArbiter()
+        self._runtime_resource_arbiter_instance = shared_runtime_resource_arbiter(
+            self.main_page
+        )
         self._inpainter_runtime_lease_held = False
         self._runtime_gpu_start_baselines: dict[str, dict[str, Any]] = {}
         self._runtime_gpu_release_required: set[str] = set()
@@ -539,14 +546,8 @@ class StageBatchedProcessor(BatchProcessor):
         return self._prewarm_executor
 
     def _runtime_resource_arbiter(self) -> RuntimeResourceArbiter:
-        arbiter = getattr(
-            self,
-            "_runtime_resource_arbiter_instance",
-            None,
-        )
-        if not isinstance(arbiter, RuntimeResourceArbiter):
-            arbiter = RuntimeResourceArbiter()
-            self._runtime_resource_arbiter_instance = arbiter
+        arbiter = shared_runtime_resource_arbiter(self.main_page)
+        self._runtime_resource_arbiter_instance = arbiter
         return arbiter
 
     def _runtime_gpu_baselines(self) -> dict[str, dict[str, Any]]:
@@ -1174,6 +1175,8 @@ class StageBatchedProcessor(BatchProcessor):
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
             return
         engine_key = str(policy["primary_ocr_engine"])
+        if engine_key in _NATIVE_WORKER_OCR_KEYS:
+            return
         settings_page = self.main_page.settings_page
         persistent_cache_requested = bool(
             engine_key == "PaddleOCR VL"
@@ -1373,6 +1376,8 @@ class StageBatchedProcessor(BatchProcessor):
             return
         settings_page = self.main_page.settings_page
         engine_key = str(policy["primary_ocr_engine"])
+        if engine_key in _NATIVE_WORKER_OCR_KEYS:
+            return
         service = self._ocr_runtime_service_name(engine_key)
         self._await_prewarm_or_run(
             "ocr",
@@ -1420,7 +1425,7 @@ class StageBatchedProcessor(BatchProcessor):
         if not callable(prepare):
             return
         engine_key = str(policy.get("primary_ocr_engine", "") or "")
-        if not engine_key:
+        if not engine_key or engine_key in _NATIVE_WORKER_OCR_KEYS:
             return
         settings_page = self.main_page.settings_page
         service = self._ocr_runtime_service_name(engine_key)
@@ -2128,6 +2133,27 @@ class StageBatchedProcessor(BatchProcessor):
             setter = getattr(engine, "set_cancel_checker", None)
             if callable(setter):
                 setter(getattr(self.main_page, "is_current_task_cancelled", None))
+            if engine_key in _NATIVE_WORKER_OCR_KEYS:
+                runtime_manager = getattr(
+                    self.main_page,
+                    "local_ocr_runtime_manager",
+                    None,
+                )
+                lease_setter = getattr(engine, "set_inference_lease_factory", None)
+                device = str(getattr(engine, "device", "cpu") or "cpu")
+                if (
+                    isinstance(runtime_manager, LocalOCRRuntimeManager)
+                    and callable(lease_setter)
+                    and device != "cpu"
+                ):
+                    lease_setter(
+                        lambda: runtime_manager.router_inference_lease(
+                            engine_key,
+                            settings_page,
+                            resource_arbiter=self._runtime_resource_arbiter(),
+                            device=device,
+                        )
+                    )
 
         paddle_plan = ctx.paddleocr_cache_plan
         paddle_engine = ctx.paddleocr_cache_engine
@@ -2192,6 +2218,8 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 selected_ocr_mode=policy["normalized_ocr_mode"],
             )
+            if engine_key in _NATIVE_WORKER_OCR_KEYS:
+                engine = copy.copy(engine)
             attach_cancel_checker(engine)
             engine.process_image(ctx.image, ctx.blk_list)
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
@@ -3051,6 +3079,8 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                     **ctx.page_ocr_metrics,
                 )
+            except NativeOCRWorkerReleaseError:
+                raise
             except _OCRRuntimeIdentityChangedError:
                 fail_closed_runtime_identity_drift()
                 break
@@ -3071,7 +3101,10 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.paddleocr_cache_plan = None
                 ctx.paddleocr_cache_engine = None
 
-        if isinstance(runtime_manager, LocalOCRRuntimeManager):
+        if (
+            isinstance(runtime_manager, LocalOCRRuntimeManager)
+            and engine_key not in _NATIVE_WORKER_OCR_KEYS
+        ):
             self._shutdown_runtime_with_retry(
                 "OCR",
                 runtime_manager,

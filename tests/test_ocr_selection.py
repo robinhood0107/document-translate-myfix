@@ -6,6 +6,8 @@ from modules.ocr.selection import (
     OCR_MODE_BEST_LOCAL,
     OCR_MODE_DEFAULT,
     OCR_MODE_MANGALMM,
+    OCR_MODE_MIT48_AR,
+    OCR_MODE_MIT48_CTC,
     OCR_MODE_PADDLE_VL_SPOTTING,
     OCR_MANGALMM_LABEL,
     OCR_OPTIMAL_LABEL,
@@ -48,6 +50,24 @@ class OCRSelectionTests(unittest.TestCase):
 
     def test_best_local_routes_other_languages_to_paddle(self) -> None:
         self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "English"), "PaddleOCR VL")
+
+    def test_mit48_modes_keep_legacy_values_and_route_to_the_selected_engine(self) -> None:
+        for mode, engine in (
+            (OCR_MODE_MIT48_AR, "MIT 48px AR"),
+            (OCR_MODE_MIT48_CTC, "MIT 48px CTC"),
+        ):
+            with self.subTest(mode=mode):
+                self.assertEqual(normalize_ocr_mode(engine), mode)
+                self.assertEqual(resolve_ocr_engine(mode, "Japanese"), engine)
+                policy = resolve_stage_batched_ocr_policy(
+                    STAGE_BATCHED_WORKFLOW_MODE,
+                    mode,
+                    "Japanese",
+                    "gemma_local",
+                )
+                self.assertTrue(policy.stage_batched_supported)
+                self.assertEqual(policy.primary_ocr_engine, engine)
+                self.assertEqual(policy.resident_ocr_engines, ())
 
     def test_stage_batched_accepts_legacy_gemma_alias(self) -> None:
         policy = resolve_stage_batched_ocr_policy(

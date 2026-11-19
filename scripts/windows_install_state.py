@@ -15,9 +15,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from modules.utils.download import (  # noqa: E402
+    FULL_ONLY_APPLICATION_MODELS,
     ModelDownloader,
+    ModelID,
     application_model_profile,
-    provision_profile,
+    provision_model_ids,
 )
 
 SCHEMA_VERSION = 1
@@ -66,30 +68,102 @@ def _requirements_record(path: Path) -> dict[str, Any]:
     }
 
 
-def _model_records(profile: str) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for model_id in application_model_profile(profile):
-        spec = ModelDownloader.registry[model_id]
-        files: list[dict[str, Any]] = []
-        for index, remote_name in enumerate(spec.files):
-            local_name = (
-                spec.save_as.get(remote_name, remote_name)
-                if spec.save_as
-                else remote_name
+def _ordered_model_ids(model_ids: set[ModelID]) -> tuple[ModelID, ...]:
+    return tuple(model_id for model_id in ModelID if model_id in model_ids)
+
+
+def _model_file_pins(model_id: ModelID) -> list[dict[str, str]]:
+    spec = ModelDownloader.registry[model_id]
+    if len(spec.files) != len(spec.sha256):
+        raise InstallStateError(f"Application model pin count is invalid: {model_id.value}")
+    pins: list[dict[str, str]] = []
+    for index, remote_name in enumerate(spec.files):
+        local_name = (
+            spec.save_as.get(remote_name, remote_name)
+            if spec.save_as
+            else remote_name
+        )
+        path = Path(spec.save_dir, local_name).resolve()
+        try:
+            relative = path.relative_to(ROOT).as_posix()
+        except ValueError as exc:
+            raise InstallStateError(
+                f"Unsafe registered application model path: {path}"
+            ) from exc
+        expected = str(spec.sha256[index] or "").strip().lower()
+        pins.append({
+            "path": relative,
+            "digest_algorithm": (
+                "sha256" if len(expected) == 64 else "md5" if len(expected) == 32 else ""
+            ),
+            "digest": expected,
+        })
+    return pins
+
+
+def _recorded_application_model_ids(
+    payload: dict[str, Any],
+    *,
+    required_ids: set[ModelID] | None = None,
+) -> set[ModelID]:
+    records = payload.get("application_models")
+    if not isinstance(records, list):
+        raise InstallStateError("Application model seal is missing.")
+    known_models = {model_id.value: model_id for model_id in ModelID}
+    model_ids: set[ModelID] = set()
+    seen_ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise InstallStateError("Invalid application model record.")
+        model_id = str(record.get("id") or "")
+        if model_id not in known_models:
+            raise InstallStateError(f"Unknown application model ID: {model_id or '<missing>'}")
+        if model_id in seen_ids:
+            raise InstallStateError(f"Duplicate application model ID: {model_id}")
+        seen_ids.add(model_id)
+        model_ids.add(known_models[model_id])
+
+    if required_ids is not None:
+        missing_required = {
+            model_id.value
+            for model_id in required_ids
+            if model_id not in model_ids
+        }
+        if missing_required:
+            raise InstallStateError(
+                "Application model seal is incomplete: "
+                + ", ".join(sorted(missing_required))
             )
-            path = Path(spec.save_dir, local_name).resolve()
+    return model_ids
+
+
+def _model_records(
+    profile: str,
+    *,
+    model_ids: set[ModelID] | None = None,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    selected_models = (
+        application_model_profile(profile)
+        if model_ids is None
+        else _ordered_model_ids(model_ids)
+    )
+    for model_id in selected_models:
+        files: list[dict[str, Any]] = []
+        for pin in _model_file_pins(model_id):
+            path = ROOT / pin["path"]
             if not path.is_file():
-                raise InstallStateError(f"Application model is missing: {model_id.value}/{local_name}")
-            expected = str(spec.sha256[index] or "").strip().lower()
-            algorithm = "sha256" if len(expected) == 64 else "md5" if len(expected) == 32 else ""
+                raise InstallStateError(
+                    f"Application model is missing: {model_id.value}/{path.name}"
+                )
             stat = path.stat()
             files.append(
                 {
-                    "path": path.relative_to(ROOT).as_posix(),
+                    "path": pin["path"],
                     "bytes": int(stat.st_size),
                     "mtime_ns": int(stat.st_mtime_ns),
-                    "digest_algorithm": algorithm,
-                    "digest": expected,
+                    "digest_algorithm": pin["digest_algorithm"],
+                    "digest": pin["digest"],
                 }
             )
         records.append({"id": model_id.value, "files": files})
@@ -104,11 +178,26 @@ def _read_state(runtime: str) -> dict[str, Any]:
         raise InstallStateError(
             f"Windows setup is incomplete for {runtime}. Run the matching setup BAT."
         ) from exc
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise InstallStateError(
             f"Windows setup state is unreadable for {runtime}. Run the matching setup BAT."
         ) from exc
-    if not isinstance(payload, dict) or int(payload.get("schema_version", 0)) != SCHEMA_VERSION:
+    if not isinstance(payload, dict):
+        raise InstallStateError(
+            f"Windows setup state is obsolete for {runtime}. Run the matching setup BAT."
+        )
+    schema_version = payload.get("schema_version", 0)
+    if isinstance(schema_version, bool) or not isinstance(schema_version, (int, str)):
+        raise InstallStateError(
+            f"Windows setup state is obsolete for {runtime}. Run the matching setup BAT."
+        )
+    try:
+        schema_version = int(schema_version)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise InstallStateError(
+            f"Windows setup state is obsolete for {runtime}. Run the matching setup BAT."
+        ) from exc
+    if schema_version != SCHEMA_VERSION:
         raise InstallStateError(
             f"Windows setup state is obsolete for {runtime}. Run the matching setup BAT."
         )
@@ -118,18 +207,28 @@ def _read_state(runtime: str) -> dict[str, Any]:
 def _validate_application_models(
     payload: dict[str, Any],
     *,
-    profile: str,
+    profile: str | None = None,
+    model_ids: set[str] | None = None,
     allow_digest_fallback: bool,
 ) -> None:
-    expected_ids = {model_id.value for model_id in application_model_profile(profile)}
+    expected_ids = (
+        {model_id.value for model_id in application_model_profile(profile or "core")}
+        if model_ids is None
+        else set(model_ids)
+    )
     records = payload.get("application_models")
     if not isinstance(records, list):
         raise InstallStateError("Application model seal is missing.")
-    by_id = {
-        str(record.get("id") or ""): record
-        for record in records
-        if isinstance(record, dict)
-    }
+    by_id: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise InstallStateError("Invalid application model record.")
+        model_id = str(record.get("id") or "")
+        if not model_id:
+            raise InstallStateError("Invalid application model ID.")
+        if model_id in by_id:
+            raise InstallStateError(f"Duplicate application model ID: {model_id}")
+        by_id[model_id] = record
     if not expected_ids.issubset(by_id):
         missing = ", ".join(sorted(expected_ids.difference(by_id)))
         raise InstallStateError(f"Application model seal is incomplete: {missing}")
@@ -138,10 +237,23 @@ def _validate_application_models(
         files = by_id[model_id].get("files")
         if not isinstance(files, list) or not files:
             raise InstallStateError(f"Application model seal has no files: {model_id}")
-        for record in files:
+        registered_pins: list[dict[str, str]] | None = None
+        if model_id in {item.value for item in FULL_ONLY_APPLICATION_MODELS}:
+            registered_pins = _model_file_pins(ModelID(model_id))
+            if len(files) != len(registered_pins):
+                raise InstallStateError(
+                    f"Application model seal shape changed: {model_id}"
+                )
+        for index, record in enumerate(files):
             if not isinstance(record, dict):
                 raise InstallStateError(f"Invalid application model record: {model_id}")
             relative = str(record.get("path") or "")
+            if registered_pins is not None:
+                pin = registered_pins[index]
+                if any(record.get(key) != pin[key] for key in pin):
+                    raise InstallStateError(
+                        f"Application model registry pin changed: {relative or model_id}"
+                    )
             path = (ROOT / relative).resolve()
             try:
                 path.relative_to(ROOT)
@@ -150,9 +262,20 @@ def _validate_application_models(
             if not path.is_file():
                 raise InstallStateError(f"Application model is missing: {relative}")
             stat = path.stat()
-            if int(record.get("bytes", -1)) != int(stat.st_size):
+            recorded_bytes = record.get("bytes")
+            recorded_mtime = record.get("mtime_ns")
+            if (
+                isinstance(recorded_bytes, bool)
+                or not isinstance(recorded_bytes, int)
+                or isinstance(recorded_mtime, bool)
+                or not isinstance(recorded_mtime, int)
+            ):
+                raise InstallStateError(
+                    f"Application model metadata is invalid: {relative}"
+                )
+            if recorded_bytes != stat.st_size:
                 raise InstallStateError(f"Application model size changed: {relative}")
-            if int(record.get("mtime_ns", -1)) == int(stat.st_mtime_ns):
+            if recorded_mtime == stat.st_mtime_ns:
                 continue
             if not allow_digest_fallback:
                 raise InstallStateError(f"Application model metadata changed: {relative}")
@@ -238,25 +361,39 @@ def _validate_docker_state(payload: dict[str, Any], *, tier: str) -> None:
 
 
 def command_provision(args: argparse.Namespace) -> int:
-    requirements = _requirements_record((ROOT / args.requirements).resolve())
-    effective_profile = args.profile
+    requested_ids = set(application_model_profile(args.profile))
+    sealed_ids: set[str] = set()
+    previous_state: dict[str, Any] | None = None
     try:
-        state = _read_state(args.runtime)
-        if str(state.get("provisioned_tier") or "") == "full":
-            effective_profile = "full"
-        if state.get("requirements") != requirements:
-            raise InstallStateError("Requirements fingerprint changed.")
-        _validate_application_models(
-            state,
-            profile=effective_profile,
-            allow_digest_fallback=False,
-        )
+        previous_state = _read_state(args.runtime)
     except InstallStateError:
-        provision_profile(
-            effective_profile,
+        pass
+
+    if previous_state is not None:
+        try:
+            previous_ids = _recorded_application_model_ids(previous_state)
+        except InstallStateError:
+            previous_ids = set()
+        for model_id in previous_ids:
+            try:
+                _validate_application_models(
+                    previous_state,
+                    model_ids={model_id.value},
+                    allow_digest_fallback=False,
+                )
+            except InstallStateError:
+                continue
+            sealed_ids.add(model_id.value)
+
+    missing_ids = _ordered_model_ids(
+        {model_id for model_id in requested_ids if model_id.value not in sealed_ids}
+    )
+    if missing_ids:
+        provision_model_ids(
+            missing_ids,
             progress_callback=lambda message: print(message, flush=True),
         )
-        print("Application model profile prepared and verified.")
+        print("Application model additions prepared and verified.")
     else:
         print("Application model seal is unchanged; model hashing and downloads skipped.")
     return 0
@@ -264,6 +401,13 @@ def command_provision(args: argparse.Namespace) -> int:
 
 def command_write(args: argparse.Namespace) -> int:
     _assert_runtime_image(args.runtime, args.image_ref)
+    previous_state: dict[str, Any] | None = None
+    previous_state_path = _state_path(args.runtime)
+    if previous_state_path.is_file():
+        try:
+            previous_state = _read_state(args.runtime)
+        except InstallStateError:
+            previous_state = None
     managed_path = Path(args.managed_state).resolve()
     try:
         managed = json.loads(managed_path.read_text(encoding="utf-8-sig"))
@@ -282,13 +426,31 @@ def command_write(args: argparse.Namespace) -> int:
         if isinstance(item, dict)
     )
     effective_tier = "full" if args.tier == "full" or has_full_runtime else "core"
-    effective_profile = "full" if effective_tier == "full" else args.profile
+    seal_model_ids = set(application_model_profile(args.profile))
+    if args.profile == "core" and previous_state is not None:
+        try:
+            previous_ids = _recorded_application_model_ids(previous_state)
+        except InstallStateError:
+            previous_ids = set()
+        for model_id in previous_ids:
+            try:
+                _validate_application_models(
+                    previous_state,
+                    model_ids={model_id.value},
+                    allow_digest_fallback=False,
+                )
+            except InstallStateError:
+                continue
+            seal_model_ids.add(model_id)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "runtime": args.runtime,
         "provisioned_tier": effective_tier,
         "requirements": _requirements_record((ROOT / args.requirements).resolve()),
-        "application_models": _model_records(effective_profile),
+        "application_models": _model_records(
+            args.profile,
+            model_ids=seal_model_ids,
+        ),
         "llama_image": {
             "ref": args.image_ref,
             "id": args.image_id,
@@ -335,7 +497,28 @@ def command_preflight(args: argparse.Namespace) -> int:
         else ""
     )
     _assert_runtime_image(args.runtime, image_ref)
-    _validate_application_models(payload, profile=tier, allow_digest_fallback=True)
+    required_model_ids = set(application_model_profile("core"))
+    if tier == "full":
+        required_model_ids = set(application_model_profile("full")) - set(
+            FULL_ONLY_APPLICATION_MODELS
+        )
+    sealed_model_ids = _recorded_application_model_ids(
+        payload,
+        required_ids=required_model_ids,
+    )
+    for model_id in _ordered_model_ids(sealed_model_ids):
+        try:
+            _validate_application_models(
+                payload,
+                model_ids={model_id.value},
+                allow_digest_fallback=True,
+            )
+        except InstallStateError as exc:
+            if model_id in FULL_ONLY_APPLICATION_MODELS:
+                raise InstallStateError(
+                    f"{exc} Run the matching setup_full BAT."
+                ) from exc
+            raise
     _validate_docker_state(payload, tier=tier)
     if args.emit_cmd:
         print(f"LLAMA_CPP_IMAGE={image_ref}")

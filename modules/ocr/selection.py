@@ -11,6 +11,8 @@ OCR_MODE_PADDLE_VL = "paddleocr_vl"
 OCR_MODE_PADDLE_VL_SPOTTING = "paddleocr_vl_spotting"
 OCR_MODE_HUNYUAN = "hunyuanocr"
 OCR_MODE_MANGALMM = "mangalmm"
+OCR_MODE_MIT48_AR = "mit48px"
+OCR_MODE_MIT48_CTC = "mit48px_ctc"
 
 OCR_DEFAULT_LABEL = "Default (existing auto: MangaOCR / PPOCR / Pororo...)"
 OCR_OPTIMAL_LABEL = "Optimal (HunyuanOCR / PaddleOCR VL)"
@@ -31,6 +33,8 @@ OCR_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ),
     (OCR_MODE_HUNYUAN, "HunyuanOCR"),
     (OCR_MODE_MANGALMM, OCR_MANGALMM_LABEL),
+    (OCR_MODE_MIT48_AR, "MIT 48px AR"),
+    (OCR_MODE_MIT48_CTC, "MIT 48px CTC"),
 )
 
 OCR_MODE_TO_ENGINE: dict[str, str] = {
@@ -42,6 +46,8 @@ OCR_MODE_TO_ENGINE: dict[str, str] = {
     OCR_MODE_PADDLE_VL_SPOTTING: "PaddleOCR VL Spotting",
     OCR_MODE_HUNYUAN: "HunyuanOCR",
     OCR_MODE_MANGALMM: "MangaLMM",
+    OCR_MODE_MIT48_AR: "MIT 48px AR",
+    OCR_MODE_MIT48_CTC: "MIT 48px CTC",
 }
 
 LOCAL_OCR_ENGINES = frozenset(
@@ -91,6 +97,10 @@ _ALIASES: dict[str, str] = {
     OCR_MODE_HUNYUAN: OCR_MODE_HUNYUAN,
     "HunyuanOCR": OCR_MODE_HUNYUAN,
     OCR_MODE_MANGALMM: OCR_MODE_MANGALMM,
+    OCR_MODE_MIT48_AR: OCR_MODE_MIT48_AR,
+    "MIT 48px AR": OCR_MODE_MIT48_AR,
+    OCR_MODE_MIT48_CTC: OCR_MODE_MIT48_CTC,
+    "MIT 48px CTC": OCR_MODE_MIT48_CTC,
     OCR_MANGALMM_LABEL: OCR_MODE_MANGALMM,
     "MangaLMM": OCR_MODE_MANGALMM,
 }
@@ -235,6 +245,10 @@ def resolve_stage_batched_ocr_policy(
     elif normalized_mode == OCR_MODE_MANGALMM:
         resident_engines = ("MangaLMM",)
         primary_engine = "MangaLMM"
+    elif normalized_mode == OCR_MODE_MIT48_AR:
+        primary_engine = "MIT 48px AR"
+    elif normalized_mode == OCR_MODE_MIT48_CTC:
+        primary_engine = "MIT 48px CTC"
     elif normalized_mode == OCR_MODE_BEST_LOCAL:
         if is_chinese_source_language(source_lang_text):
             resident_engines = ("HunyuanOCR",)

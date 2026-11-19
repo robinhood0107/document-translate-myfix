@@ -86,6 +86,10 @@ from modules.ocr.paddle_spotting.runtime import (
     validate_paddle_spotting_volume_name,
 )
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
+from modules.utils.gpu_handoff import (
+    query_cuda_handoff_metrics,
+    wait_for_global_vram_release,
+)
 from modules.utils.local_llama_router import (
     LocalLlamaRouterCoordinator,
     RouterModelMaterial,
@@ -116,6 +120,172 @@ class _ManagedVolumeNotProvisioned(RuntimeError):
     준비 스크립트를 돌리면 해결되는 상태다. 볼륨 라벨 불일치처럼 사람의 판단을
     요구하는 상태와 구별하려고 따로 둔다.
     """
+
+
+class NativeOCRWorkerReleaseError(RuntimeError):
+    pass
+
+
+class _NativeOCRWorkerLease:
+    def __init__(self, arbiter: Any, service: str, device: str) -> None:
+        self._arbiter = arbiter
+        self._service = service
+        self._device = device
+        self._worker_started = False
+        self._worker_reaped = False
+        self._model_loaded = False
+        self._baseline: dict[str, Any] | None = None
+        self._pre_stop: dict[str, Any] | None = None
+        self._measurement_error = ""
+        self.release_report: dict[str, Any] = {
+            "required": device.startswith("cuda"),
+            "observed": False,
+            "status": "not-started",
+        }
+        self._acquired = False
+
+    def __enter__(self):
+        if self._arbiter is None:
+            raise RuntimeError(
+                "MIT 48px GPU inference requires the shared runtime resource arbiter."
+            )
+        self._arbiter.acquire_external_model(self._service)
+        self._acquired = True
+        if self._device.startswith("cuda"):
+            try:
+                self._baseline = query_cuda_handoff_metrics()
+            except BaseException as sampling_error:
+                self._measurement_error = (
+                    f"{type(sampling_error).__name__}: {sampling_error}"
+                )
+                self.release_report = {
+                    "required": True,
+                    "observed": False,
+                    "status": "baseline_measurement_failed",
+                    "measurement_error": self._measurement_error,
+                }
+                try:
+                    self._arbiter.release_external_model(
+                        self._service,
+                        release_succeeded=True,
+                    )
+                except BaseException as release_error:
+                    self.release_report["arbiter_release_error"] = (
+                        f"{type(release_error).__name__}: {release_error}"
+                    )
+                    self._acquired = False
+                    raise NativeOCRWorkerReleaseError(
+                        f"{self._service} baseline sampling failed and arbiter "
+                        "release failed."
+                    ) from sampling_error
+                self._acquired = False
+                raise
+        return self
+
+    def mark_worker_started(self, _pid: int) -> None:
+        self._worker_started = True
+
+    def mark_model_loaded(self, _runtime: dict[str, Any]) -> None:
+        self._model_loaded = True
+        self._arbiter.mark_external_model_ready(self._service)
+
+    def capture_pre_stop(self) -> None:
+        if self._device.startswith("cuda"):
+            try:
+                self._pre_stop = query_cuda_handoff_metrics()
+            except Exception as exc:
+                self._measurement_error = f"{type(exc).__name__}: {exc}"
+
+    def mark_worker_reaped(self) -> None:
+        self._worker_reaped = True
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        release_succeeded = not self._worker_started
+        release_error: BaseException | None = None
+        if self._worker_started and self._worker_reaped:
+            if self._device.startswith("cuda"):
+                if (
+                    not self._measurement_error
+                    and self._baseline is not None
+                    and self._pre_stop is not None
+                ):
+                    try:
+                        self.release_report = wait_for_global_vram_release(
+                            self._pre_stop,
+                            gpu_release_expected=True,
+                            driver_baseline=self._baseline,
+                            min_drop_mb=0.0,
+                            expected_drop_ratio=0.9,
+                        )
+                        release_succeeded = bool(
+                            self.release_report.get("observed", False)
+                        )
+                    except BaseException as sampling_error:
+                        release_error = sampling_error
+                        self._measurement_error = (
+                            f"{type(sampling_error).__name__}: {sampling_error}"
+                        )
+                        self.release_report = {
+                            "required": True,
+                            "observed": False,
+                            "status": "measurement_failed",
+                            "model_loaded": self._model_loaded,
+                            "measurement_error": self._measurement_error,
+                        }
+                        release_succeeded = False
+                else:
+                    self.release_report = {
+                        "required": True,
+                        "observed": False,
+                        "status": "measurement_unavailable",
+                        "model_loaded": self._model_loaded,
+                        "measurement_error": self._measurement_error,
+                    }
+            else:
+                release_succeeded = True
+                self.release_report = {
+                    "required": False,
+                    "observed": True,
+                    "status": "process_exit",
+                    "device": self._device,
+                    "model_loaded": self._model_loaded,
+                }
+        elif self._worker_started:
+            self.release_report = {
+                "required": self._device.startswith("cuda"),
+                "observed": False,
+                "status": "worker_not_reaped",
+            }
+
+        if self._acquired:
+            try:
+                self._arbiter.release_external_model(
+                    self._service,
+                    release_succeeded=release_succeeded,
+                )
+            except BaseException as arbiter_error:
+                self.release_report["arbiter_release_error"] = (
+                    f"{type(arbiter_error).__name__}: {arbiter_error}"
+                )
+                self._acquired = False
+                raise NativeOCRWorkerReleaseError(
+                    f"{self._service} worker GPU release was not confirmed; "
+                    f"measurement={self._measurement_error or 'available'}; "
+                    f"arbiter={type(arbiter_error).__name__}."
+                ) from (release_error or exc or arbiter_error)
+            self._acquired = False
+        if not release_succeeded:
+            if exc is not None:
+                self.release_report["worker_error"] = (
+                    f"{type(exc).__name__}: {exc}"
+                )
+            raise NativeOCRWorkerReleaseError(
+                f"{self._service} worker GPU release was not confirmed; "
+                f"the runtime arbiter retains its lease. "
+                f"measurement={self._measurement_error or 'unavailable'}."
+            ) from (release_error or exc)
+        return False
+
 
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
@@ -313,6 +483,9 @@ class LocalOCRRuntimeManager:
         self,
         engine_key: str,
         settings_page: Any,
+        *,
+        resource_arbiter: Any | None = None,
+        device: str = "cpu",
     ) -> Any:
         """Return an HTTP-only Router lease, or a no-op for non-Router paths.
 
@@ -321,6 +494,15 @@ class LocalOCRRuntimeManager:
         returned coordinator lease checks the loaded alias again immediately
         before the request; it does not retain this manager lock during HTTP.
         """
+
+        native_service = {
+            "MIT 48px AR": "mit48_ar",
+            "MIT 48px CTC": "mit48_ctc",
+        }.get(str(engine_key))
+        if native_service is not None:
+            if str(device) == "cpu":
+                return nullcontext(None)
+            return _NativeOCRWorkerLease(resource_arbiter, native_service, str(device))
 
         with self._lock:
             pair = self.router_pair_for_engine(engine_key, settings_page)

@@ -4,7 +4,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator
 
 from modules.utils.exceptions import OperationCancelledError
 
@@ -264,6 +264,13 @@ class RuntimeResourceArbiter:
                         f"External GPU model lease is already held by "
                         f"{self._external_owner[0]}."
                     )
+                if (
+                    self._active_model == service
+                    and self._states.get(service) is RuntimeModelState.RELEASE_FAILED
+                ):
+                    raise RuntimeLeaseConflictError(
+                        f"Cannot reacquire {service}; its previous GPU release failed."
+                    )
                 if self._active_model not in {None, service}:
                     raise RuntimeLeaseConflictError(
                         f"Cannot acquire {service}; GPU model lease is held by "
@@ -310,22 +317,24 @@ class RuntimeResourceArbiter:
                     f"External GPU model lease for {service} is not held by "
                     "the current thread."
                 )
-            self._external_owner = None
-            if release_succeeded:
-                if self._active_model == service:
-                    self._active_model = None
-                self._transition(
-                    service,
-                    RuntimeModelState.STOPPED,
-                    outcome="completed",
-                )
-            else:
-                self._transition(
-                    service,
-                    RuntimeModelState.RELEASE_FAILED,
-                    outcome="failed",
-                )
-        self._command_lock.release()
+            try:
+                self._external_owner = None
+                if release_succeeded:
+                    if self._active_model == service:
+                        self._active_model = None
+                    self._transition(
+                        service,
+                        RuntimeModelState.STOPPED,
+                        outcome="completed",
+                    )
+                else:
+                    self._transition(
+                        service,
+                        RuntimeModelState.RELEASE_FAILED,
+                        outcome="failed",
+                    )
+            finally:
+                self._command_lock.release()
 
     def external_model_held_by_current_thread(self, service: str) -> bool:
         service = self._normalize_service(service)
@@ -394,3 +403,11 @@ class RuntimeResourceArbiter:
         if not normalized:
             raise ValueError("Runtime service name must not be empty.")
         return normalized
+
+
+def shared_runtime_resource_arbiter(owner: Any) -> RuntimeResourceArbiter:
+    arbiter = getattr(owner, "runtime_resource_arbiter", None)
+    if not isinstance(arbiter, RuntimeResourceArbiter):
+        arbiter = RuntimeResourceArbiter()
+        owner.runtime_resource_arbiter = arbiter
+    return arbiter

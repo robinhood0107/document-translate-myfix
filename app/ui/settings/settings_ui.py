@@ -1,8 +1,12 @@
-﻿import os
 from PySide6 import QtWidgets
 from PySide6 import QtCore
 
-from modules.ocr.selection import OCR_MODE_OPTIONS, WORKFLOW_MODE_OPTIONS
+from modules.ocr.selection import (
+    OCR_MODE_MIT48_AR,
+    OCR_MODE_MIT48_CTC,
+    OCR_MODE_OPTIONS,
+    WORKFLOW_MODE_OPTIONS,
+)
 
 from ..dayu_widgets.clickable_card import ClickMeta
 from ..dayu_widgets.divider import MDivider
@@ -65,7 +69,14 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.inpainters = ['AOT', 'lama_large_512px', 'lama_mpe']
         self.detectors = ['RT-DETR-v2']
         self.ocr_engine_keys = [key for key, _label in OCR_MODE_OPTIONS]
-        self.ocr_engines = [self.tr(label) for _key, label in OCR_MODE_OPTIONS]
+        translated_mit48_labels = {
+            OCR_MODE_MIT48_AR: self.tr("MIT 48px AR"),
+            OCR_MODE_MIT48_CTC: self.tr("MIT 48px CTC"),
+        }
+        self.ocr_engines = [
+            translated_mit48_labels.get(key, self.tr(label))
+            for key, label in OCR_MODE_OPTIONS
+        ]
         self.inpaint_strategy = [self.tr('Resize'), self.tr('Original'), self.tr('Crop')]
         self.themes = [self.tr('Dark'), self.tr('Light')]
         self.alignment = [self.tr("Left"), self.tr("Center"), self.tr("Right")]

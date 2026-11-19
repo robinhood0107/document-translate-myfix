@@ -173,6 +173,11 @@ class ComicTranslatePipeline:
     
     def webtoon_batch_process(self, selected_paths=None):
         """Webtoon batch processing with seam-aware virtual-page streaming."""
+        source_lang = self.main_page.s_combo.currentText()
+        assert_selected_windows_models_installed(
+            self.main_page.settings_page,
+            self.main_page.lang_mapping.get(source_lang, source_lang),
+        )
         return self.webtoon_batch_processor.webtoon_batch_process(selected_paths)
 
     # Segmentation methods (delegate to segmentation_handler)
