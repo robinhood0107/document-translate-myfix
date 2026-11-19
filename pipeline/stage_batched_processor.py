@@ -3820,9 +3820,9 @@ class StageBatchedProcessor(BatchProcessor):
         for index, ctx, inpaint_blocks in pending:
             if ctx.failed_stage:
                 continue
+            self._raise_if_cancelled()
+            self._drain_render_futures(block=False)
             try:
-                self._raise_if_cancelled()
-                self._drain_render_futures(block=False)
                 with self._measure_performance(
                     stage="inpaint",
                     operation="model_forward",
