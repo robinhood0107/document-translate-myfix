@@ -220,6 +220,117 @@ class RenderBackpressureTests(unittest.TestCase):
         processor._mark_page_failed.assert_not_called()
         self.assertEqual(current_page.failed_stage, "")
 
+    def test_model_forward_drain_preserves_bookkeeping_failures_and_cancellation(
+        self,
+    ) -> None:
+        for cancel_before_drain in (False, True):
+            with self.subTest(cancel_before_drain=cancel_before_drain):
+                processor, executor = _processor()
+                processor._submit_or_inline_render(
+                    _page(0), index=0, total_images=2, export_settings={}
+                )
+                previous_future = executor.futures[0]
+                current_page = _page(1)
+                block = TextBlock(
+                    text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+                    text="protected",
+                    text_class="sfx",
+                    block_id="stable",
+                )
+                current_page.blk_list = [block]
+                processor.main_page.settings_page = SimpleNamespace(
+                    get_hd_strategy_settings=lambda: {"strategy": "Original"},
+                    get_mask_refiner_settings=lambda: {},
+                    get_tool_selection=lambda _tool: "AOT",
+                    ui=SimpleNamespace(value_mappings={"Original": "Original"}),
+                )
+                processor._effective_export_settings = mock.Mock(return_value={})
+                processor._ensure_source_image = lambda ctx: ctx.image
+                processor._finish_inpaint_page = mock.Mock()
+                processor._release_inpainter_before_render = mock.Mock()
+                processor._measure_performance = mock.Mock(
+                    return_value=mock.MagicMock()
+                )
+                processor._sample_performance_resources = mock.Mock()
+
+                def model_ready() -> None:
+                    if cancel_before_drain:
+                        processor._render_cancel_event.set()
+                    previous_future.set_result(
+                        _result("example_previous_output.png")
+                    )
+
+                processor._ensure_inpainter = mock.Mock(side_effect=model_ready)
+                processor.inpainting = SimpleNamespace(
+                    inpaint_with_blocks=mock.Mock(),
+                )
+                bookkeeping_cause = ValueError("example bookkeeping cause")
+                bookkeeping_error = RuntimeError("example bookkeeping failure")
+                bookkeeping_error.__cause__ = bookkeeping_cause
+                processor._finish_render_page_bookkeeping = mock.Mock(
+                    side_effect=None if cancel_before_drain else bookkeeping_error
+                )
+
+                with mock.patch.object(StageBatchedProcessor, "_render_worker_count", return_value=1), mock.patch(
+                    "pipeline.stage_batched_processor.psutil.virtual_memory",
+                    return_value=SimpleNamespace(available=10**9),
+                ), mock.patch(
+                    "pipeline.stage_batched_processor.get_inpainter_runtime",
+                    return_value={"key": "AOT", "backend": "torch", "device": "cpu"},
+                ), mock.patch(
+                    "pipeline.stage_batched_processor.registered_inpainter_model_identity",
+                    return_value={},
+                ), mock.patch(
+                    "pipeline.stage_batched_processor.get_config",
+                    return_value={},
+                ), mock.patch(
+                    "pipeline.stage_batched_processor.split_inpaint_protected_ocr_blocks",
+                    return_value=([block], []),
+                ), mock.patch(
+                    "pipeline.stage_batched_processor.generate_mask",
+                    return_value={
+                        "final_mask": np.ones((10, 10), dtype=np.uint8),
+                        "raw_mask": np.ones((10, 10), dtype=np.uint8),
+                    },
+                ):
+                    if cancel_before_drain:
+                        with self.assertRaises(OperationCancelledError):
+                            processor._inpaint_all([current_page])
+                        processor._finish_render_page_bookkeeping.assert_not_called()
+                        processor.main_page.render_state_ready.emit.assert_not_called()
+                        self.assertEqual(len(processor._pending_render_jobs), 1)
+                    else:
+                        try:
+                            processor._inpaint_all([current_page])
+                        except RuntimeError as exc:
+                            caught = exc
+                        else:
+                            processor._mark_page_failed.assert_called_once()
+                            self.assertIs(
+                                processor._mark_page_failed.call_args.args[0],
+                                current_page,
+                            )
+                            self.fail(
+                                "prior render bookkeeping failure was attributed to the current page"
+                            )
+
+                        self.assertIs(caught, bookkeeping_error)
+                        self.assertIs(caught.__cause__, bookkeeping_cause)
+                        traceback_frames = {
+                            frame.name
+                            for frame in traceback.extract_tb(caught.__traceback__)
+                        }
+                        self.assertIn("_resolve_render_future", traceback_frames)
+                        self.assertIn("_drain_render_futures", traceback_frames)
+                        self.assertEqual(processor._pending_render_jobs, [])
+
+                processor._mark_page_failed.assert_not_called()
+                self.assertEqual(current_page.failed_stage, "")
+                processor._release_inpainter_before_render.assert_called_once_with(
+                    [current_page], handoff_outcome="aborted"
+                )
+                processor.inpainting.inpaint_with_blocks.assert_not_called()
+
     def test_outstanding_limit_waits_for_failed_future_then_submits(self) -> None:
         processor, executor = _processor()
         wait_started = threading.Event()
