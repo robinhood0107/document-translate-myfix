@@ -85,8 +85,8 @@ Local translation/runtime:
 ### Setup-managed vs user-supplied assets
 
 Windows setup downloads and seals the default RT-DETR/font/CTD/LaMa models.
-`setup_full*.bat` also seals optional AOT, MangaOCR, Pororo, and PPOCRv5 models;
-the running application never downloads them.
+`setup_full*.bat` also seals optional AOT, MangaOCR, Pororo, PPOCRv5, and MIT 48px
+AR/CTC OCR assets. The running application never downloads them.
 
 Prepared by Windows setup in verified external volumes:
 - the `gemma-4-26B-IQ4_NL.gguf` translation model
@@ -229,7 +229,7 @@ setup_cuda13.bat
 That prepares the selected venv, every default-pipeline app model (RT-DETR v2,
 font detection, CTD protect/positive-claim, and LaMa), and the three core
 runtimes: HunyuanOCR, PaddleOCR VL, and Gemma IQ4_NL. To also provision
-MangaLMM and PaddleOCR VL Spotting up front, use `setup_full.bat` or
+MangaLMM, PaddleOCR VL Spotting, and MIT 48px AR/CTC OCR, use `setup_full.bat` or
 `setup_full_cuda13.bat` instead. Setup is non-interactive and resumable:
 downloads resume from `models/managed-runtime-sources` under the installation
 folder, and only size/SHA-verified files enter Docker volumes. Re-running setup
@@ -248,8 +248,8 @@ run_comic_cuda13.bat
 
 Setup is required. The run launchers and the application never install packages,
 download models, pull images, or reseal volumes. Missing core state fails before
-the app starts; selecting MangaLMM or Spotting without the full tier fails before
-page 1 and points to `setup_full*.bat`. Use
+the app starts. Selecting MangaLMM, Spotting, or MIT 48px AR/CTC without the
+required setup state fails before page processing and points to `setup_full*.bat`. Use
 `setup.bat --doctor` or `setup_cuda13.bat --doctor` for a read-only status
 report.
 

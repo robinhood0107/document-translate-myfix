@@ -85,8 +85,8 @@ OCR:
 ### setup 관리 자산과 사용자 준비 자산 구분
 
 Windows core setup은 기본 RT-DETR/font/CTD/LaMa 모델을 내려받아 봉인합니다.
-`setup_full*.bat`은 선택형 AOT, MangaOCR, Pororo, PPOCRv5 모델도 봉인하며,
-실행 중인 앱은 이 모델들을 다운로드하지 않습니다.
+`setup_full*.bat`은 선택형 AOT, MangaOCR, Pororo, PPOCRv5와 MIT 48px AR/CTC
+OCR 자산도 봉인합니다. 실행 중인 앱은 이 모델들을 다운로드하지 않습니다.
 
 Windows setup이 검증된 external volume에 준비하는 자산:
 - `gemma-4-26B-IQ4_NL.gguf` Gemma 번역 모델
@@ -225,8 +225,8 @@ setup_cuda13.bat
 
 전용 venv, 기본 파이프라인 앱 모델 전체(RT-DETR v2, 글꼴 감지, CTD 보호 및
 positive-claim, LaMa), 그리고 핵심 런타임 3종(HunyuanOCR, PaddleOCR VL,
-Gemma IQ4_NL)을 준비합니다. MangaLMM과 PaddleOCR VL Spotting까지 미리 받아
-두려면 `setup_full.bat` 또는 `setup_full_cuda13.bat`을 사용하세요. 설치는 질문
+Gemma IQ4_NL)을 준비합니다. MangaLMM, PaddleOCR VL Spotting, MIT 48px AR/CTC
+OCR도 준비하려면 `setup_full.bat` 또는 `setup_full_cuda13.bat`을 사용하세요. 설치는 질문
 없이 진행되고 중단되어도 이어집니다. 다운로드는 설치 폴더의
 `models/managed-runtime-sources` cache에서 이어받고, 크기와 SHA-256을 통과한
 파일만 Docker volume에 들어갑니다. 다시 실행하면 ready manifest, 현재 image ID,
@@ -244,7 +244,8 @@ run_comic_cuda13.bat
 
 setup은 필수입니다. 실행 BAT와 앱은 package/model/image/volume을 설치하거나
 다운로드·재봉인하지 않습니다. core 봉인이 없으면 앱 시작 전에 중단하고,
-MangaLMM/Spotting을 full 없이 선택하면 페이지 1 전에 `setup_full*.bat`을 안내합니다.
+MangaLMM, Spotting, MIT 48px AR/CTC를 선택했는데 필요한 설치 상태가 없으면
+페이지 처리 전에 `setup_full*.bat`을 안내합니다.
 설치 상태만 읽기 전용으로
 확인하려면 `setup.bat --doctor` 또는 `setup_cuda13.bat --doctor`를 실행합니다.
 

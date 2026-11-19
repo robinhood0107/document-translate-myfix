@@ -1,10 +1,28 @@
-import os, sys, hashlib
+import os, sys, hashlib, stat, tempfile, zipfile, shutil
 import logging
 from enum import Enum
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable, Optional, Dict, List, Union
 from .download_file import download_url_to_file
 from .paths import get_project_models_dir
+from modules.ocr.mit48_assets import (
+    MIT48_AR_CHECKPOINT,
+    MIT48_AR_CHECKPOINT_SHA256,
+    MIT48_AR_DICTIONARY,
+    MIT48_AR_DICTIONARY_SHA256,
+    MIT48_CTC_ARCHIVE,
+    MIT48_CTC_ARCHIVE_SHA256,
+    MIT48_CTC_CHECKPOINT,
+    MIT48_CTC_CHECKPOINT_SHA256,
+    MIT48_CTC_DICTIONARY,
+    MIT48_CTC_DICTIONARY_SHA256,
+    MIT48_CTC_EXTRACT_DIRECTORY,
+    MIT48_MODEL_SOURCE_SHA256,
+    MIT48_MODEL_SOURCE_URLS,
+    MIT48_RELEASE_TAG,
+    MIT48_UPSTREAM_COMMIT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +115,11 @@ class ModelID(Enum):
     FONT_DETECTOR_ONNX = "font-detector-onnx"
     FONT_DETECTOR_TORCH = "font-detector-torch"
 
+    MIT48_AR = "mit48-ar"
+    MIT48_CTC_ARCHIVE = "mit48-ctc-archive"
+    MIT48_CTC = "mit48-ctc"
+    MIT48_SOURCE = "mit48-upstream-source"
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -149,6 +172,9 @@ class ModelDownloader:
                     f"Required model '{spec.id.value}' is not prepared. "
                     "Run the matching setup BAT before starting Comic Translate."
                 )
+            return
+        if spec.id == ModelID.MIT48_CTC:
+            _prepare_mit48_ctc_members()
             return
         _download_spec(spec)
 
@@ -377,22 +403,18 @@ def _download_spec(spec: ModelSpec):
             try:
                 if len(expected_checksum) == 64:
                     calculated = calculate_sha256_checksum(file_path)
-                    algo = 'sha256'
                 elif len(expected_checksum) == 32:
                     calculated = calculate_md5_checksum(file_path)
-                    algo = 'md5'
                 else:
                     # Unknown checksum format: force re-download
                     logger.warning(
                         f"Unknown checksum format for {remote_name} (len={len(expected_checksum)}). Redownloading..."
                     )
                     calculated = None
-                    algo = None
             except Exception:
                 # If checksum calculation fails, force re-download
                 logger.warning(f"Failed to calculate checksum for {local_name}. Redownloading...")
                 calculated = None
-                algo = None
 
             if calculated and calculated == expected_checksum:
                 continue
@@ -403,6 +425,125 @@ def _download_spec(spec: ModelSpec):
                     )
 
         _download_single_file(file_url, file_path, expected_checksum)
+
+
+def _prepare_mit48_ctc_members() -> None:
+    archive_spec = ModelDownloader.registry[ModelID.MIT48_CTC_ARCHIVE]
+    model_spec = ModelDownloader.registry[ModelID.MIT48_CTC]
+    destination = Path(model_spec.save_dir)
+    if destination.is_dir() and not destination.is_symlink():
+        existing_members = [
+            destination
+            / (
+                model_spec.save_as.get(remote_name, remote_name)
+                if model_spec.save_as
+                else remote_name
+            )
+            for remote_name in model_spec.files
+        ]
+        if all(path.is_file() and not path.is_symlink() for path in existing_members):
+            if ModelDownloader.is_downloaded(model_spec):
+                return
+    ModelDownloader.get(archive_spec)
+    if not ModelDownloader.is_downloaded(archive_spec):
+        raise RuntimeError("MIT 48px CTC archive did not pass its pinned checksum.")
+
+    archive_root = Path(archive_spec.save_dir)
+    archive_root.mkdir(parents=True, exist_ok=True)
+
+    expected = dict(zip(model_spec.files, model_spec.sha256))
+    expected_names = set(expected)
+    temporary_dir = Path(
+        tempfile.mkdtemp(prefix=".mit48-ctc-extract-", dir=str(archive_root))
+    )
+    backup_directory: Path | None = None
+    backup_destination: Path | None = None
+    try:
+        with zipfile.ZipFile(Path(archive_spec.save_dir, MIT48_CTC_ARCHIVE), "r") as archive:
+            entries = archive.infolist()
+            names = [entry.filename for entry in entries]
+            if len(names) != len(set(names)) or set(names) != expected_names:
+                raise RuntimeError(
+                    "MIT 48px CTC archive members do not match the pinned source mapping."
+                )
+
+            total_size = 0
+            for entry in entries:
+                name = entry.filename
+                path = PurePosixPath(name)
+                mode = (entry.external_attr >> 16) & 0xFFFF
+                if (
+                    not name
+                    or "\\" in name
+                    or name.startswith("/")
+                    or ":" in name
+                    or len(path.parts) != 1
+                    or any(part in {"", ".", ".."} for part in path.parts)
+                    or entry.is_dir()
+                    or stat.S_ISLNK(mode)
+                    or entry.flag_bits & 0x1
+                ):
+                    raise RuntimeError(
+                        f"MIT 48px CTC archive has an unsafe member: {name!r}"
+                    )
+                if entry.file_size <= 0 or entry.file_size > 1024**3:
+                    raise RuntimeError(
+                        f"MIT 48px CTC archive member exceeds the size limit: {name}"
+                    )
+                total_size += entry.file_size
+                if total_size > 2 * 1024**3:
+                    raise RuntimeError(
+                        "MIT 48px CTC archive exceeds the total uncompressed size limit."
+                    )
+                if (
+                    entry.compress_size <= 0
+                    or entry.file_size / entry.compress_size > 200
+                ):
+                    raise RuntimeError(
+                        f"MIT 48px CTC archive member exceeds the compression ratio limit: {name}"
+                    )
+
+                digest = hashlib.sha256()
+                member_path = temporary_dir / name
+                count = 0
+                with archive.open(entry, "r") as source, member_path.open("xb") as output:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        output.write(chunk)
+                        digest.update(chunk)
+                        count += len(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if count != entry.file_size or digest.hexdigest() != expected[name]:
+                    raise RuntimeError(
+                        f"MIT 48px CTC extracted member failed verification: {name}"
+                    )
+
+        if destination.exists() or destination.is_symlink():
+            backup_directory = Path(
+                tempfile.mkdtemp(prefix=".mit48-ctc-preserved-", dir=str(archive_root))
+            )
+            backup_destination = backup_directory / destination.name
+            try:
+                os.replace(destination, backup_destination)
+            except BaseException:
+                backup_directory.rmdir()
+                raise
+        try:
+            os.replace(temporary_dir, destination)
+        except BaseException as publish_error:
+            if backup_destination is not None:
+                try:
+                    os.replace(backup_destination, destination)
+                    backup_directory.rmdir()
+                except BaseException as restore_error:
+                    raise RuntimeError(
+                        "MIT 48px CTC publication failed; the previous directory "
+                        f"remains in its setup backup: {restore_error}"
+                    ) from publish_error
+            raise publish_error
+    finally:
+        if temporary_dir.exists():
+            shutil.rmtree(temporary_dir)
 
 
 # Registry population
@@ -766,6 +907,51 @@ def _register_defaults():
         save_as={'name%3D4x-epoch%3D84-step%3D1649340.ckpt': 'font-detector.ckpt'}
     ))
 
+    mit48_root = os.path.join(models_base_dir, "ocr", "mit48")
+    mit48_release = (
+        "https://github.com/zyddnys/manga-image-translator/releases/download/"
+        f"{MIT48_RELEASE_TAG}/"
+    )
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.MIT48_AR,
+        url=mit48_release,
+        files=[MIT48_AR_CHECKPOINT, MIT48_AR_DICTIONARY],
+        sha256=[MIT48_AR_CHECKPOINT_SHA256, MIT48_AR_DICTIONARY_SHA256],
+        save_dir=os.path.join(mit48_root, "ar"),
+    ))
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.MIT48_CTC_ARCHIVE,
+        url=mit48_release,
+        files=[MIT48_CTC_ARCHIVE],
+        sha256=[MIT48_CTC_ARCHIVE_SHA256],
+        save_dir=os.path.join(mit48_root, "ctc"),
+    ))
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.MIT48_CTC,
+        url="",
+        files=[MIT48_CTC_CHECKPOINT, MIT48_CTC_DICTIONARY],
+        sha256=[MIT48_CTC_CHECKPOINT_SHA256, MIT48_CTC_DICTIONARY_SHA256],
+        save_dir=os.path.join(
+            mit48_root,
+            "ctc",
+            MIT48_CTC_EXTRACT_DIRECTORY,
+        ),
+    ))
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.MIT48_SOURCE,
+        url="",
+        files=list(MIT48_MODEL_SOURCE_URLS),
+        sha256=[MIT48_MODEL_SOURCE_SHA256[name] for name in MIT48_MODEL_SOURCE_URLS],
+        save_dir=os.path.join(
+            mit48_root,
+            "runtime",
+            MIT48_UPSTREAM_COMMIT,
+            "manga_translator",
+            "ocr",
+        ),
+        additional_urls=dict(MIT48_MODEL_SOURCE_URLS),
+    ))
+
 _register_defaults()
 
 CORE_APPLICATION_MODELS: tuple[ModelID, ...] = (
@@ -792,6 +978,22 @@ OPTIONAL_APPLICATION_MODELS: tuple[ModelID, ...] = (
     ModelID.PPOCR_V5_REC_ESLAV_MOBILE,
 )
 
+MIT48_AR_APPLICATION_MODELS: tuple[ModelID, ...] = (
+    ModelID.MIT48_AR,
+    ModelID.MIT48_SOURCE,
+)
+MIT48_CTC_APPLICATION_MODELS: tuple[ModelID, ...] = (
+    ModelID.MIT48_CTC_ARCHIVE,
+    ModelID.MIT48_CTC,
+    ModelID.MIT48_SOURCE,
+)
+FULL_ONLY_APPLICATION_MODELS: tuple[ModelID, ...] = (
+    ModelID.MIT48_AR,
+    ModelID.MIT48_CTC_ARCHIVE,
+    ModelID.MIT48_CTC,
+    ModelID.MIT48_SOURCE,
+)
+
 # Compatibility alias.  The setup-owned startup profile is deliberately the
 # complete product-default pipeline, rather than the historical partial list.
 STARTUP_RUNTIME_MODELS: tuple[ModelID, ...] = CORE_APPLICATION_MODELS
@@ -802,8 +1004,25 @@ def application_model_profile(profile: str = "core") -> tuple[ModelID, ...]:
     if normalized not in {"core", "full"}:
         raise ValueError(f"Unknown application model profile: {profile}")
     if normalized == "full":
-        return CORE_APPLICATION_MODELS + OPTIONAL_APPLICATION_MODELS
+        return (
+            CORE_APPLICATION_MODELS
+            + OPTIONAL_APPLICATION_MODELS
+            + FULL_ONLY_APPLICATION_MODELS
+        )
     return CORE_APPLICATION_MODELS
+
+
+def provision_model_ids(
+    model_ids: Iterable[ModelID],
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
+    selected_ids = tuple(model_ids)
+    for index, model_id in enumerate(selected_ids, start=1):
+        if progress_callback is not None:
+            progress_callback(f"[model {index}/{len(selected_ids)}] Checking {model_id.value}...")
+        ModelDownloader.get(model_id)
+        if progress_callback is not None:
+            progress_callback(f"[model {index}/{len(selected_ids)}] Ready: {model_id.value}")
 
 
 def provision_profile(
@@ -812,13 +1031,7 @@ def provision_profile(
 ) -> None:
     """Download and verify every model owned by a setup profile."""
 
-    model_ids = application_model_profile(profile)
-    for index, model_id in enumerate(model_ids, start=1):
-        if progress_callback is not None:
-            progress_callback(f"[model {index}/{len(model_ids)}] Checking {model_id.value}...")
-        ModelDownloader.get(model_id)
-        if progress_callback is not None:
-            progress_callback(f"[model {index}/{len(model_ids)}] Ready: {model_id.value}")
+    provision_model_ids(application_model_profile(profile), progress_callback)
 
 
 def require_prepared_model(model: Union[ModelID, ModelSpec]) -> ModelSpec:

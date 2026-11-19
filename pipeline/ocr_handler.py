@@ -8,6 +8,7 @@ from modules.ocr.selection import resolve_ocr_engine
 from modules.utils.correction_dictionary import apply_ocr_result_dictionary
 from modules.utils.device import resolve_device
 from modules.utils.ocr_quality import summarize_ocr_quality
+from modules.utils.windows_installation import assert_selected_mit48_assets_installed
 from pipeline.webtoon_utils import filter_and_convert_visible_blocks, restore_original_block_coordinates
 
 logger = logging.getLogger(__name__)
@@ -82,11 +83,15 @@ class OCRHandler:
     def OCR_image(self, single_block: bool = False):
         source_lang = self.main_page.s_combo.currentText()
         if self.main_page.image_viewer.hasPhoto() and self.main_page.image_viewer.rectangles:
-            image = self.main_page.image_viewer.get_image_array()
             ocr_model = self.main_page.settings_page.get_tool_selection('ocr')
             source_lang_english = self.main_page.lang_mapping.get(
                 source_lang, source_lang
             )
+            assert_selected_mit48_assets_installed(
+                self.main_page.settings_page,
+                source_lang_english,
+            )
+            image = self.main_page.image_viewer.get_image_array()
             device = resolve_device(
                 self.main_page.settings_page.is_gpu_enabled()
             )
@@ -184,6 +189,15 @@ class OCRHandler:
                 self.main_page.webtoon_mode):
             logger.warning("OCR_webtoon_visible_area called but not in webtoon mode")
             return
+
+        source_lang_english = self.main_page.lang_mapping.get(
+            source_lang,
+            source_lang,
+        )
+        assert_selected_mit48_assets_installed(
+            self.main_page.settings_page,
+            source_lang_english,
+        )
         
         # Get the visible area image and mapping data
         visible_image, mappings = self.main_page.image_viewer.get_visible_area_image()

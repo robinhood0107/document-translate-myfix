@@ -5,7 +5,13 @@ import os
 from pathlib import Path
 
 from .paths import get_repo_root
-from .download import CORE_APPLICATION_MODELS, OPTIONAL_APPLICATION_MODELS, ModelID
+from .download import (
+    CORE_APPLICATION_MODELS,
+    MIT48_AR_APPLICATION_MODELS,
+    MIT48_CTC_APPLICATION_MODELS,
+    OPTIONAL_APPLICATION_MODELS,
+    ModelID,
+)
 
 
 CORE_APPLICATION_MODEL_IDS = frozenset(model.value for model in CORE_APPLICATION_MODELS)
@@ -31,7 +37,7 @@ def active_windows_install_state() -> dict:
     path = Path(get_repo_root()) / ".comic-bootstrap" / f"install-state-{runtime}.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -67,6 +73,64 @@ def active_windows_managed_runtime_names(state: dict | None = None) -> frozenset
     )
 
 
+def _selected_mit48_application_model_ids(ocr_engine: str) -> set[str]:
+    if ocr_engine == "MIT 48px AR":
+        return {model.value for model in MIT48_AR_APPLICATION_MODELS}
+    if ocr_engine == "MIT 48px CTC":
+        return {model.value for model in MIT48_CTC_APPLICATION_MODELS}
+    return set()
+
+
+def _assert_selected_mit48_seal(state: dict, model_ids: set[str]) -> None:
+    from scripts.windows_install_state import (
+        SCHEMA_VERSION,
+        InstallStateError,
+        _validate_application_models,
+    )
+
+    try:
+        version = state.get("schema_version")
+        try:
+            version_matches = (
+                not isinstance(version, bool)
+                and isinstance(version, (int, str))
+                and int(version) == SCHEMA_VERSION
+            )
+        except (TypeError, ValueError, OverflowError):
+            version_matches = False
+        if not version_matches:
+            raise InstallStateError("Windows setup state schema is invalid.")
+        _validate_application_models(
+            state,
+            model_ids=model_ids,
+            allow_digest_fallback=True,
+        )
+    except InstallStateError as exc:
+        raise RuntimeError(
+            "The selected MIT 48px OCR assets are missing or invalid. "
+            "Run the matching setup_full BAT before starting this job. "
+            f"({exc})"
+        ) from exc
+
+
+def assert_selected_mit48_assets_installed(
+    settings_page,
+    source_lang_english: str,
+) -> None:
+    if not active_windows_runtime():
+        return
+    from modules.ocr.selection import resolve_ocr_engine
+
+    model_ids = _selected_mit48_application_model_ids(
+        resolve_ocr_engine(
+            settings_page.get_tool_selection("ocr"),
+            source_lang_english,
+        )
+    )
+    if model_ids:
+        _assert_selected_mit48_seal(active_windows_install_state(), model_ids)
+
+
 def assert_selected_windows_models_installed(settings_page, source_lang_english: str) -> None:
     """Require exact setup-sealed records before any page is decoded."""
 
@@ -82,6 +146,7 @@ def assert_selected_windows_models_installed(settings_page, source_lang_english:
         settings_page.get_tool_selection("ocr"),
         source_lang_english,
     )
+    selected_mit48_models = _selected_mit48_application_model_ids(ocr_engine)
     required_models = set(CORE_APPLICATION_MODEL_IDS)
     required_runtimes: set[str] = set()
     optional_required = False
@@ -98,6 +163,9 @@ def assert_selected_windows_models_installed(settings_page, source_lang_english:
     elif ocr_engine == "MangaLMM":
         required_runtimes.add("MangaLMM-llama.cpp")
         optional_required = True
+    elif selected_mit48_models:
+        required_models.update(selected_mit48_models)
+        optional_required = True
 
     inpainter = normalize_inpainter_key(settings_page.get_tool_selection("inpainter"))
     if inpainter == "AOT":
@@ -111,6 +179,8 @@ def assert_selected_windows_models_installed(settings_page, source_lang_english:
     missing_models = sorted(required_models.difference(sealed_models))
     missing_runtimes = sorted(required_runtimes.difference(sealed_runtimes))
     if not missing_models and not missing_runtimes:
+        if selected_mit48_models:
+            _assert_selected_mit48_seal(state, selected_mit48_models)
         return
 
     setup_name = "setup_full" if optional_required else "setup"

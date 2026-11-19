@@ -3595,6 +3595,14 @@ Redémarrer maintenant ?</translation>
         <source>Export</source>
         <translation>Exporter</translation>
     </message>
+    <message>
+        <source>MIT 48px AR</source>
+        <translation>MIT 48px AR</translation>
+    </message>
+    <message>
+        <source>MIT 48px CTC</source>
+        <translation>MIT 48px CTC</translation>
+    </message>
 </context>
 <context>
     <name>ShortcutDefinitions</name>

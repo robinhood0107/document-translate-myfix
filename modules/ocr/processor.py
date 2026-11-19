@@ -1,3 +1,4 @@
+import copy
 import logging
 import numpy as np
 from typing import Any
@@ -8,6 +9,10 @@ from ..utils.textblock import TextBlock
 from ..utils.device import resolve_device
 from ..utils.language_utils import language_codes
 from .factory import OCRFactory
+from pipeline.runtime_resource_arbiter import (
+    RuntimeResourceArbiter,
+    shared_runtime_resource_arbiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,9 @@ class OCRProcessor:
     def _get_english_lang(self, translated_lang: str) -> str:
         return self.main_page.lang_mapping.get(translated_lang, translated_lang)
 
+    def _runtime_resource_arbiter(self) -> RuntimeResourceArbiter:
+        return shared_runtime_resource_arbiter(self.main_page)
+
     def process(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         """
         Process image with appropriate OCR engine.
@@ -83,16 +91,26 @@ class OCRProcessor:
             self.ocr_key,
             selected_ocr_mode=self.ocr_mode,
         )
+        if self.ocr_key in {"MIT 48px AR", "MIT 48px CTC"}:
+            engine = copy.copy(engine)
         setter = getattr(engine, "set_cancel_checker", None)
         if callable(setter):
             setter(getattr(self.main_page, "is_current_task_cancelled", None))
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         lease_setter = getattr(engine, "set_inference_lease_factory", None)
         if isinstance(runtime_manager, LocalOCRRuntimeManager) and callable(lease_setter):
+            device = str(getattr(engine, "device", "cpu") or "cpu")
+            lease_options = {}
+            if self.ocr_key in {"MIT 48px AR", "MIT 48px CTC"} and device != "cpu":
+                lease_options = {
+                    "resource_arbiter": self._runtime_resource_arbiter(),
+                    "device": device,
+                }
             lease_setter(
                 lambda: runtime_manager.router_inference_lease(
                     self.ocr_key,
                     self.settings,
+                    **lease_options,
                 )
             )
         self.last_engine_name = engine.__class__.__name__

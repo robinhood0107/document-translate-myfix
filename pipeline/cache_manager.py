@@ -6,6 +6,11 @@ from modules.utils.ocr_debug import (
     HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION,
     OCR_EMPTY_REASON_HUNYUAN_TRUNCATED,
 )
+from modules.ocr.mit48_assets import (
+    MIT48_AR_MODEL_IDENTITY,
+    MIT48_CTC_MODEL_IDENTITY,
+    MIT48_RUNTIME_IDENTITY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +20,8 @@ class CacheManager:
 
     PADDLEOCR_VL_CACHE_VERSION = "paddleocr_vl_text_guard_v1"
     HUNYUAN_OCR_CACHE_VERSION = HUNYUAN_OCR_RESPONSE_CONTRACT_VERSION
+    MIT48_AR_CACHE_VERSION = f"{MIT48_AR_MODEL_IDENTITY}:{MIT48_RUNTIME_IDENTITY}"
+    MIT48_CTC_CACHE_VERSION = f"{MIT48_CTC_MODEL_IDENTITY}:{MIT48_RUNTIME_IDENTITY}"
     
     def __init__(self):
         self.ocr_cache = {}  # OCR results cache: {(image_hash, model_key, source_lang): {block_id: text}}
@@ -82,6 +89,13 @@ class CacheManager:
         )
         if model_key == "hunyuanocr" or resolved_model_key == "hunyuanocr":
             return cls.HUNYUAN_OCR_CACHE_VERSION
+        if model_key in {"mit48px", "mit48pxar"} or resolved_model_key in {
+            "mit48px",
+            "mit48pxar",
+        }:
+            return cls.MIT48_AR_CACHE_VERSION
+        if model_key == "mit48pxctc" or resolved_model_key == "mit48pxctc":
+            return cls.MIT48_CTC_CACHE_VERSION
         if "paddleocr" in model_key and "vl" in model_key:
             return cls.PADDLEOCR_VL_CACHE_VERSION
         return ""

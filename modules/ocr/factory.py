@@ -15,6 +15,12 @@ from .ppocr import PPOCRv5Engine
 from .manga_ocr.onnx_engine import MangaOCREngineONNX
 from .pororo.onnx_engine import PororoOCREngineONNX  
 from .gemini_ocr import GeminiOCR
+from .mit48_engine import Mit48OCREngine
+from .mit48_assets import (
+    MIT48_AR_MODEL_IDENTITY,
+    MIT48_CTC_MODEL_IDENTITY,
+    MIT48_RUNTIME_IDENTITY,
+)
 
 
 class OCRFactory:
@@ -94,13 +100,18 @@ class OCRFactory:
         - If no dynamic values are found, falls back to a simple key
           based on ocr and source language.
         """
-        base = f"{ocr_key}_{source_lang}_{backend}"
+        is_mit48 = ocr_key in {"MIT 48px AR", "MIT 48px CTC"}
+        cache_backend = "torch" if is_mit48 else backend
+        base = f"{ocr_key}_{source_lang}_{cache_backend}"
 
         # Gather any dynamic bits we care about:
         extras = {}
 
         creds = settings.get_credentials(ocr_key)
-        device = resolve_device(settings.is_gpu_enabled(), backend)
+        device = resolve_device(
+            settings.is_gpu_enabled(),
+            "torch" if is_mit48 else backend,
+        )
 
         if creds:
             extras["credentials"] = creds
@@ -121,6 +132,15 @@ class OCRFactory:
         if ocr_key == "MangaLMM":
             extras["mangalmm_ocr"] = settings.get_mangalmm_ocr_settings()
             extras["selected_ocr_mode"] = normalize_ocr_mode(selected_ocr_mode)
+        if is_mit48:
+            extras["mit48_identity"] = {
+                "model": (
+                    MIT48_AR_MODEL_IDENTITY
+                    if ocr_key == "MIT 48px AR"
+                    else MIT48_CTC_MODEL_IDENTITY
+                ),
+                "runtime": MIT48_RUNTIME_IDENTITY,
+            }
 
         # The LLM OCR engines currently don't use the settings in the LLMs tab
         # so exclude this for now
@@ -171,6 +191,16 @@ class OCRFactory:
                 s,
                 source_lang_english=source_lang_english,
                 selected_ocr_mode=selected_ocr_mode,
+            ),
+            'MIT 48px AR': lambda s: cls._create_mit48_ocr(
+                s,
+                "ar",
+                source_lang_english,
+            ),
+            'MIT 48px CTC': lambda s: cls._create_mit48_ocr(
+                s,
+                "ctc",
+                source_lang_english,
             ),
         }
         
@@ -304,4 +334,20 @@ class OCRFactory:
             source_lang_english=source_lang_english,
             selected_ocr_mode=selected_ocr_mode,
         )
+        return engine
+
+    @staticmethod
+    def _create_mit48_ocr(
+        settings,
+        variant: str,
+        source_lang_english: str,
+    ) -> OCREngine:
+        use_gpu = settings.is_gpu_enabled()
+        device = resolve_device(use_gpu, "torch")
+        if use_gpu and device == "cpu":
+            raise RuntimeError(
+                "MIT 48px GPU inference was selected, but no PyTorch GPU device is available."
+            )
+        engine = Mit48OCREngine(variant, device, source_lang_english)
+        engine.initialize()
         return engine

@@ -26,6 +26,7 @@ from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import validate_ocr, validate_translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
+from modules.utils.windows_installation import assert_selected_mit48_assets_installed
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
 
 if TYPE_CHECKING:
@@ -278,10 +279,14 @@ class ManualWorkflowController:
                     blk_list = state.get("blk_list", [])
                     if not blk_list:
                         continue
+                    source_lang = state.get("source_lang", source_lang_fallback)
+                    assert_selected_mit48_assets_installed(
+                        self.main.settings_page,
+                        self.main.lang_mapping.get(source_lang, source_lang),
+                    )
                     image = self._load_page_image(file_path)
                     if image is None:
                         continue
-                    source_lang = state.get("source_lang", source_lang_fallback)
                     ocr.initialize(self.main, source_lang)
                     cache_key = cache_manager._get_ocr_cache_key(
                         image,

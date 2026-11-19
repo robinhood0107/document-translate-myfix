@@ -49,9 +49,10 @@ setup_cuda13.bat
 - PaddleOCR VL 1.6 model/mmproj
 - `gemma-4-26B-IQ4_NL.gguf`(약 13.58 GiB)
 
-`setup_full.bat`과 `setup_full_cuda13.bat`은 여기에 MangaLMM과 PaddleOCR VL
-Spotting까지 추가합니다. core 단계는 full 단계의 부분집합이므로
-`setup_full.bat` 뒤에 `setup.bat`을 실행해도 추가로 만든 볼륨이 사라지지 않습니다.
+`setup_full.bat`과 `setup_full_cuda13.bat`은 MangaLMM, PaddleOCR VL Spotting,
+MIT 48px AR/CTC 모델·사전·실행 소스를 추가합니다. MIT 48px를 쓰려면 OCR
+설정에서 직접 선택합니다. 이후 core setup을 다시 실행해도 검증된 full 자산과
+볼륨을 보존합니다.
 
 Docker 원본 모델은 설치 폴더의 `models\managed-runtime-sources`에서 재사용하고,
 중단된 다운로드는 다음 실행에서 이어받습니다. 모든 항목은 크기·SHA-256과
@@ -81,8 +82,9 @@ run_comic_cuda13.bat
 
 실행 런처는 venv와 원자적 install-state를 확인하고 setup이 선택한 정확한
 llama.cpp image를 전달한 뒤 앱을 띄웁니다. package/model/image/volume을 설치,
-다운로드, pull, 생성, 재봉인하지 않습니다. core 상태가 없으면 해당 setup BAT,
-MangaLMM/Spotting 상태가 없으면 페이지 처리 전에 setup_full을 요구합니다.
+다운로드, pull, 생성, 재봉인하지 않습니다. core 상태가 없으면 해당 setup BAT를
+실행합니다. 선택한 MangaLMM, Spotting, MIT 48px AR/CTC의 설치 상태가 없으면
+페이지 처리 전에 해당 `setup_full` BAT를 실행합니다.
 
 CUDA13 launcher는 `server-cuda13` 이미지의 `NVIDIA_REQUIRE_CUDA`와
 드라이버 호환 버전을 비교합니다. 준비 완료 뒤에는 ready manifest, image ID,
