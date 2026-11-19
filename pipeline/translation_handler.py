@@ -89,14 +89,29 @@ class TranslationHandler:
                     return
 
                 legacy_cache_key = None
+                prepared_request = None
                 if not translator.uses_persistent_translation_memory:
+                    cache_scope_blocks = self.main_page.blk_list
+                    if translator.is_llm_engine:
+                        prepared_request = (
+                            translator.engine._prepare_translation_input_request(
+                                [blk],
+                                include_blank=False,
+                            )
+                        )
+                        if not prepared_request[1]:
+                            return
+                        cache_scope_blocks = [blk]
                     legacy_cache_key = self.cache_manager._get_translation_cache_key(
                         image,
                         translator.source_lang_en,
                         translator.target_lang_en,
                         translator.translator_key,
                         extra_context,
-                        translator.translation_cache_identity,
+                        translator.translation_cache_identity_for_blocks(
+                            cache_scope_blocks,
+                            prepared_request,
+                        ),
                     )
                     cached_translation = (
                         self.cache_manager._get_cached_translation_for_block(
@@ -140,18 +155,26 @@ class TranslationHandler:
                     image,
                     extra_context,
                     requested_indices=[selected_index],
+                    _prepared_translation_request=prepared_request,
                 )
                 if legacy_cache_key is not None:
-                    original_blocks = (
-                        self.main_page.blk_list
-                        if len(working_blocks) == len(self.main_page.blk_list)
-                        else [blk]
-                    )
-                    self.cache_manager._cache_translation_results(
-                        legacy_cache_key,
-                        original_blocks,
-                        working_blocks,
-                    )
+                    if translator.is_llm_engine:
+                        self.cache_manager._cache_translation_results(
+                            legacy_cache_key,
+                            [blk],
+                            [working_blocks[selected_index]],
+                        )
+                    else:
+                        original_blocks = (
+                            self.main_page.blk_list
+                            if len(working_blocks) == len(self.main_page.blk_list)
+                            else [blk]
+                        )
+                        self.cache_manager._cache_translation_results(
+                            legacy_cache_key,
+                            original_blocks,
+                            working_blocks,
+                        )
                 translated = working_blocks[selected_index]
                 blk.translation = translated.translation
                 guard_metadata = getattr(

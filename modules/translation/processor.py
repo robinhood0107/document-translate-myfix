@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import numpy as np
 from typing import Iterable
@@ -206,6 +207,22 @@ class Translator:
     def uses_persistent_translation_memory(self) -> bool:
         return self._local_gemma_runtime_manager is not None
 
+    def translation_cache_identity_for_blocks(
+        self,
+        blk_list: list[TextBlock],
+        prepared_request: tuple[str, tuple[int, ...], str] | None = None,
+    ):
+        identity = getattr(self, "translation_cache_identity", None)
+        if not self.is_llm_engine:
+            return identity
+        if prepared_request is None:
+            prepared_request = self.engine._prepare_translation_input_request(
+                blk_list,
+                include_blank=False,
+            )
+        request_scope = hashlib.sha256(prepared_request[0].encode("utf-8")).hexdigest()
+        return identity, request_scope
+
     def translate_with_cache_manager(
         self,
         blk_list: list[TextBlock],
@@ -219,26 +236,56 @@ class Translator:
             translated = self.translate(blk_list, image, extra_context)
             return translated, self.translation_cache_status
 
+        prepared_request = None
+        if self.is_llm_engine:
+            prepared_request = self.engine._prepare_translation_input_request(
+                blk_list,
+                include_blank=False,
+            )
+            requested_blocks = [blk_list[idx] for idx in prepared_request[1]]
+        else:
+            requested_blocks = [
+                block
+                for block in blk_list
+                if str(getattr(block, "text", "") or "").strip()
+            ]
+        if not requested_blocks:
+            return blk_list, self.translation_cache_status
+
         cache_key = cache_manager._get_translation_cache_key(
             image,
             self.source_lang_en,
             self.target_lang_en,
             self.translator_key,
             extra_context,
-            getattr(self, "translation_cache_identity", None),
+            self.translation_cache_identity_for_blocks(
+                blk_list,
+                prepared_request,
+            ),
         )
         if cache_manager._can_serve_all_blocks_from_translation_cache(
             cache_key,
-            blk_list,
+            requested_blocks,
         ):
-            cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
+            cache_manager._apply_cached_translations_to_blocks(
+                cache_key,
+                requested_blocks,
+            )
             return blk_list, "hit"
 
-        translated = self.translate(blk_list, image, extra_context)
+        if prepared_request is None:
+            translated = self.translate(blk_list, image, extra_context)
+        else:
+            translated = self.translate(
+                blk_list,
+                image,
+                extra_context,
+                _prepared_translation_request=prepared_request,
+            )
         # Keep the legacy cache useful for remote/traditional translators, but
         # store the raw translation before user dictionary substitution so both
         # hit and miss paths apply current rules exactly once.
-        cache_manager._cache_translation_results(cache_key, blk_list)
+        cache_manager._cache_translation_results(cache_key, requested_blocks)
         return translated, "refreshed"
 
     def _report_translation_memory_warning(self) -> None:
@@ -292,6 +339,7 @@ class Translator:
         extra_context: str = "",
         *,
         requested_indices: Iterable[int] | None = None,
+        _prepared_translation_request: tuple[str, tuple[int, ...], str] | None = None,
     ) -> list[TextBlock]:
         """
         Translate text in text blocks using the configured translation engine.
@@ -330,7 +378,27 @@ class Translator:
                     )
                 finally:
                     self._report_translation_memory_warning()
-            return self.engine.translate(blk_list, image, extra_context)
+            requested_blocks = blk_list
+            if requested_indices is not None:
+                requested = sorted({int(index) for index in requested_indices})
+                invalid = [
+                    index
+                    for index in requested
+                    if index < 0 or index >= len(blk_list)
+                ]
+                if invalid:
+                    raise IndexError(
+                        f"Requested translation block indices are out of range: {invalid}"
+                    )
+                requested_blocks = [blk_list[index] for index in requested]
+            if _prepared_translation_request is None:
+                return self.engine.translate(requested_blocks, image, extra_context)
+            return self.engine.translate(
+                requested_blocks,
+                image,
+                extra_context,
+                prepared_translation_request=_prepared_translation_request,
+            )
         else:
             # Text-based translators only need the text blocks
             return self.engine.translate(blk_list)
