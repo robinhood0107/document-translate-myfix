@@ -507,6 +507,109 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
             "model_ready",
         )
 
+    def test_stage_memory_observations_are_safe_workload_features(self) -> None:
+        telemetry = PipelinePerformanceTelemetry(resource_sampling_enabled=False)
+        telemetry.record_workload_features(
+            "detect",
+            {
+                "process_rss_bytes": None,
+                "process_rss_bytes_source": "psutil.Process.memory_info.rss",
+                "process_rss_bytes_unit": "bytes",
+                "process_rss_bytes_status": "unavailable",
+                "process_rss_bytes_reason_code": "probe_failed",
+            },
+        )
+        telemetry.record_workload_features(
+            "ocr",
+            {
+                "process_rss_bytes": None,
+                "process_rss_bytes_source": r"C:\private\source",
+                "process_rss_bytes_unit": "bytes",
+                "process_rss_bytes_status": "unavailable",
+                "process_rss_bytes_reason_code": r"C:\private\error",
+                "source_path": r"C:\private\chapter01.jpg",
+                "raw_text": "secret",
+            },
+        )
+
+        stats = telemetry.snapshot()
+
+        self.assertEqual(
+            stats["workload"]["detect"],
+            {
+                "process_rss_bytes": None,
+                "process_rss_bytes_source": "psutil.Process.memory_info.rss",
+                "process_rss_bytes_unit": "bytes",
+                "process_rss_bytes_status": "unavailable",
+                "process_rss_bytes_reason_code": "probe_failed",
+            },
+        )
+        self.assertEqual(stats["workload"]["ocr"], {})
+
+    def test_repeated_stage_memory_updates_are_atomic(self) -> None:
+        telemetry = PipelinePerformanceTelemetry(resource_sampling_enabled=False)
+        telemetry.record_workload_features(
+            "detect",
+            {
+                "process_rss_bytes": None,
+                "process_rss_bytes_source": "psutil.Process.memory_info.rss",
+                "process_rss_bytes_unit": "bytes",
+                "process_rss_bytes_status": "unavailable",
+                "process_rss_bytes_reason_code": "probe_failed",
+                "page_count": 1,
+            },
+        )
+        telemetry.record_workload_features(
+            "detect",
+            {
+                " process_rss_bytes ": 0,
+                "PROCESS_RSS_BYTES_STATUS": 0,
+                "PROCESS_RSS_BYTES_SOURCE": r"C:\private\invalid",
+                " PAGE_COUNT ": 2,
+                "available_ram_bytes_status": 0,
+            },
+        )
+
+        workload = telemetry.snapshot()["workload"]["detect"]
+
+        self.assertIsNone(workload["process_rss_bytes"])
+        self.assertEqual(workload["process_rss_bytes_status"], "unavailable")
+        self.assertEqual(
+            workload["process_rss_bytes_source"],
+            "psutil.Process.memory_info.rss",
+        )
+        self.assertEqual(workload["process_rss_bytes_unit"], "bytes")
+        self.assertEqual(workload["process_rss_bytes_reason_code"], "probe_failed")
+        self.assertNotIn("available_ram_bytes_status", workload)
+        self.assertEqual(workload["page_count"], 2)
+
+        telemetry.record_workload_features(
+            "detect",
+            {
+                "process_rss_bytes": 1_000_000_000,
+                "process_rss_bytes_source": "psutil.Process.memory_info.rss",
+                "process_rss_bytes_unit": "bytes",
+                "process_rss_bytes_status": "observed",
+                "process_rss_bytes_reason_code": None,
+                "page_count": 4,
+            },
+            process_rss_bytes=None,
+            page_count=3,
+        )
+
+        workload = telemetry.snapshot()["workload"]["detect"]
+        self.assertIsNone(workload["process_rss_bytes"])
+        self.assertEqual(workload["process_rss_bytes_status"], "unavailable")
+        self.assertEqual(workload["page_count"], 3)
+
+        telemetry.record_workload_features(
+            "detect",
+            {"process_rss_bytes": 0, "page_count": 5},
+        )
+
+        workload = telemetry.snapshot()["workload"]["detect"]
+        self.assertEqual(workload, {"process_rss_bytes": 0, "page_count": 5})
+
     def test_measure_propagates_operation_errors_and_records_failure(self) -> None:
         telemetry = PipelinePerformanceTelemetry(resource_sampling_enabled=False)
 

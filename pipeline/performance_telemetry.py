@@ -29,6 +29,16 @@ _SAFE_CATEGORICAL_FEATURE_KEYS = frozenset(
         "workflow_mode",
     }
 )
+_STAGE_MEMORY_SOURCES = {
+    "process_rss_bytes": "psutil.Process.memory_info.rss",
+    "available_ram_bytes": "psutil.virtual_memory.available",
+}
+_STAGE_MEMORY_METADATA = ("source", "unit", "status", "reason_code")
+_STAGE_MEMORY_FEATURE_KEYS = frozenset(_STAGE_MEMORY_SOURCES) | frozenset(
+    f"{metric}_{suffix}"
+    for metric in _STAGE_MEMORY_SOURCES
+    for suffix in _STAGE_MEMORY_METADATA
+)
 _TERMINAL_RUN_TAGS = frozenset(
     {
         "batch_run_done",
@@ -340,11 +350,66 @@ class PipelinePerformanceTelemetry:
         **extra: Any,
     ) -> None:
         normalized_stage = self._safe_label(stage, fallback="pipeline")
-        combined = dict(features or {})
+        base_features = dict(features or {})
+        combined = dict(base_features)
         combined.update(extra)
         safe = self._safe_mapping(combined)
+        memory_features: dict[str, Any] = {}
+        for feature_map in (base_features, extra):
+            for key, value in feature_map.items():
+                normalized_key = self._safe_label(key, fallback="")
+                if normalized_key in _STAGE_MEMORY_FEATURE_KEYS:
+                    memory_features[normalized_key] = value
+        clear_metadata: list[str] = []
+        for metric, source in _STAGE_MEMORY_SOURCES.items():
+            metadata_keys = tuple(
+                f"{metric}_{suffix}" for suffix in _STAGE_MEMORY_METADATA
+            )
+            if not any(key in memory_features for key in (metric, *metadata_keys)):
+                continue
+            value = memory_features.get(metric)
+            if not any(key in memory_features for key in metadata_keys):
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    safe_value = self._safe_mapping({metric: value}).get(metric)
+                    if safe_value is not None:
+                        safe[metric] = safe_value
+                    clear_metadata.extend(metadata_keys)
+                else:
+                    safe.pop(metric, None)
+                continue
+            for key in (metric, *metadata_keys):
+                safe.pop(key, None)
+            status = memory_features.get(f"{metric}_status")
+            reason_code = memory_features.get(f"{metric}_reason_code")
+            if (
+                memory_features.get(f"{metric}_source") != source
+                or memory_features.get(f"{metric}_unit") != "bytes"
+            ):
+                continue
+            if (
+                status == "observed"
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                and reason_code is None
+            ) or (
+                status == "unavailable"
+                and value is None
+                and reason_code == "probe_failed"
+            ):
+                safe.update(
+                    {
+                        metric: value,
+                        f"{metric}_source": source,
+                        f"{metric}_unit": "bytes",
+                        f"{metric}_status": status,
+                        f"{metric}_reason_code": reason_code,
+                    }
+                )
         with self._lock:
             current = self._workload.setdefault(normalized_stage, {})
+            for key in clear_metadata:
+                current.pop(key, None)
             current.update(safe)
 
     def record_work_node(

@@ -178,12 +178,129 @@ class BufferSizeEstimateTests(unittest.TestCase):
         processor._record_performance_workload.assert_called_once_with(
             "detect",
             process_rss_bytes=1_000_000_000,
+            process_rss_bytes_source="psutil.Process.memory_info.rss",
+            process_rss_bytes_unit="bytes",
+            process_rss_bytes_status="observed",
+            process_rss_bytes_reason_code=None,
             available_ram_bytes=4_000_000_000,
+            available_ram_bytes_source="psutil.virtual_memory.available",
+            available_ram_bytes_unit="bytes",
+            available_ram_bytes_status="observed",
+            available_ram_bytes_reason_code=None,
             full_resolution_page_buffer_count=1,
             estimated_page_buffer_bytes=page.image.nbytes,
             released_page_buffer_bytes=123,
         )
         self.assertIsNotNone(page.image)
+
+    def test_stage_memory_probe_results_reach_the_run_report_independently(
+        self,
+    ) -> None:
+        from app.controllers.batch_report import BatchReportController
+        from pipeline.performance_telemetry import PipelinePerformanceTelemetry
+
+        observations = (
+            ("process_rss_bytes", OSError("private detail"), 0, None),
+            ("available_ram_bytes", None, OSError("private detail"), 1_000_000_000),
+            (None, None, 0, 1_000_000_000),
+        )
+        for failed_metric, process_error, memory_error, expected_rss in observations:
+            with self.subTest(failed_metric=failed_metric):
+                processor = StageBatchedProcessor.__new__(StageBatchedProcessor)
+                processor._released_page_buffer_bytes = 123
+                processor.performance_telemetry = PipelinePerformanceTelemetry(
+                    resource_sampling_enabled=False,
+                )
+                report_ctrl = BatchReportController.__new__(BatchReportController)
+                report_ctrl._current_batch_report = {"run_report_id": "example-run"}
+                processor.main_page = SimpleNamespace(batch_report_ctrl=report_ctrl)
+                processor._click_to_now_seconds = mock.Mock(return_value=1.0)
+                processor._page_outcomes = mock.Mock(return_value=[])
+                processor._run_started_wall_text = mock.Mock(return_value="")
+                page = StagePageContext(
+                    image_path="page.png",
+                    image_name="page.png",
+                    source_lang="Japanese",
+                    target_lang="Korean",
+                    image=np.zeros((10, 20, 3), dtype=np.uint8),
+                )
+                process = mock.Mock()
+                process.memory_info.return_value = mock.Mock(rss=1_000_000_000)
+                process_probe = (
+                    mock.Mock(side_effect=process_error)
+                    if process_error
+                    else mock.Mock(return_value=process)
+                )
+                memory_probe = (
+                    mock.Mock(side_effect=memory_error)
+                    if isinstance(memory_error, Exception)
+                    else mock.Mock(return_value=mock.Mock(available=memory_error))
+                )
+
+                with mock.patch(
+                    "pipeline.stage_batched_processor.psutil.Process",
+                    process_probe,
+                ), mock.patch(
+                    "pipeline.stage_batched_processor.psutil.virtual_memory",
+                    memory_probe,
+                ):
+                    processor._record_stage_memory_telemetry("detect", [page])
+
+                self.assertEqual(
+                    processor._write_run_report(
+                        [page],
+                        output_summary={"input_count": 1, "output_count": 1},
+                        processing_status="completed",
+                    ),
+                    "",
+                )
+                report = report_ctrl._current_batch_report["pipeline_run_report_data"]
+                workload = report["telemetry"]["value"]["workload"]["detect"]
+
+                if failed_metric == "process_rss_bytes":
+                    self.assertIsNone(workload["process_rss_bytes"])
+                    self.assertEqual(
+                        workload["process_rss_bytes_status"], "unavailable"
+                    )
+                    self.assertEqual(
+                        workload["available_ram_bytes"], 0
+                    )
+                    self.assertEqual(
+                        workload["available_ram_bytes_status"], "observed"
+                    )
+                elif failed_metric == "available_ram_bytes":
+                    self.assertEqual(workload["process_rss_bytes"], expected_rss)
+                    self.assertEqual(
+                        workload["process_rss_bytes_status"], "observed"
+                    )
+                    self.assertIsNone(workload["available_ram_bytes"])
+                    self.assertEqual(
+                        workload["available_ram_bytes_status"], "unavailable"
+                    )
+                else:
+                    self.assertEqual(workload["process_rss_bytes"], expected_rss)
+                    self.assertEqual(workload["available_ram_bytes"], memory_error)
+                    self.assertEqual(
+                        workload["process_rss_bytes_status"], "observed"
+                    )
+                    self.assertEqual(
+                        workload["available_ram_bytes_status"], "observed"
+                    )
+
+                for metric in ("process_rss_bytes", "available_ram_bytes"):
+                    self.assertEqual(workload[f"{metric}_unit"], "bytes")
+                    self.assertTrue(workload[f"{metric}_source"].startswith("psutil."))
+                    if workload[f"{metric}_status"] == "unavailable":
+                        self.assertIsNone(workload[metric])
+                        self.assertEqual(
+                            workload[f"{metric}_reason_code"], "probe_failed"
+                        )
+                    else:
+                        self.assertIsNone(workload[f"{metric}_reason_code"])
+                self.assertNotIn("private detail", str(workload))
+                self.assertEqual(workload["full_resolution_page_buffer_count"], 1)
+                self.assertEqual(workload["estimated_page_buffer_bytes"], page.image.nbytes)
+                self.assertEqual(workload["released_page_buffer_bytes"], 123)
 
 
 class SourceReloadTests(unittest.TestCase):

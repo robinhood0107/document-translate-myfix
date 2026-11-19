@@ -5265,26 +5265,46 @@ class StageBatchedProcessor(BatchProcessor):
             if page_bytes > 0:
                 buffered_pages += 1
                 buffer_bytes += page_bytes
+        process_rss: int | None = None
+        process_rss_status = "unavailable"
+        process_rss_reason = "probe_failed"
         try:
             process_rss = int(psutil.Process().memory_info().rss)
-            available_ram = int(psutil.virtual_memory().available)
+            process_rss_status = "observed"
+            process_rss_reason = None
         except Exception:
-            process_rss = 0
-            available_ram = 0
+            pass
+        available_ram: int | None = None
+        available_ram_status = "unavailable"
+        available_ram_reason = "probe_failed"
+        try:
+            available_ram = int(psutil.virtual_memory().available)
+            available_ram_status = "observed"
+            available_ram_reason = None
+        except Exception:
+            pass
         self._record_performance_workload(
             stage,
             process_rss_bytes=process_rss,
+            process_rss_bytes_source="psutil.Process.memory_info.rss",
+            process_rss_bytes_unit="bytes",
+            process_rss_bytes_status=process_rss_status,
+            process_rss_bytes_reason_code=process_rss_reason,
             available_ram_bytes=available_ram,
+            available_ram_bytes_source="psutil.virtual_memory.available",
+            available_ram_bytes_unit="bytes",
+            available_ram_bytes_status=available_ram_status,
+            available_ram_bytes_reason_code=available_ram_reason,
             full_resolution_page_buffer_count=buffered_pages,
             estimated_page_buffer_bytes=buffer_bytes,
             released_page_buffer_bytes=int(self._released_page_buffer_bytes),
         )
         logger.info(
-            "Stage memory: stage=%s rss=%d available=%d page_buffers=%d "
+            "Stage memory: stage=%s rss=%s available=%s page_buffers=%d "
             "estimated_buffer_bytes=%d released_bytes=%d",
             stage,
-            process_rss,
-            available_ram,
+            process_rss if process_rss is not None else "unavailable",
+            available_ram if available_ram is not None else "unavailable",
             buffered_pages,
             buffer_bytes,
             int(self._released_page_buffer_bytes),
