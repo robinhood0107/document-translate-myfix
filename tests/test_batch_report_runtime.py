@@ -167,6 +167,107 @@ class BatchReportRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_invalid_translation_response_is_localized_for_skip_notice_and_report(self) -> None:
+        qm_dir = Path(__file__).resolve().parents[1] / "resources" / "translations" / "compiled"
+        translations = {
+            "de": {
+                "detail": "Ungültige Übersetzungsantwort",
+                "base": "Übersetzung fehlgeschlagen",
+                "action": "Versuchen Sie einen anderen Übersetzer",
+            },
+            "es": {
+                "detail": "Respuesta de traducción no válida",
+                "base": "Error de traducción",
+                "action": "Prueba con otro traductor",
+            },
+            "fr": {
+                "detail": "Réponse de traduction invalide",
+                "base": "Échec de la traduction",
+                "action": "Essayez un autre traducteur",
+            },
+            "it": {
+                "detail": "Risposta di traduzione non valida",
+                "base": "Traduzione non riuscita",
+                "action": "Prova un altro traduttore",
+            },
+            "ja": {
+                "detail": "翻訳応答が無効です",
+                "base": "翻訳に失敗しました",
+                "action": "別の翻訳ツールをお試しください",
+            },
+            "ko": {
+                "detail": "번역 응답이 올바르지 않습니다",
+                "base": "번역 실패",
+                "action": "다른 번역기를 사용해 보세요",
+            },
+            "ru": {
+                "detail": "Некорректный ответ перевода",
+                "base": "Ошибка перевода",
+                "action": "Попробуйте другой переводчик",
+            },
+            "tr": {
+                "detail": "Çeviri yanıtı geçersiz",
+                "base": "Çeviri başarısız",
+                "action": "Başka bir çeviri aracı deneyin",
+            },
+            "zh-CN": {
+                "detail": "翻译响应无效",
+                "base": "翻译失败",
+                "action": "请尝试其他翻译工具",
+            },
+        }
+        for language, expected in translations.items():
+            with self.subTest(language=language):
+                translator = QtCore.QTranslator()
+                self.assertTrue(translator.load(str(qm_dir / f"ct_{language}.qm")))
+                self._app.installTranslator(translator)
+                try:
+                    page_detail = QtCore.QCoreApplication.translate(
+                        "Messages",
+                        "Invalid translation response",
+                    )
+                    page_action = QtCore.QCoreApplication.translate(
+                        "Messages",
+                        "Try another translator",
+                    )
+                    report_detail = QtCore.QCoreApplication.translate(
+                        "BatchReportController",
+                        "Invalid translation response",
+                    )
+                    report_base = QtCore.QCoreApplication.translate(
+                        "BatchReportController",
+                        "Translation failed",
+                    )
+                    report_action = QtCore.QCoreApplication.translate(
+                        "BatchReportController",
+                        "Try another translator",
+                    )
+                    if language == "ko":
+                        page_notice = ImageStateController.__new__(ImageStateController)._build_skip_message(
+                            "example_source_page.png",
+                            "translation",
+                            "Invalid translation response",
+                        )
+                        report_reason = BatchReportController(_FakeMain())._format_batch_skip_reason(
+                            "translation",
+                            "Invalid translation response",
+                        )
+                finally:
+                    self._app.removeTranslator(translator)
+
+                self.assertEqual(page_detail, expected["detail"])
+                self.assertEqual(page_action, expected["action"])
+                self.assertEqual(report_detail, expected["detail"])
+                self.assertEqual(report_base, expected["base"])
+                self.assertEqual(report_action, expected["action"])
+                if language == "ko":
+                    self.assertIn(expected["detail"], page_notice)
+                    self.assertIn(expected["action"], page_notice)
+                    self.assertNotIn("Invalid translation response", page_notice)
+                    self.assertIn(expected["detail"], report_reason)
+                    self.assertIn(expected["action"], report_reason)
+                    self.assertNotIn("Invalid translation response", report_reason)
+
     def test_inpaint_skip_preserves_stage_and_boundary_reason(self) -> None:
         main = _FakeMain()
         ctrl = BatchReportController(main)

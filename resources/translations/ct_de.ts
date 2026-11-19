@@ -169,12 +169,24 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>Ungültige Übersetzungsantwort</translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>Versuchen Sie einen anderen Übersetzer</translation>
+    </message>
+    <message>
         <source>Try rerunning inpainting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translation failed</source>
+        <translation>Übersetzung fehlgeschlagen</translation>
     </message>
     <message>
         <source>Completed</source>
@@ -1269,9 +1281,17 @@ Begründung:
 <context>
     <name>Messages</name>
     <message>
+        <source>Invalid translation response</source>
+        <translation>Ungültige Übersetzungsantwort</translation>
+    </message>
+    <message>
         <source>Could not inpaint detected text.
 Skipping:</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>Versuchen Sie einen anderen Übersetzer</translation>
     </message>
     <message>
         <source>Skipping:</source>

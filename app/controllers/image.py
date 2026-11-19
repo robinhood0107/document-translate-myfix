@@ -5,7 +5,7 @@ import imkit as imk
 import numpy as np
 from typing import TYPE_CHECKING, List
 from datetime import datetime
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore
 
 from app.ui.dayu_widgets.message import MMessage
 from app.ui.messages import Messages
@@ -322,6 +322,12 @@ class ImageStateController:
     def _build_skip_message(self, image_path: str, skip_reason: str, error: str) -> str:
         file_name = os.path.basename(image_path)
         reason = self._summarize_skip_error(error)
+        invalid_translation_response = reason == "Invalid translation response"
+        if invalid_translation_response:
+            reason = QtCore.QCoreApplication.translate(
+                "Messages",
+                "Invalid translation response",
+            )
         t = QtCore.QCoreApplication.translate
 
         message_map = {
@@ -336,6 +342,10 @@ class ImageStateController:
                 "Could not inpaint detected text.\nSkipping:",
             ),
             "Translator": t("Messages", "Could not get translations.\nSkipping:"),
+            "translation": QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Translation failed",
+            ),
             "OCR Chunk Failed": t("Messages", "Could not recognize webtoon chunk.\nSkipping:"),
             "Translation": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
             "Translation Chunk Failed": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
@@ -348,6 +358,11 @@ class ImageStateController:
         text = f"{base} {file_name}"
         if reason:
             text += f"\n{reason}"
+        if invalid_translation_response:
+            text += "\n" + QtCore.QCoreApplication.translate(
+                "Messages",
+                "Try another translator",
+            )
         return text
 
     def _close_transient_skip_notice(self):

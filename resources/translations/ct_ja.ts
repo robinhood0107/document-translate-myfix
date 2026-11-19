@@ -169,12 +169,24 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>翻訳応答が無効です</translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>別の翻訳ツールをお試しください</translation>
+    </message>
+    <message>
         <source>Try rerunning inpainting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translation failed</source>
+        <translation>翻訳に失敗しました</translation>
     </message>
     <message>
         <source>Completed</source>
@@ -1277,9 +1289,17 @@ Reasoning:
         <translation>アーカイブ:</translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>翻訳応答が無効です</translation>
+    </message>
+    <message>
         <source>Could not inpaint detected text.
 Skipping:</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>別の翻訳ツールをお試しください</translation>
     </message>
     <message>
         <source>Skipping:</source>
