@@ -72,6 +72,7 @@ class TranslationFactory:
             engine.initialize(settings, source_lang, target_lang)
         
         # Cache the engine
+        engine._factory_cache_key = cache_key
         cls._engines[cache_key] = engine
         return engine
     
