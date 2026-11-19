@@ -888,17 +888,26 @@ class BatchReportController:
         ):
             return self._tr("Provider unavailable")
         if (
-            "jsondecodeerror" in lowered
+            "invalid translation response" in lowered
+            or "jsondecodeerror" in lowered
             or "empty json" in lowered
             or "expecting value" in lowered
         ):
-            return self._tr("Invalid translation response")
+            return QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Invalid translation response",
+            )
         return self._tr("Unexpected tool error")
 
     def _localize_batch_skip_action(self, skip_reason: str, error: str) -> str:
         summary = self._sanitize_batch_skip_error(error)
         lowered = summary.lower()
 
+        if "invalid translation response" in lowered:
+            return QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Try another translator",
+            )
         if self._is_content_flagged_error_text(summary):
             if "ocr" in (skip_reason or "").lower():
                 return self._tr("Try another text recognition tool")
@@ -974,7 +983,14 @@ class BatchReportController:
                 "BatchReportController",
                 "Inpainting failed",
             ),
-            "Translator": self._tr("Translation failed"),
+            "Translator": QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Translation failed",
+            ),
+            "translation": QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Translation failed",
+            ),
             "OCR Chunk Failed": self._tr("Webtoon text recognition chunk failed"),
             "Translation": self._tr("Webtoon translation chunk failed"),
             "Translation Chunk Failed": self._tr(

@@ -1,23 +1,34 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
+import requests
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6 import QtCore, QtWidgets
+
+from app.controllers.batch_report import BatchReportController
+from app.controllers.image import ImageStateController
 
 from modules.translation.llm.custom_local_gemma import CustomLocalGemmaTranslation
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.factory import TranslationFactory
 from modules.translation.llm.gpt import GPTTranslation
+from modules.translation.microsoft import MicrosoftTranslation
 from modules.translation.processor import Translator
 from modules.translation.translation_memory import TranslationMemoryStore
 from modules.utils.correction_dictionary import apply_translation_result_dictionary
 from modules.utils.textblock import TextBlock
 from pipeline.cache_manager import CacheManager
+from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 from pipeline.translation_handler import TranslationHandler
 
 
@@ -97,6 +108,39 @@ class _CustomServiceSettings:
                 "case_sens": True,
             }
         ]
+
+
+class _MicrosoftSettings:
+    class _UI:
+        @staticmethod
+        def tr(value: str) -> str:
+            return value
+
+    def __init__(self) -> None:
+        self.ui = self._UI()
+
+    @staticmethod
+    def get_tool_selection(tool: str) -> str:
+        return "Microsoft Translator" if tool == "translator" else "default"
+
+    @staticmethod
+    def get_credentials(_service: str) -> dict[str, str]:
+        return {
+            "api_key_translator": "example-key",
+            "region_translator": "example-region",
+        }
+
+    @staticmethod
+    def get_llm_settings() -> dict[str, object]:
+        return {"image_input_enabled": False, "extra_context": ""}
+
+    @staticmethod
+    def is_gpu_enabled() -> bool:
+        return False
+
+    @staticmethod
+    def get_translation_result_dictionary_rules() -> list[dict]:
+        return []
 
 
 def _response(translation: str) -> dict:
@@ -473,6 +517,326 @@ class TranslationProcessorMemoryTests(unittest.TestCase):
                 ("model-b", "https://second.example.invalid/v1", "Japanese", "Korean"),
             ],
         )
+
+
+class MicrosoftTranslationResponseContractTests(unittest.TestCase):
+    @staticmethod
+    def _block(
+        text: str,
+        translation: str,
+        index: int,
+        *,
+        action: str = "",
+        semantic_role: str = "",
+    ) -> TextBlock:
+        block = TextBlock(
+            text_bbox=np.asarray([index * 10, 0, index * 10 + 8, 8]),
+            text=text,
+            block_id=f"example-block-{index}",
+            text_class="text_bubble",
+        )
+        block.translation = translation
+        if action:
+            block.processing_action = action
+            block.semantic_role = semantic_role
+        return block
+
+    @staticmethod
+    def _response(payload):
+        return SimpleNamespace(
+            json=lambda: payload,
+            raise_for_status=mock.Mock(),
+        )
+
+    @staticmethod
+    def _translator(settings: _MicrosoftSettings) -> Translator:
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+        )
+        return Translator(main_page, "Japanese", "Korean")
+
+    @staticmethod
+    def _rows(*translations: str) -> list[dict]:
+        return [
+            {"translations": [{"text": value}]}
+            for value in translations
+        ]
+
+    def _run_batch(self, blocks: list[TextBlock], payload):
+        settings = _MicrosoftSettings()
+        image_ctrl = SimpleNamespace(
+            update_processing_summary=mock.Mock(),
+            mark_processing_stage=mock.Mock(),
+        )
+        image_skipped = SimpleNamespace(emit=mock.Mock())
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+            local_translation_runtime_manager=None,
+            image_ctrl=image_ctrl,
+            image_skipped=image_skipped,
+            is_current_task_cancelled=lambda: False,
+        )
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = main_page
+        processor.cache_manager = CacheManager()
+        processor._project_checkpoint_store = None
+        processor._inpainter_release_gate = {"required": False, "observed": True}
+        processor._record_performance_detail = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor._released_page_buffer_bytes = 0
+        processor._sample_performance_resources = mock.Mock()
+        processor._translation_benchmark_metrics = mock.Mock(return_value={})
+        processor._measure_performance = lambda **_kwargs: nullcontext()
+        processor.emit_progress = mock.Mock()
+        page = StagePageContext(
+            image_path="example_source_page.png",
+            image_name="example_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((4, 4, 3), dtype=np.uint8),
+            blk_list=blocks,
+        )
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch(
+                "modules.translation.microsoft.requests.post",
+                return_value=self._response(payload),
+            ) as post,
+        ):
+            processor._translate_all([page])
+        return processor, page, image_ctrl, post, main_page
+
+    def test_incomplete_responses_do_not_mutate_blocks_or_cache(self) -> None:
+        responses = (
+            [],
+            self._rows("fresh-0"),
+            [*self._rows("fresh-0"), {}],
+            [*self._rows("fresh-0"), {"translations": []}],
+            [*self._rows("fresh-0"), {"translations": [{}]}],
+            [*self._rows("fresh-0"), {"translations": [{"text": "  "}]}],
+        )
+        for payload in responses:
+            with self.subTest(payload=payload):
+                blocks = [
+                    self._block("source-0", "old-0", 0),
+                    self._block("source-1", "old-1", 1),
+                ]
+                cache_manager = CacheManager()
+                with (
+                    mock.patch.object(TranslationFactory, "_engines", {}),
+                    mock.patch(
+                        "modules.translation.microsoft.requests.post",
+                        return_value=self._response(payload),
+                    ),
+                ):
+                    translator = self._translator(_MicrosoftSettings())
+                    self.assertIsInstance(translator.engine, MicrosoftTranslation)
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "^Invalid translation response$",
+                    ):
+                        translator.translate_with_cache_manager(
+                            blocks,
+                            np.zeros((4, 4, 3), dtype=np.uint8),
+                            "",
+                            cache_manager,
+                        )
+
+                self.assertEqual(
+                    [block.translation for block in blocks],
+                    ["old-0", "old-1"],
+                )
+                self.assertEqual(cache_manager.translation_cache, {})
+
+    def test_second_batch_failure_does_not_publish_first_batch(self) -> None:
+        blocks = [
+            self._block(f"source-{index}", f"old-{index}", index)
+            for index in range(26)
+        ]
+        cache_manager = CacheManager()
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch(
+                "modules.translation.microsoft.requests.post",
+                side_effect=(
+                    self._response(self._rows(*(f"fresh-{index}" for index in range(25)))),
+                    self._response([]),
+                ),
+            ) as post,
+        ):
+            translator = self._translator(_MicrosoftSettings())
+            with self.assertRaisesRegex(
+                ValueError,
+                "^Invalid translation response$",
+            ):
+                translator.translate_with_cache_manager(
+                    blocks,
+                    np.zeros((4, 4, 3), dtype=np.uint8),
+                    "",
+                    cache_manager,
+                )
+
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(
+            [block.translation for block in blocks],
+            [f"old-{index}" for index in range(26)],
+        )
+        self.assertEqual(cache_manager.translation_cache, {})
+
+    def test_blank_source_target_is_preserved_on_success(self) -> None:
+        blocks = [
+            self._block("source", "old", 0),
+            self._block(" \n ", "protected target", 1),
+        ]
+        cache_manager = CacheManager()
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch(
+                "modules.translation.microsoft.requests.post",
+                return_value=self._response(self._rows("fresh")),
+            ),
+        ):
+            translator = self._translator(_MicrosoftSettings())
+            translator.translate_with_cache_manager(
+                blocks,
+                np.zeros((4, 4, 3), dtype=np.uint8),
+                "",
+                cache_manager,
+            )
+
+        self.assertEqual(
+            [block.translation for block in blocks],
+            ["fresh", "protected target"],
+        )
+
+    def test_http_error_is_propagated_unchanged(self) -> None:
+        error = requests.HTTPError("example transport failure")
+        blocks = [self._block("source", "old", 0)]
+        cache_manager = CacheManager()
+        response = self._response([])
+        response.raise_for_status.side_effect = error
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch(
+                "modules.translation.microsoft.requests.post",
+                return_value=response,
+            ),
+        ):
+            translator = self._translator(_MicrosoftSettings())
+            with self.assertRaises(requests.HTTPError) as caught:
+                translator.translate_with_cache_manager(
+                    blocks,
+                    np.zeros((4, 4, 3), dtype=np.uint8),
+                    "",
+                    cache_manager,
+                )
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(blocks[0].translation, "old")
+        self.assertEqual(cache_manager.translation_cache, {})
+
+    def test_batch_failure_does_not_persist_or_mark_page_complete(self) -> None:
+        required = self._block(
+            "required source",
+            "previous target",
+            0,
+            action="translate_inpaint",
+            semantic_role="dialogue_bubble",
+        )
+        protected = self._block(
+            "protected source",
+            "keep target",
+            1,
+            action="preserve",
+            semantic_role="decorative",
+        )
+        processor, page, image_ctrl, _, main_page = self._run_batch(
+            [required, protected],
+            [],
+        )
+
+        self.assertEqual(page.failed_stage, "translation")
+        self.assertEqual(page.failed_reason, "Invalid translation response")
+        self.assertEqual(required.translation, "previous target")
+        self.assertEqual(protected.translation, "keep target")
+        self.assertEqual(processor.cache_manager.translation_cache, {})
+        processor._persist_translation_state.assert_not_called()
+        image_ctrl.mark_processing_stage.assert_called_once()
+        self.assertEqual(
+            image_ctrl.mark_processing_stage.call_args.args[:3],
+            ("example_source_page.png", "translation", "failed"),
+        )
+        self.assertIsNone(page.image)
+        self.assertGreater(processor._released_page_buffer_bytes, 0)
+        emitted = main_page.image_skipped.emit.call_args.args
+        self.assertEqual(
+            emitted,
+            (
+                "example_source_page.png",
+                "translation",
+                "Invalid translation response",
+            ),
+        )
+
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        translator = QtCore.QTranslator()
+        qm_path = (
+            Path(__file__).resolve().parents[1]
+            / "resources"
+            / "translations"
+            / "compiled"
+            / "ct_ko.qm"
+        )
+        self.assertTrue(translator.load(str(qm_path)))
+        app.installTranslator(translator)
+        try:
+            page_notice = ImageStateController.__new__(ImageStateController)._build_skip_message(
+                *emitted
+            )
+            report_reason = BatchReportController(SimpleNamespace())._format_batch_skip_reason(
+                emitted[1],
+                emitted[2],
+            )
+        finally:
+            app.removeTranslator(translator)
+
+        for message in (page_notice, report_reason):
+            self.assertIn("번역 실패", message)
+            self.assertIn("번역 응답이 올바르지 않습니다", message)
+            self.assertIn("다른 번역기를 사용해 보세요", message)
+            self.assertNotIn("Invalid translation response", message)
+
+    def test_batch_success_translates_only_required_blocks(self) -> None:
+        required = self._block(
+            "required source",
+            "",
+            0,
+            action="translate_inpaint",
+            semantic_role="dialogue_bubble",
+        )
+        protected = self._block(
+            "protected source",
+            "keep target",
+            1,
+            action="preserve",
+            semantic_role="decorative",
+        )
+        processor, page, _, post, _ = self._run_batch(
+            [required, protected],
+            self._rows("fresh"),
+        )
+
+        self.assertEqual(post.call_args.kwargs["json"], [{"text": "requiredsource"}])
+        self.assertEqual(required.translation, "fresh")
+        self.assertEqual(protected.translation, "keep target")
+        self.assertEqual(page.source_unit_outcomes["example-block-1"]["status"], "preserved")
+        self.assertEqual(page.failed_stage, "")
+        processor._persist_translation_state.assert_called_once()
 
 
 if __name__ == "__main__":

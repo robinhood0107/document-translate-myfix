@@ -169,12 +169,24 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>翻译响应无效</translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>请尝试其他翻译工具</translation>
+    </message>
+    <message>
         <source>Try rerunning inpainting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translation failed</source>
+        <translation>翻译失败</translation>
     </message>
     <message>
         <source>Completed</source>
@@ -1281,9 +1293,17 @@ Reasoning:
         <translation>归档中：</translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>翻译响应无效</translation>
+    </message>
+    <message>
         <source>Could not inpaint detected text.
 Skipping:</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>请尝试其他翻译工具</translation>
     </message>
     <message>
         <source>Skipping:</source>

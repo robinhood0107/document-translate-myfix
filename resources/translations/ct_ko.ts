@@ -169,12 +169,24 @@
         <translation>마스크 경계가 이미지 범위를 벗어났습니다</translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>번역 응답이 올바르지 않습니다</translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>다른 번역기를 사용해 보세요</translation>
+    </message>
+    <message>
         <source>Try rerunning inpainting</source>
         <translation>인페인트를 다시 실행해 보세요</translation>
     </message>
     <message>
         <source>Inpainting failed</source>
         <translation>인페인트 실패</translation>
+    </message>
+    <message>
+        <source>Translation failed</source>
+        <translation>번역 실패</translation>
     </message>
     <message>
         <source>Completed</source>
@@ -1296,10 +1308,18 @@ Reasoning:
         <translation>잠시만 기다려주세요</translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>번역 응답이 올바르지 않습니다</translation>
+    </message>
+    <message>
         <source>Could not inpaint detected text.
 Skipping:</source>
         <translation>감지된 텍스트를 인페인트하지 못했습니다.
 건너뛰기:</translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>다른 번역기를 사용해 보세요</translation>
     </message>
     <message>
         <source>Skipping:</source>

@@ -47,6 +47,7 @@ class MicrosoftTranslation(TraditionalTranslation):
         
         # Process blocks in batches to avoid request size limits
         batch_size = 25  # Adjust based on typical text length
+        updates = []
         for i in range(0, len(blk_list), batch_size):
             batch = blk_list[i:i+batch_size]
             
@@ -58,7 +59,6 @@ class MicrosoftTranslation(TraditionalTranslation):
                 text = self.preprocess_text(blk.text, self.source_lang_code)
                 
                 if not text.strip():
-                    blk.translation = ""
                     continue
                 
                 body.append({
@@ -82,13 +82,25 @@ class MicrosoftTranslation(TraditionalTranslation):
             
             # Process the response
             translations = response.json()
-            
-            # Update translations in the block list
-            for j, translation_result in enumerate(translations):
-                if j < len(indices_to_update):
-                    block_idx = indices_to_update[j]
-                    if block_idx < len(blk_list) and 'translations' in translation_result:
-                        blk_list[block_idx].translation = translation_result['translations'][0]['text']
+            if not isinstance(translations, list) or len(translations) != len(body):
+                raise ValueError(
+                    "Invalid translation response"
+                )
+            for block_idx, translation_result in zip(indices_to_update, translations):
+                try:
+                    translation = translation_result["translations"][0]["text"]
+                except (IndexError, KeyError, TypeError) as exc:
+                    raise ValueError(
+                        "Invalid translation response"
+                    ) from exc
+                if not isinstance(translation, str) or not translation.strip():
+                    raise ValueError(
+                        "Invalid translation response"
+                    )
+                updates.append((block_idx, translation))
+
+        for block_idx, translation in updates:
+            blk_list[block_idx].translation = translation
             
         return blk_list
     

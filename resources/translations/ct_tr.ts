@@ -169,12 +169,24 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>Çeviri yanıtı geçersiz</translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>Başka bir çeviri aracı deneyin</translation>
+    </message>
+    <message>
         <source>Try rerunning inpainting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translation failed</source>
+        <translation>Çeviri başarısız</translation>
     </message>
     <message>
         <source>Completed</source>
@@ -1281,9 +1293,17 @@ Gerekçe:
         <translation>Arşivleniyor:</translation>
     </message>
     <message>
+        <source>Invalid translation response</source>
+        <translation>Çeviri yanıtı geçersiz</translation>
+    </message>
+    <message>
         <source>Could not inpaint detected text.
 Skipping:</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try another translator</source>
+        <translation>Başka bir çeviri aracı deneyin</translation>
     </message>
     <message>
         <source>Skipping:</source>
