@@ -48,6 +48,7 @@ class TaskRunnerController:
         error_callback: Callable = None,
         finished_callback: Callable = None,
         *args,
+        _discarded_callback: Callable = None,
         **kwargs,
     ):
         operation = {
@@ -57,6 +58,7 @@ class TaskRunnerController:
             "result_callback": result_callback,
             "error_callback": error_callback,
             "finished_callback": finished_callback,
+            "_discarded_callback": _discarded_callback,
             "args": args,
             "kwargs": kwargs,
         }
@@ -135,6 +137,7 @@ class TaskRunnerController:
             *operation["args"],
             _progress_callback=operation.get("progress_callback"),
             _inject_progress=bool(operation.get("inject_progress")),
+            _queue_generation=queue_generation,
             **operation["kwargs"],
         )
 
@@ -147,6 +150,7 @@ class TaskRunnerController:
         *args,
         _progress_callback: Callable = None,
         _inject_progress: bool = False,
+        _queue_generation: int | None = None,
         **kwargs,
     ):
         if _inject_progress:
@@ -160,10 +164,25 @@ class TaskRunnerController:
             if getattr(self.main, "current_worker", None) is worker:
                 self.main.current_worker = None
 
+        def deliver_result(result) -> None:
+            if (
+                _queue_generation is not None
+                and _queue_generation != self._queue_generation
+            ):
+                return
+            result_callback(result)
+
+        def deliver_progress(event) -> None:
+            if (
+                _queue_generation is None
+                or _queue_generation == self._queue_generation
+            ):
+                _progress_callback(dict(event or {}))
+
         if result_callback:
             worker.signals.result.connect(
                 lambda result: QtCore.QTimer.singleShot(
-                    0, self.main, lambda: result_callback(result)
+                    0, self.main, lambda: deliver_result(result)
                 )
             )
         if error_callback:
@@ -175,7 +194,7 @@ class TaskRunnerController:
         if _progress_callback:
             worker.signals.progress.connect(
                 lambda event: QtCore.QTimer.singleShot(
-                    0, self.main, lambda: _progress_callback(dict(event or {}))
+                    0, self.main, lambda: deliver_progress(event)
                 )
             )
         if finished_callback:
@@ -213,11 +232,19 @@ class TaskRunnerController:
         )
 
     def clear_operation_queue(self):
+        discarded_operations = list(self.operation_queue)
         self._queue_generation += 1
         self.operation_queue.clear()
         # 비운 큐에는 처리할 것이 남아 있지 않으므로 busy 플래그가 살아남으면 안
         # 된다. 남은 플래그는 이후 모든 작업을 큐에 가둔다.
         self.is_processing_queue = False
+        for operation in discarded_operations:
+            callback = operation.get("_discarded_callback")
+            if callback:
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("Discarded callback failed for a queued operation.")
 
     def cancel_current_task(self):
         if self.main.current_worker:

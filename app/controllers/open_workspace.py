@@ -384,9 +384,40 @@ class OpenWorkspaceCoordinator:
             return False
 
         prepared_result: dict[str, Any] = {"value": None}
+        result_delivered = {"value": False}
+        lifecycle_settled = {"value": False}
+
+        def prepare_with_ownership(report_progress):
+            result = prepare(report_progress)
+            prepared_result["value"] = result
+            return result
+
+        def settle_unpublished_result() -> None:
+            if (
+                lifecycle_settled["value"]
+                or result_delivered["value"]
+                or not self.active
+            ):
+                return
+            lifecycle_settled["value"] = True
+            result = prepared_result["value"]
+            prepared_result["value"] = None
+            try:
+                cleanup = getattr(result, "cleanup", None)
+                if callable(cleanup):
+                    cleanup()
+            except Exception:
+                logger.warning("Unpublished workspace cleanup failed.", exc_info=True)
+            self._prepared_result = None
+            self.active = False
+            self._failed = False
+            self.overlay.hide()
+            self.main.set_runtime_editing_locked(False)
+            self.main._set_project_navigation_enabled(True)
 
         def on_result(result: Any) -> None:
-            prepared_result["value"] = result
+            result_delivered["value"] = True
+            prepared_result["value"] = None
             self._prepared_result = result
             self.progress(
                 {
@@ -411,12 +442,16 @@ class OpenWorkspaceCoordinator:
             self._prepared_result = value
             self.fail(error_tuple)
 
+        def on_finished() -> None:
+            settle_unpublished_result()
+
         self.main.run_threaded_with_progress(
-            prepare,
+            prepare_with_ownership,
             self.progress,
             on_result,
             on_error,
-            None,
+            on_finished,
+            _discarded_callback=settle_unpublished_result,
         )
         return True
 
