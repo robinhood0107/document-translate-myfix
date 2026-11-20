@@ -1480,6 +1480,7 @@ class ComicTranslate(ComicTranslateUI):
         error_callback: Callable = None,
         finished_callback: Callable = None,
         *args,
+        _discarded_callback: Callable = None,
         **kwargs,
     ):
         return self.task_runner_ctrl.run_threaded_with_progress(
@@ -1489,6 +1490,7 @@ class ComicTranslate(ComicTranslateUI):
             error_callback,
             finished_callback,
             *args,
+            _discarded_callback=_discarded_callback,
             **kwargs,
         )
 

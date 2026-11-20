@@ -4,11 +4,18 @@ import os
 import time
 import unittest
 from threading import Event
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtCore, QtWidgets  # noqa: E402
 
+from controller import ComicTranslate  # noqa: E402
+from app.controllers.open_workspace import (  # noqa: E402
+    OpenWorkspaceCoordinator,
+    PreparedWorkspace,
+)
 from app.controllers.task_runner import TaskRunnerController  # noqa: E402
 
 
@@ -28,18 +35,62 @@ class _FakeMain(QtCore.QObject):
         self._batch_cancel_requested = False
 
 
+class _FakeOverlay(QtCore.QObject):
+    close_requested = QtCore.Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.visible = False
+        self.hide_count = 0
+
+    def start(self, _message: str) -> None:
+        self.visible = True
+
+    def update_progress(self, _event: dict) -> None:
+        pass
+
+    def hide(self) -> None:
+        self.visible = False
+        self.hide_count += 1
+
+
+class _FakeWorkspaceMain(_FakeMain):
+    def __init__(self) -> None:
+        super().__init__()
+        self.open_workspace_overlay = _FakeOverlay()
+        self.navigation_enabled = True
+        self.runtime_editing_locked = False
+        self.runner = TaskRunnerController(self)
+
+    def _set_project_navigation_enabled(self, enabled: bool) -> None:
+        self.navigation_enabled = enabled
+
+    def set_runtime_editing_locked(self, locked: bool) -> None:
+        self.runtime_editing_locked = locked
+
+    def _update_runtime_surface_geometry(self) -> None:
+        pass
+
+    def tr(self, text: str) -> str:
+        return text
+
+    def run_threaded_with_progress(self, *args, **kwargs) -> None:
+        self.runner.run_threaded_with_progress(*args, **kwargs)
+
+
 class TaskRunnerQueueRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = _app()
         self.main = _FakeMain()
         self.runner = TaskRunnerController(self.main)
 
-    def _drain(self, predicate, timeout_ms: int = 4000) -> bool:
+    def _drain(self, predicate, timeout_ms: int = 4000, main=None) -> bool:
         deadline = QtCore.QElapsedTimer()
         deadline.start()
+        threadpool = (main or self.main).threadpool
         while deadline.elapsed() < timeout_ms:
             self.app.processEvents()
-            self.main.threadpool.waitForDone(20)
+            threadpool.waitForDone(20)
             self.app.processEvents()
             if predicate():
                 return True
@@ -74,6 +125,35 @@ class TaskRunnerQueueRecoveryTests(unittest.TestCase):
         self.runner.clear_operation_queue()
         self.assertEqual(len(self.runner.operation_queue), 0)
         self.assertFalse(self.runner.is_processing_queue)
+
+    def test_controller_forwards_opted_in_discard_callback(self) -> None:
+        task_runner = Mock()
+        main = SimpleNamespace(task_runner_ctrl=task_runner)
+        callback = Mock()
+        progress_callback = Mock()
+        result_callback = Mock()
+        error_callback = Mock()
+        finished_callback = Mock()
+        discarded_callback = Mock()
+
+        ComicTranslate.run_threaded_with_progress(
+            main,
+            callback,
+            progress_callback,
+            result_callback,
+            error_callback,
+            finished_callback,
+            _discarded_callback=discarded_callback,
+        )
+
+        task_runner.run_threaded_with_progress.assert_called_once_with(
+            callback,
+            progress_callback,
+            result_callback,
+            error_callback,
+            finished_callback,
+            _discarded_callback=discarded_callback,
+        )
 
     def test_operation_queued_after_a_cleared_queue_still_runs(self) -> None:
         """The rerender path queues work; a stale busy flag must not strand it."""
@@ -281,6 +361,208 @@ class TaskRunnerQueueRecoveryTests(unittest.TestCase):
         )
         self.assertTrue(self._drain(lambda: results == ["ready"]))
         self.assertEqual([event["stage"] for event in progress], ["index", "decode"])
+
+    def test_posted_result_is_disposed_when_cancellation_replaces_queue(self) -> None:
+        commits: list[object] = []
+        main = _FakeWorkspaceMain()
+        workspace = OpenWorkspaceCoordinator(main)
+        started = Event()
+        release = Event()
+        result_emitted = Event()
+        file_handler = Mock()
+        prepared = PreparedWorkspace(file_handler, [], None)
+
+        def prepare(_report_progress):
+            started.set()
+            release.wait()
+            return prepared
+
+        workspace.run(message="Opening", prepare=prepare, commit=commits.append)
+        try:
+            self.assertTrue(started.wait(4), "workspace preparation never started")
+            main.current_worker.signals.result.connect(
+                lambda _result: result_emitted.set(),
+                QtCore.Qt.ConnectionType.DirectConnection,
+            )
+            release.set()
+            self.assertTrue(result_emitted.wait(4), "worker result was never emitted")
+            main.runner.cancel_current_task()
+            self.assertTrue(main.threadpool.waitForDone(4000), "workspace worker did not finish")
+            self.assertTrue(
+                self._drain(lambda: not workspace.active, main=main),
+                "cancelled workspace did not release its lifecycle lock",
+            )
+            self.assertEqual(commits, [])
+            file_handler.cleanup.assert_called_once_with()
+            self.assertEqual(main.open_workspace_overlay.hide_count, 1)
+            self.assertTrue(main.navigation_enabled)
+            self.assertFalse(main.runtime_editing_locked)
+        finally:
+            release.set()
+            main.threadpool.waitForDone(4000)
+
+    def test_cancel_before_prepare_returns_cleans_retained_workspace_once(self) -> None:
+        commits: list[object] = []
+        main = _FakeWorkspaceMain()
+        workspace = OpenWorkspaceCoordinator(main)
+        started = Event()
+        release = Event()
+        result_emitted = Event()
+        file_handler = Mock()
+        prepared = PreparedWorkspace(file_handler, [], None)
+
+        def prepare(_report_progress):
+            started.set()
+            release.wait()
+            return prepared
+
+        workspace.run(message="Opening", prepare=prepare, commit=commits.append)
+        try:
+            self.assertTrue(started.wait(4), "workspace preparation never started")
+            main.current_worker.signals.result.connect(
+                lambda _result: result_emitted.set(),
+                QtCore.Qt.ConnectionType.DirectConnection,
+            )
+            main.runner.cancel_current_task()
+            release.set()
+            self.assertTrue(main.threadpool.waitForDone(4000), "workspace worker did not finish")
+            self.assertFalse(result_emitted.is_set())
+            self.assertTrue(
+                self._drain(lambda: not workspace.active, main=main),
+                "cancelled workspace did not release its lifecycle lock",
+            )
+            self.assertEqual(commits, [])
+            file_handler.cleanup.assert_called_once_with()
+            self.assertEqual(main.open_workspace_overlay.hide_count, 1)
+            self.assertTrue(main.navigation_enabled)
+            self.assertFalse(main.runtime_editing_locked)
+        finally:
+            release.set()
+            main.threadpool.waitForDone(4000)
+
+    def test_pending_workspace_is_settled_when_queue_is_cleared(self) -> None:
+        main = _FakeWorkspaceMain()
+        workspace = OpenWorkspaceCoordinator(main)
+        first_started = Event()
+        release_first = Event()
+        first_finished = Event()
+        prepare_called = Event()
+
+        def first_task() -> None:
+            first_started.set()
+            release_first.wait()
+
+        def prepare(_report_progress):
+            prepare_called.set()
+            return object()
+
+        main.runner.run_threaded(first_task, finished_callback=first_finished.set)
+        try:
+            self.assertTrue(first_started.wait(4), "leading operation never started")
+            workspace.run(
+                message="Opening",
+                prepare=prepare,
+                commit=lambda _result: None,
+            )
+            self.assertTrue(workspace.active)
+            self.assertFalse(main.navigation_enabled)
+            self.assertTrue(main.runtime_editing_locked)
+            self.assertEqual(len(main.runner.operation_queue), 1)
+
+            main.runner.cancel_current_task()
+            self.assertFalse(workspace.active)
+            self.assertTrue(main.navigation_enabled)
+            self.assertFalse(main.runtime_editing_locked)
+            self.assertFalse(main.open_workspace_overlay.visible)
+            self.assertEqual(main.open_workspace_overlay.hide_count, 1)
+
+            release_first.set()
+            self.assertTrue(main.threadpool.waitForDone(4000), "leading operation did not finish")
+            self.assertTrue(
+                self._drain(first_finished.is_set, main=main),
+                "leading operation lost its finished callback",
+            )
+            self.assertFalse(prepare_called.is_set())
+        finally:
+            release_first.set()
+            main.threadpool.waitForDone(4000)
+
+    def test_successful_workspace_publication_completes_and_unlocks(self) -> None:
+        commits: list[object] = []
+        main = _FakeWorkspaceMain()
+        workspace = OpenWorkspaceCoordinator(main)
+        file_handler = Mock()
+        prepared = PreparedWorkspace(file_handler, [], None)
+
+        workspace.run(
+            message="Opening",
+            prepare=lambda _report_progress: prepared,
+            commit=commits.append,
+        )
+        self.assertTrue(
+            self._drain(lambda: not workspace.active, main=main),
+            "successful workspace did not complete",
+        )
+        self.assertEqual(commits, [prepared])
+        file_handler.cleanup.assert_not_called()
+        self.assertEqual(main.open_workspace_overlay.hide_count, 1)
+        self.assertTrue(main.navigation_enabled)
+        self.assertFalse(main.runtime_editing_locked)
+        self.assertFalse(main.open_workspace_overlay.visible)
+
+    def test_posted_progress_is_discarded_after_queue_replacement(self) -> None:
+        progress: list[dict] = []
+        started = Event()
+        release = Event()
+        progress_emitted = Event()
+        replacement_started = Event()
+
+        def worker(report_progress):
+            started.set()
+            release.wait()
+            report_progress({"stage": "stale"})
+            release.wait()
+
+        try:
+            self.runner.run_threaded_with_progress(worker, progress.append)
+            self.assertTrue(started.wait(4), "progress worker never started")
+            self.main.current_worker.signals.progress.connect(
+                lambda _event: progress_emitted.set(),
+                QtCore.Qt.ConnectionType.DirectConnection,
+            )
+            release.set()
+            self.assertTrue(progress_emitted.wait(4), "worker progress was never emitted")
+
+            self.runner.cancel_current_task()
+            self.runner.run_threaded(lambda: replacement_started.set())
+            self.assertTrue(
+                self._drain(replacement_started.is_set), "replacement operation never ran"
+            )
+            self.assertEqual(progress, [])
+        finally:
+            release.set()
+
+    def test_immediate_result_still_publishes_after_queue_generation_changes(self) -> None:
+        results: list[str] = []
+
+        self.runner.run_threaded_immediate(lambda: "immediate", results.append)
+        self.assertTrue(
+            self.main.threadpool.waitForDone(4000), "immediate operation did not finish"
+        )
+        self.runner.clear_operation_queue()
+        self.assertTrue(self._drain(lambda: results == ["immediate"]))
+
+    def test_late_error_callback_still_runs_after_cancellation(self) -> None:
+        errors: list[tuple] = []
+
+        def fail() -> None:
+            raise ValueError("expected failure")
+
+        self.runner.run_threaded(fail, error_callback=errors.append)
+        self.assertTrue(self.main.threadpool.waitForDone(4000), "error worker did not finish")
+        self.runner.cancel_current_task()
+        self.assertTrue(self._drain(lambda: len(errors) == 1), "error cleanup callback was lost")
+        self.assertIs(errors[0][0], ValueError)
 
     def test_progress_worker_does_not_block_the_qt_event_loop(self) -> None:
         ticks: list[str] = []
