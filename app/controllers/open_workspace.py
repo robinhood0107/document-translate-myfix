@@ -93,6 +93,7 @@ class ProjectLoadSnapshot:
             "loaded_images",
             "image_patches",
             "project_output_preferences",
+            "project_glossary",
             "project_checkpoint_reference",
             "project_checkpoint_reference_persisted",
             "project_checkpoint_warning",
@@ -129,6 +130,7 @@ _WORKSPACE_STATE_ATTRIBUTES = (
     "project_file",
     "project_kind",
     "project_output_preferences",
+    "project_glossary",
     "project_checkpoint_reference",
     "project_checkpoint_reference_persisted",
     "project_checkpoint_warning",
@@ -163,6 +165,22 @@ class _WorkspaceCommitTransaction:
             for name in _WORKSPACE_STATE_ATTRIBUTES
             if hasattr(main, name)
         }
+        glossary_page = getattr(
+            getattr(getattr(main, "settings_page", None), "ui", None),
+            "project_page",
+            None,
+        )
+        self.old_project_glossary_draft = (
+            list(glossary_page.glossary_entries())
+            if callable(getattr(glossary_page, "glossary_entries", None))
+            else list(getattr(main, "project_glossary", []) or [])
+        )
+        self.old_project_glossary_error = bool(
+            getattr(glossary_page, "_glossary_validation_error", False)
+        )
+        self.old_project_glossary_editor_enabled = bool(
+            getattr(glossary_page, "_glossary_editor_enabled", True)
+        )
         self.old_owned_roots = list(
             getattr(main, "_workspace_owned_temp_roots", []) or []
         )
@@ -229,6 +247,15 @@ class _WorkspaceCommitTransaction:
         self.main._workspace_owned_temp_roots = list(self.old_owned_roots)
         if callable(self._participant_rollback):
             self._participant_rollback()
+        try:
+            page = self.main.settings_page.ui.project_page
+            page.set_glossary_entries(self.old_project_glossary_draft)
+            page.set_glossary_validation_error(self.old_project_glossary_error)
+            page.set_glossary_editor_enabled(
+                self.old_project_glossary_editor_enabled
+            )
+        except Exception:
+            pass
         self._restore_ui_best_effort()
         cleanup = getattr(self.prepared, "cleanup", None)
         if callable(cleanup):
@@ -459,6 +486,7 @@ class OpenWorkspaceCoordinator:
             loaded_images=[],
             image_patches={},
             project_output_preferences={},
+            project_glossary=[],
             project_checkpoint_reference={},
             project_checkpoint_reference_persisted=False,
             project_checkpoint_warning="",

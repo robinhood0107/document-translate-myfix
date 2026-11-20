@@ -2587,6 +2587,38 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>단계 강제 재계산</translation>
     </message>
     <message>
+        <source>Project Glossary</source>
+        <translation>프로젝트 용어집</translation>
+    </message>
+    <message>
+        <source>Preferred translations are sent to LLM translators as guidance. They do not replace translated text automatically.</source>
+        <translation>선호 번역은 LLM 번역에 참고 정보로 전달됩니다. 번역 결과를 자동으로 바꾸지는 않습니다.</translation>
+    </message>
+    <message>
+        <source>Source term</source>
+        <translation>원문 용어</translation>
+    </message>
+    <message>
+        <source>Preferred translation</source>
+        <translation>권장 번역</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>추가</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>삭제</translation>
+    </message>
+    <message>
+        <source>Open a series item to edit its project glossary.</source>
+        <translation>프로젝트 용어집을 편집하려면 시리즈 항목을 여세요.</translation>
+    </message>
+    <message>
+        <source>The whole glossary table is pending and is not saved until every row is complete. Complete every row to save it; otherwise, saving keeps the last valid table and discards these edits.</source>
+        <translation>모든 행이 완성될 때까지 용어집 표 전체가 보류되어 저장되지 않습니다. 저장하려면 모든 행을 완성하세요. 그렇지 않으면 마지막으로 유효했던 표가 유지되고 이번 편집은 버려집니다.</translation>
+    </message>
+    <message>
         <source>Choose Auto-Save Folder</source>
         <translation>자동 저장 폴더 선택</translation>
     </message>

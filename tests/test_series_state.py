@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from app.projects.project_types import (
     PROJECT_KIND_SERIES,
@@ -27,6 +29,11 @@ from app.projects.series_state_v1 import (
     scan_series_source_files,
     update_series_item_manual_status,
     update_series_queue_runtime,
+)
+from app.projects.project_state_v2 import (
+    close_cached_connection,
+    load_state_from_proj_file_v2,
+    save_state_to_proj_file_v2,
 )
 
 
@@ -331,6 +338,81 @@ class SeriesStateTests(unittest.TestCase):
             child_path = materialize_series_child_project(series_path, loaded["items"][0], temp_dir=temp_dir)
             with open(child_path, "rb") as fh:
                 self.assertEqual(fh.read(), payload)
+
+    def test_series_child_round_trip_preserves_project_glossary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            child_path = os.path.join(temp_dir, "child.ctpr")
+            series_path = os.path.join(temp_dir, "series.seriesctpr")
+            glossary = [{"source": "north", "translation": "북쪽"}]
+
+            def project_context(project_glossary):
+                return SimpleNamespace(
+                    curr_img_idx=-1,
+                    webtoon_mode=False,
+                    image_files=[],
+                    export_source_by_path={},
+                    image_states={},
+                    image_data={},
+                    image_history={},
+                    in_memory_history={},
+                    current_history_index={},
+                    displayed_images=set(),
+                    loaded_images=[],
+                    image_patches={},
+                    project_glossary=project_glossary,
+                    project_output_preferences={},
+                    settings_page=SimpleNamespace(
+                        get_llm_settings=lambda: {"extra_context": ""}
+                    ),
+                    image_viewer=SimpleNamespace(webtoon_view_state={}),
+                    batch_report_ctrl=SimpleNamespace(
+                        export_latest_report_for_project=lambda: None,
+                        import_latest_report_from_project=lambda *_args, **_kwargs: None,
+                    ),
+                )
+
+            save_state_to_proj_file_v2(project_context(glossary), child_path)
+            with open(child_path, "rb") as child_file:
+                payload = child_file.read()
+            project_hash = hashlib.sha256(payload).hexdigest()
+            item = {
+                "series_item_id": "child-1",
+                "queue_index": 1,
+                "display_name": "child.ctpr",
+                "source_kind": "ctpr_import",
+                "source_origin_path": child_path,
+                "source_origin_relpath": "child.ctpr",
+                "imported_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-01T00:00:00",
+                "status": "pending",
+                "embedded_project_blob_hash": project_hash,
+            }
+            create_series_project(
+                series_path,
+                root_dir=temp_dir,
+                items=[item],
+                embedded_projects=[
+                    {
+                        "project_hash": project_hash,
+                        "display_name": "child.ctpr",
+                        "project_size": len(payload),
+                        "project_blob": payload,
+                    }
+                ],
+            )
+            loaded = load_series_project(series_path)
+            restored_child_path = materialize_series_child_project(
+                series_path,
+                loaded["items"][0],
+                temp_dir=temp_dir,
+            )
+            restored = project_context([])
+            try:
+                load_state_from_proj_file_v2(restored, restored_child_path)
+                self.assertEqual(restored.project_glossary, glossary)
+            finally:
+                close_cached_connection(child_path)
+                close_cached_connection(restored_child_path)
 
 
 if __name__ == "__main__":

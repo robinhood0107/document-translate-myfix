@@ -1506,6 +1506,33 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             self.assertIsNotNone(store)
             self.assertTrue(Path(f"{project_file}.cache").is_dir())
 
+    def test_project_glossary_changes_translation_checkpoint_identity(self) -> None:
+        identity_args = {
+            "ocr_fingerprint": "a" * 64,
+            "source_lang": "Japanese",
+            "target_lang": "Korean",
+            "extra_context": "",
+            "translator_key": "Custom Service",
+            "translator_engine": "CustomServiceTranslation",
+            "translator_settings": {"model": "example"},
+            "runtime_identity": {},
+            "dictionary_fingerprint": "b" * 64,
+        }
+        first = build_translation_identity(
+            **identity_args,
+            project_glossary_sha256="c" * 64,
+        )
+        second = build_translation_identity(
+            **identity_args,
+            project_glossary_sha256="d" * 64,
+        )
+
+        self.assertEqual(first["project_glossary_sha256"], "c" * 64)
+        self.assertNotEqual(
+            build_translation_fingerprint(first),
+            build_translation_fingerprint(second),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

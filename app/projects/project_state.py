@@ -3,7 +3,6 @@
 import msgpack
 import os
 import zipfile
-import shutil
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,7 +14,7 @@ from .checkpoint_store import (
     ProjectCheckpointReference,
     load_checkpoint_reference_into_project,
 )
-from .parsers import ProjectEncoder, ProjectDecoder, ensure_string_keys
+from .parsers import ProjectDecoder
 from .project_state_v2 import (
     close_cached_connection as close_state_v2_cached_connection,
     ensure_lazy_blob_materialized,
@@ -26,6 +25,7 @@ from .project_state_v2 import (
 )
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
+from modules.utils.project_glossary import normalize_project_glossary
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -99,8 +99,6 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
     image_states = {}
     current_history_index = {}
     displayed_images = set()
-    loaded_images = []
-
     if file_name.lower().endswith( '.ctpr'):
         with zipfile.ZipFile(file_name, 'r') as archive:
             for file in archive.namelist():
@@ -280,6 +278,10 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
             original_to_temp.get(page, page): plist
             for page, plist in reconstructed.items()
         }
+
+    comic_translate.project_glossary = normalize_project_glossary(
+        state.get('llm_project_glossary')
+    )
 
     # restore LLM extra context
     load_checkpoint_reference_into_project(

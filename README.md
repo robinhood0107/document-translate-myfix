@@ -261,6 +261,8 @@ read-only `gemma-4-26B-IQ4_NL.gguf` volume. Run
 
 The **User Dictionaries** settings page also controls the persistent block-result cache and exact translation memory. Result-cache entries use the complete translation/runtime identity. Exact source-to-translation pairs bypass Gemma only after explicit approval; imported approved entries require confirmation. These databases contain sensitive local text, remain in the app user-data directory, and are never silently deleted after a lock or corruption error. See [the translation-memory guide](docs/gemma/translation-memory.md).
 
+In **Settings → Project → Project Glossary**, enter source terms and their preferred translations. LLM translators use these entries as prompt guidance. Each project, including a series item, stores its own glossary. Complete both columns in every row to save edits. OCR and translation correction dictionaries apply after their respective stages.
+
 ### 3. Local OCR runtimes
 
 The setup BAT also prepares both runtimes used by

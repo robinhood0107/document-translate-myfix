@@ -173,11 +173,23 @@ class ChunkMixin:
         source_lang: str,
         target_lang: str,
         image_path: str,
+        project_glossary_snapshot: list[dict[str, str]] | None = None,
     ) -> dict[str, dict[str, str | None]]:
         if not blocks:
             return {}
         extra_context = self.main_page.settings_page.get_llm_settings()["extra_context"]
-        translator = Translator(self.main_page, source_lang, target_lang)
+        project_glossary = (
+            list(getattr(self.main_page, "project_glossary", []) or [])
+            if project_glossary_snapshot is None
+            else project_glossary_snapshot
+        )
+        translator = Translator(
+            self.main_page,
+            source_lang,
+            target_lang,
+            project_glossary=project_glossary,
+        )
+        project_glossary = translator.project_glossary
         self._emit_benchmark_event(
             "translate_start",
             image_path=image_path,
@@ -185,7 +197,12 @@ class ChunkMixin:
             translator_key=self.main_page.settings_page.get_tool_selection("translator"),
         )
         try:
-            translated_blocks = translator.translate(blocks, image, extra_context)
+            translated_blocks = translator.translate(
+                blocks,
+                image,
+                extra_context,
+                project_glossary=project_glossary,
+            )
             apply_translation_result_dictionary(
                 blocks,
                 self.main_page.settings_page.get_translation_result_dictionary_rules(),

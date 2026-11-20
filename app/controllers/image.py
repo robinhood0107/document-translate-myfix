@@ -593,6 +593,21 @@ class ImageStateController:
         self.main.in_memory_patches.clear()
         self.main.project_file = None
         self.main.project_kind = PROJECT_KIND_SINGLE
+        self.main.project_glossary = []
+        set_project_glossary = getattr(
+            self.main.settings_page,
+            "set_project_glossary_settings",
+            None,
+        )
+        if callable(set_project_glossary):
+            set_project_glossary([])
+        enable_project_glossary = getattr(
+            self.main.settings_page,
+            "set_project_glossary_editor_enabled",
+            None,
+        )
+        if callable(enable_project_glossary):
+            enable_project_glossary(True)
         self.main.project_output_preferences = default_project_output_preferences()
         self.main.clear_automatic_output_metric_cache()
         try:

@@ -70,6 +70,10 @@ class _MainStub(QtCore.QObject):
         self.batch_pause_requested = True
         return True
 
+    def _run_guarded_project_transition(self, proceed) -> bool:
+        proceed()
+        return True
+
 
 class SeriesControllerBusyTests(unittest.TestCase):
     def _series_file(self, temp_dir: str, *, status: str = "pending") -> str:

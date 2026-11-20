@@ -14,6 +14,7 @@ from ...utils.translator_utils import (
     get_raw_text,
     set_texts_from_json,
 )
+from ...utils.project_glossary import format_project_glossary_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class BaseLLMTranslation(LLMTranslation):
         extra_context: str,
         *,
         prepared_translation_request: tuple[str, tuple[int, ...], str] | None = None,
+        project_glossary: list[dict[str, str]] | None = None,
     ) -> list[TextBlock]:
         """
         Translate text blocks using LLM.
@@ -95,7 +97,12 @@ class BaseLLMTranslation(LLMTranslation):
             return blk_list
 
         system_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
-        user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{translation_input_json}"
+        glossary_prompt = format_project_glossary_prompt(project_glossary or [])
+        user_prompt = (
+            f"{extra_context}\n{glossary_prompt}\nMake the translation sound as natural as possible.\nTranslate this:\n{translation_input_json}"
+            if glossary_prompt
+            else f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{translation_input_json}"
+        )
         
         entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
         if self.debug_log_raw_response:

@@ -1117,6 +1117,33 @@ class ComicTranslate(ComicTranslateUI):
             source="batch",
         )
 
+    def _has_project_glossary_draft(self) -> bool:
+        getter = getattr(
+            self.settings_page,
+            "has_unpersisted_project_glossary_draft",
+            None,
+        )
+        return bool(getter()) if callable(getter) else False
+
+    def _confirm_project_glossary_draft_discard(self) -> bool:
+        if not self._has_project_glossary_draft():
+            return True
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Question)
+        msg_box.setWindowTitle(self.tr("Unsaved Changes"))
+        msg_box.setText(self.settings_page.ui.project_page.glossary_status_label.text())
+        discard_btn = msg_box.addButton(
+            self.tr("Don't Save"),
+            QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_btn = msg_box.addButton(
+            self.tr("Cancel"),
+            QtWidgets.QMessageBox.ButtonRole.RejectRole,
+        )
+        msg_box.setDefaultButton(cancel_btn)
+        msg_box.exec()
+        return msg_box.clickedButton() == discard_btn
+
     def _run_guarded_project_transition(self, proceed: Callable[[], None]) -> bool:
         try:
             self.text_ctrl._commit_pending_text_command()
@@ -1128,6 +1155,12 @@ class ComicTranslate(ComicTranslateUI):
             return False
         if getattr(getattr(self, "open_workspace_ctrl", None), "active", False):
             return False
+
+        has_glossary_draft = self._has_project_glossary_draft()
+        if has_glossary_draft:
+            if not self._confirm_project_glossary_draft_discard():
+                return False
+            has_glossary_draft = False
 
         if not self.has_unsaved_changes():
             proceed()
@@ -1143,7 +1176,10 @@ class ComicTranslate(ComicTranslateUI):
         msg_box = QtWidgets.QMessageBox(self)
         msg_box.setIcon(QtWidgets.QMessageBox.Question)
         msg_box.setWindowTitle(self.tr("Unsaved Changes"))
-        msg_box.setText(self.tr("Save changes to this file?"))
+        message = self.tr("Save changes to this file?")
+        if has_glossary_draft:
+            message += "\n\n" + self.settings_page.ui.project_page.glossary_status_label.text()
+        msg_box.setText(message)
         save_btn = msg_box.addButton(self.tr("Save"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
         dont_save_btn = msg_box.addButton(
             self.tr("Don't Save"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole
@@ -3272,11 +3308,16 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         if not getattr(self, "_skip_close_prompt", False):
+            has_glossary_draft = self._has_project_glossary_draft()
+            if has_glossary_draft and not self._confirm_project_glossary_draft_discard():
+                event.ignore()
+                return
             if self.has_unsaved_changes():
                 msg_box = QtWidgets.QMessageBox(self)
                 msg_box.setIcon(QtWidgets.QMessageBox.Question)
                 msg_box.setWindowTitle(self.tr("Unsaved Changes"))
-                msg_box.setText(self.tr("Save changes to this file?"))
+                message = self.tr("Save changes to this file?")
+                msg_box.setText(message)
                 save_btn = msg_box.addButton(self.tr("Save"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
                 msg_box.addButton(self.tr("Don't Save"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
                 cancel_btn = msg_box.addButton(self.tr("Cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)

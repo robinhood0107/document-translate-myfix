@@ -77,6 +77,7 @@ class _ProjectMain:
         self.project_file = project_file
         self.project_kind = PROJECT_KIND_SINGLE
         self.project_output_preferences = {}
+        self.project_glossary = []
 
 
 class ProjectCheckpointReferenceTests(unittest.TestCase):
@@ -814,6 +815,7 @@ class ProjectCheckpointProjectStateTests(unittest.TestCase):
                         restored.project_checkpoint_reference,
                     ).exists()
                 )
+                self.assertEqual(restored.project_glossary, [])
             finally:
                 shutil_target = getattr(restored, "temp_dir", "")
                 if shutil_target:
@@ -839,6 +841,78 @@ class ProjectCheckpointProjectStateTests(unittest.TestCase):
                 )
             finally:
                 close_cached_connection(project_path)
+
+    def test_project_glossary_round_trip_and_old_file_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = os.path.join(temp_dir, "glossary.ctpr")
+            glossary = [
+                {"source": "north", "translation": "북쪽"},
+                {"source": "south", "translation": "남쪽"},
+            ]
+            source = _ProjectMain(project_path)
+            source.project_glossary = glossary
+            restored = _ProjectMain()
+            try:
+                save_state_to_proj_file_v2(source, project_path)
+                load_state_from_proj_file_v2(restored, project_path)
+                self.assertEqual(restored.project_glossary, glossary)
+
+                connection = sqlite3.connect(project_path)
+                row = connection.execute(
+                    "SELECT manifest_blob FROM project_manifest WHERE id = 1"
+                ).fetchone()
+                manifest = msgpack.unpackb(row[0], strict_map_key=True)
+                manifest.pop("llm_project_glossary")
+                with connection:
+                    connection.execute(
+                        "UPDATE project_manifest SET manifest_blob = ? WHERE id = 1",
+                        (msgpack.packb(manifest, use_bin_type=True),),
+                    )
+                connection.close()
+                close_cached_connection(project_path)
+
+                load_state_from_proj_file_v2(restored, project_path)
+                self.assertEqual(restored.project_glossary, [])
+            finally:
+                close_cached_connection(project_path)
+
+    def test_invalid_project_glossary_fails_before_temp_db_allocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = os.path.join(temp_dir, "existing.ctpr")
+            original = b"existing project bytes"
+            Path(project_path).write_bytes(original)
+            source = _ProjectMain(project_path)
+            source.project_glossary = [
+                {"source": "incomplete", "translation": ""},
+            ]
+
+            with mock.patch(
+                "app.projects.project_state_v2.tempfile.mkstemp",
+                side_effect=AssertionError("temporary project database allocated"),
+            ) as make_temp:
+                with self.assertRaisesRegex(ValueError, "both terms"):
+                    save_state_to_proj_file_v2(source, project_path)
+
+            make_temp.assert_not_called()
+            self.assertEqual(Path(project_path).read_bytes(), original)
+
+    def test_loaded_project_glossary_is_restored_into_settings_ui(self) -> None:
+        glossary = [{"source": "north", "translation": "북쪽"}]
+        extra_context = SimpleNamespace(setPlainText=mock.Mock())
+        setter = mock.Mock()
+        controller = ProjectController.__new__(ProjectController)
+        controller.main = SimpleNamespace(
+            project_glossary=glossary,
+            settings_page=SimpleNamespace(
+                ui=SimpleNamespace(extra_context=extra_context),
+                set_project_glossary_settings=setter,
+            ),
+        )
+
+        controller.load_state_to_ui("raw context")
+
+        extra_context.setPlainText.assert_called_once_with("raw context")
+        setter.assert_called_once_with(glossary)
 
     def test_old_v2_without_reference_opens_and_adds_reference_on_next_save(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from PySide6 import QtCore
@@ -53,6 +54,21 @@ class _MainStub(QtCore.QObject):
         self.pipeline_status_panel = _PipelineStatusStub()
         self.series_workspace = _SeriesWorkspaceStub()
         self.image_ctrl = _ImageControllerStub()
+        combo = SimpleNamespace(
+            count=lambda: 0,
+            itemText=lambda _index: "",
+            itemData=lambda _index: "",
+        )
+        self.settings_page = SimpleNamespace(
+            set_project_glossary_editor_enabled=mock.Mock(),
+            ui=SimpleNamespace(
+                translator_combo=combo,
+                ocr_combo=combo,
+                workflow_mode_combo=combo,
+                value_mappings={},
+            ),
+        )
+        self.lang_mapping = {}
         self.project_file = None
         self.project_kind = "single"
         self.clean_calls = 0
@@ -206,6 +222,33 @@ class ChildTeardownGuardTests(unittest.TestCase):
             warn_mock.assert_called_once()
             self.assertIn(work_dir, warn_mock.call_args.args[1])
 
+    def test_failed_child_to_board_transition_keeps_glossary_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = _controller(_series_file(temp_dir))
+            work_dir = self._child_active(controller, temp_dir)
+            controller._child_unsynced_dirty = True
+            controller.main._has_project_glossary_draft = mock.Mock(
+                return_value=True
+            )
+            controller.main._confirm_project_glossary_draft_discard = mock.Mock(
+                return_value=True
+            )
+
+            with (
+                mock.patch.object(
+                    controller,
+                    "sync_active_child_to_series",
+                    side_effect=RuntimeError("sync failed"),
+                ),
+                mock.patch.object(controller, "_warn_child_sync_failed") as warn_mock,
+            ):
+                controller._show_board(push_history=False)
+
+            self.assertTrue(controller.is_child_project_active())
+            self.assertEqual(controller.active_child_temp_dir, work_dir)
+            self.assertEqual(controller.main.image_ctrl.clear_calls, 0)
+            warn_mock.assert_called_once_with(work_dir)
+
     def test_clean_child_teardown_does_not_sync(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             controller = _controller(_series_file(temp_dir))
@@ -217,6 +260,55 @@ class ChildTeardownGuardTests(unittest.TestCase):
                 controller._show_board(push_history=False)
 
             sync_mock.assert_not_called()
+
+    def test_child_and_board_transitions_guard_glossary_editor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = _controller(_series_file(temp_dir))
+            controller.main.temp_dir = temp_dir
+            controller.main.show_main_page = mock.Mock()
+            controller.main.project_ctrl = SimpleNamespace(
+                load_state_to_ui=mock.Mock(),
+                update_ui_from_project=mock.Mock(),
+            )
+
+            def run_workspace(*, prepare, commit, **_kwargs):
+                prepared = prepare(lambda _event: None)
+                commit(prepared)
+
+            controller.main.open_workspace_ctrl = SimpleNamespace(
+                run=run_workspace
+            )
+            settings_page = controller.main.settings_page
+            child_path = os.path.join(temp_dir, "series-child", "child.ctpr")
+            snapshot = SimpleNamespace(apply=mock.Mock(), saved_context="")
+            prepared_child = SimpleNamespace(
+                child_project_path=child_path,
+                snapshot=snapshot,
+            )
+            with (
+                mock.patch.object(
+                    controller,
+                    "_open_child_worker",
+                    return_value=prepared_child,
+                ),
+                mock.patch.object(controller, "_set_series_window_title"),
+                mock.patch.object(controller, "_refresh_workspace_navigation"),
+            ):
+                controller._apply_workspace_state()
+                self.assertEqual(
+                    settings_page.set_project_glossary_editor_enabled.call_args.args,
+                    (False,),
+                )
+                settings_page.set_project_glossary_editor_enabled.reset_mock()
+
+                controller._open_item("item-1", push_history=False)
+                self.assertTrue(controller.is_child_project_active())
+                settings_page.set_project_glossary_editor_enabled.assert_called_with(True)
+                settings_page.set_project_glossary_editor_enabled.reset_mock()
+
+                controller._show_board(push_history=False)
+                self.assertFalse(controller.is_child_project_active())
+                settings_page.set_project_glossary_editor_enabled.assert_called_with(False)
 
     def test_batch_finish_sync_failure_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

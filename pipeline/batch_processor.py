@@ -1317,6 +1317,9 @@ class BatchProcessor:
 
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = build_export_timestamp()
+        project_glossary_snapshot = list(
+            getattr(self.main_page, "project_glossary", []) or []
+        )
         self._export_run_tokens = {}
         reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
         if callable(reset_output_reservations):
@@ -2412,7 +2415,9 @@ class BatchProcessor:
                         self.main_page,
                         source_lang,
                         target_lang,
+                        project_glossary=project_glossary_snapshot,
                     )
+                    project_glossary = translator.project_glossary
                     translator_engine = (
                         translator.engine.__class__.__name__
                     )
@@ -2422,6 +2427,7 @@ class BatchProcessor:
                             image,
                             extra_context,
                             self.cache_manager,
+                            project_glossary=project_glossary,
                         )
                     )
                     apply_translation_result_dictionary(
