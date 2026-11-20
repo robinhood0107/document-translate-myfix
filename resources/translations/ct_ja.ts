@@ -2545,6 +2545,38 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Project Glossary</source>
+        <translation>プロジェクト用語集</translation>
+    </message>
+    <message>
+        <source>Preferred translations are sent to LLM translators as guidance. They do not replace translated text automatically.</source>
+        <translation>推奨訳は参考情報としてLLM翻訳に渡されます。翻訳文を自動的に置き換えるものではありません。</translation>
+    </message>
+    <message>
+        <source>Source term</source>
+        <translation>原語</translation>
+    </message>
+    <message>
+        <source>Preferred translation</source>
+        <translation>推奨訳</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>追加</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>削除</translation>
+    </message>
+    <message>
+        <source>Open a series item to edit its project glossary.</source>
+        <translation>プロジェクト用語集を編集するには、シリーズ項目を開いてください。</translation>
+    </message>
+    <message>
+        <source>The whole glossary table is pending and is not saved until every row is complete. Complete every row to save it; otherwise, saving keeps the last valid table and discards these edits.</source>
+        <translation>すべての行が完成するまで、用語集テーブル全体は保留され保存されません。保存するにはすべての行を完成させてください。そうしない場合、最後に有効だった表が保持され、今回の編集は破棄されます。</translation>
+    </message>
+    <message>
         <source>Choose Auto-Save Folder</source>
         <translation>自動保存フォルダーの選択</translation>
     </message>

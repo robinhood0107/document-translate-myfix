@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
@@ -21,6 +23,7 @@ from modules.translation.llm.custom_local_gemma import (
 from modules.utils.exceptions import LocalServiceConnectionError
 from modules.utils.textblock import TextBlock
 from modules.utils.correction_dictionary import apply_translation_result_dictionary
+from modules.utils.project_glossary import project_glossary_sha256
 from modules.translation.translation_memory import TranslationMemoryStore
 
 
@@ -1140,6 +1143,156 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                 second.last_benchmark_stats["gemma_tm_stale_reject_count"],
                 1,
             )
+
+    def test_project_glossary_reaches_gemma_prompt_and_result_identity(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            engine = self._engine()
+            engine.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": True,
+                },
+            )
+            engine.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            store.record_tm_candidate("source", "stale", "Japanese", "Korean")
+            store.set_approved([store.list_tm_entries()[0]["id"]], True)
+            glossary = [{"source": "north", "translation": "북쪽"}]
+            blocks = self._blocks("source")
+            image = np.zeros((1, 1, 3), dtype=np.uint8)
+            self.assertTrue(
+                engine.prepare_translation(
+                    blocks,
+                    "",
+                    project_glossary=glossary,
+                )
+            )
+            plan = engine._pending_translation_plan
+            self.assertIsNotNone(plan)
+            identity = json.loads(plan.targets[0].identity_json)
+            self.assertEqual(
+                identity["project_glossary_sha256"],
+                project_glossary_sha256(glossary),
+            )
+            self.assertNotIn("north", plan.targets[0].identity_json)
+            captured: list[tuple[str, str]] = []
+
+            def mock_request(system_prompt, user_prompt, **_kwargs):
+                captured.append((system_prompt, user_prompt))
+                return _response({"translation": "fresh"})
+
+            with mock.patch.object(
+                engine,
+                "_request_translation",
+                side_effect=mock_request,
+            ) as request:
+                engine.translate(
+                    blocks,
+                    image,
+                    "",
+                    project_glossary=glossary,
+                )
+
+            request.assert_called_once()
+            self.assertIn('"source":"north"', captured[0][0])
+            self.assertEqual(blocks[0].translation, "fresh")
+            self.assertEqual(
+                [entry["translation"] for entry in store.list_tm_entries()],
+                ["stale"],
+            )
+
+    def test_overlapping_glossary_requests_keep_prompt_cache_and_write_parity(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            engine = self._engine()
+            engine.contextual_merge_input = False
+            engine.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            plan_ready = threading.Barrier(2)
+            overlap = threading.Barrier(2)
+            engine.configure_runtime_hooks(
+                ensure_runtime=lambda: overlap.wait(timeout=10),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            first_glossary = [{"source": "north", "translation": "blue"}]
+            second_glossary = [{"source": "north", "translation": "green"}]
+            captured: list[tuple[str, str]] = []
+            capture_lock = threading.Lock()
+
+            def mock_request(system_prompt, user_prompt, **_kwargs):
+                translation = (
+                    "blue-result"
+                    if '"translation":"blue"' in system_prompt
+                    else "green-result"
+                )
+                with capture_lock:
+                    captured.append((system_prompt, user_prompt))
+                return _response({"block_0": translation})
+
+            def translate(glossary, *, force_overlap=False):
+                blocks = self._blocks("shared-neutral-source")
+                if force_overlap:
+                    engine.prepare_translation(
+                        blocks,
+                        "",
+                        project_glossary=glossary,
+                    )
+                    plan_ready.wait(timeout=10)
+                engine.translate(
+                    blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                    project_glossary=glossary,
+                )
+                return blocks[0].translation
+
+            with mock.patch.object(
+                engine,
+                "_request_translation",
+                side_effect=mock_request,
+            ) as request:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    first_future = executor.submit(
+                        translate,
+                        first_glossary,
+                        force_overlap=True,
+                    )
+                    second_future = executor.submit(
+                        translate,
+                        second_glossary,
+                        force_overlap=True,
+                    )
+                    self.assertEqual(first_future.result(timeout=15), "blue-result")
+                    self.assertEqual(second_future.result(timeout=15), "green-result")
+                self.assertEqual(store.stats()["result_cache_entries"], 2)
+
+                self.assertEqual(translate(first_glossary), "blue-result")
+                self.assertEqual(translate(second_glossary), "green-result")
+                self.assertEqual(request.call_count, 2)
+
+            self.assertEqual(len(captured), 2)
+            self.assertEqual(
+                sum('"translation":"blue"' in prompt for prompt, _user in captured),
+                1,
+            )
+            self.assertEqual(
+                sum('"translation":"green"' in prompt for prompt, _user in captured),
+                1,
+            )
+            self.assertFalse(hasattr(engine, "_active_project_glossary"))
 
     def test_result_cache_rejects_prompt_model_sampler_context_and_tm_changes(
         self,

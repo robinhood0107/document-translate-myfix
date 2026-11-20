@@ -2544,6 +2544,38 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Project Glossary</source>
+        <translation>项目词汇表</translation>
+    </message>
+    <message>
+        <source>Preferred translations are sent to LLM translators as guidance. They do not replace translated text automatically.</source>
+        <translation>首选译文会作为参考信息发送给LLM翻译器，不会自动替换译文。</translation>
+    </message>
+    <message>
+        <source>Source term</source>
+        <translation>源词</translation>
+    </message>
+    <message>
+        <source>Preferred translation</source>
+        <translation>首选译文</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>添加</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>删除</translation>
+    </message>
+    <message>
+        <source>Open a series item to edit its project glossary.</source>
+        <translation>打开系列项目以编辑其项目词汇表。</translation>
+    </message>
+    <message>
+        <source>The whole glossary table is pending and is not saved until every row is complete. Complete every row to save it; otherwise, saving keeps the last valid table and discards these edits.</source>
+        <translation>所有行完整之前，整个词汇表都处于待保存状态。请填写所有行以保存；否则将保留上次有效的词汇表并丢弃这些编辑。</translation>
+    </message>
+    <message>
         <source>Choose Auto-Save Folder</source>
         <translation>选择自动保存文件夹</translation>
     </message>

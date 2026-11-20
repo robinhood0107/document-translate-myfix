@@ -23,6 +23,7 @@ from modules.utils.automatic_output import (
 from modules.utils.export_paths import normalize_export_source_record, sanitize_export_path_component
 from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
 from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
+from modules.utils.project_glossary import normalize_project_glossary
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -228,6 +229,9 @@ def save_state_to_proj_file_v2(
     호출자가 `comic_translate.project_file` 을 잠시 바꿔치기했다가 되돌렸다.
     그 전역 조작은 저장을 워커 스레드로 옮기는 순간 메인 스레드와 경합한다.
     """
+    saved_project_glossary = normalize_project_glossary(
+        getattr(comic_translate, "project_glossary", [])
+    )
     encoder = ProjectEncoder()
     saved_checkpoint_reference = checkpoint_reference_for_save(
         checkpoint_reference
@@ -426,6 +430,7 @@ def save_state_to_proj_file_v2(
         "displayed_images": list(comic_translate.displayed_images),
         "loaded_images": comic_translate.loaded_images,
         "llm_extra_context": comic_translate.settings_page.get_llm_settings().get("extra_context", ""),
+        "llm_project_glossary": saved_project_glossary,
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
         "latest_automatic_report": comic_translate.batch_report_ctrl.export_latest_report_for_project(),
@@ -718,6 +723,9 @@ def _materialize_from_manifest_and_pages(
             "output_preset_override_value": manifest.get("output_preset_override_value"),
         }
     )
+    comic_translate.project_glossary = normalize_project_glossary(
+        manifest.get("llm_project_glossary")
+    )
 
     return manifest.get("llm_extra_context", "")
 
@@ -755,6 +763,7 @@ def _load_from_legacy_state_blob(
         "displayed_images": state.get("displayed_images", []),
         "loaded_images": state.get("loaded_images", []),
         "llm_extra_context": state.get("llm_extra_context", ""),
+        "llm_project_glossary": state.get("llm_project_glossary", []),
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
         "latest_automatic_report": state.get("latest_automatic_report"),

@@ -74,11 +74,20 @@ class TranslationHandler:
             settings_page = self.main_page.settings_page
             image = self.main_page.image_viewer.get_image_array()
             extra_context = settings_page.get_llm_settings()['extra_context']
+            project_glossary = list(
+                getattr(self.main_page, "project_glossary", []) or []
+            )
             translator_key = settings_page.get_tool_selection('translator')
 
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 
-            translator = Translator(self.main_page, source_lang, target_lang)
+            translator = Translator(
+                self.main_page,
+                source_lang,
+                target_lang,
+                project_glossary=project_glossary,
+            )
+            project_glossary = translator.project_glossary
 
             if single_block:
                 blk = self.pipeline.get_selected_block()
@@ -111,6 +120,7 @@ class TranslationHandler:
                         translator.translation_cache_identity_for_blocks(
                             cache_scope_blocks,
                             prepared_request,
+                            project_glossary,
                         ),
                     )
                     cached_translation = (
@@ -156,6 +166,7 @@ class TranslationHandler:
                     extra_context,
                     requested_indices=[selected_index],
                     _prepared_translation_request=prepared_request,
+                    project_glossary=project_glossary,
                 )
                 if legacy_cache_key is not None:
                     if translator.is_llm_engine:
@@ -204,6 +215,7 @@ class TranslationHandler:
                     image,
                     extra_context,
                     self.cache_manager,
+                    project_glossary=project_glossary,
                 )
                 self._apply_translation_corrections(self.main_page.blk_list)
                 set_upper_case(self.main_page.blk_list, upper_case)
@@ -241,10 +253,24 @@ class TranslationHandler:
         # Perform translation on the visible image with filtered blocks
         settings_page = self.main_page.settings_page
         extra_context = settings_page.get_llm_settings()['extra_context']
+        project_glossary = list(
+            getattr(self.main_page, "project_glossary", []) or []
+        )
         upper_case = settings_page.ui.uppercase_checkbox.isChecked()
         
-        translator = Translator(self.main_page, source_lang, target_lang)
-        translator.translate(visible_blocks, visible_image, extra_context)
+        translator = Translator(
+            self.main_page,
+            source_lang,
+            target_lang,
+            project_glossary=project_glossary,
+        )
+        project_glossary = translator.project_glossary
+        translator.translate(
+            visible_blocks,
+            visible_image,
+            extra_context,
+            project_glossary=project_glossary,
+        )
         self._apply_translation_corrections(visible_blocks)
         
         # Translation is set, now restore original coordinates

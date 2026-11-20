@@ -2537,7 +2537,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
                 self.uses_persistent_translation_memory = True
 
             @staticmethod
-            def prepare_translation(_blocks, _extra_context) -> bool:
+            def prepare_translation(_blocks, _extra_context, **_kwargs) -> bool:
                 return False
 
             @staticmethod
@@ -2546,6 +2546,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
                 _image,
                 _extra_context,
                 _cache_manager,
+                **_kwargs,
             ):
                 for block in blocks:
                     block.translation = "cached"
@@ -3245,7 +3246,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
                 self.engine = SimpleNamespace(last_benchmark_stats={})
                 self._prepare_results = iter((False, True))
 
-            def prepare_translation(self, _blocks, _extra_context) -> bool:
+            def prepare_translation(self, _blocks, _extra_context, **_kwargs) -> bool:
                 return next(self._prepare_results)
 
             @staticmethod

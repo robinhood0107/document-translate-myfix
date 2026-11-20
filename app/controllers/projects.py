@@ -2426,6 +2426,30 @@ class ProjectController:
     
     def load_state_to_ui(self, saved_ctx: str):
         self.main.settings_page.ui.extra_context.setPlainText(saved_ctx)
+        setter = getattr(
+            self.main.settings_page,
+            "set_project_glossary_settings",
+            None,
+        )
+        if callable(setter):
+            setter(getattr(self.main, "project_glossary", []))
+        enable_editor = getattr(
+            self.main.settings_page,
+            "set_project_glossary_editor_enabled",
+            None,
+        )
+        if callable(enable_editor):
+            series_controller = getattr(self.main, "series_ctrl", None)
+            is_child_active = getattr(
+                series_controller,
+                "is_child_project_active",
+                None,
+            )
+            enable_editor(
+                getattr(self.main, "project_kind", PROJECT_KIND_SINGLE)
+                != PROJECT_KIND_SERIES
+                or bool(callable(is_child_active) and is_child_active())
+            )
 
     def save_main_page_settings(self):
         settings = QSettings("ComicLabs", "ComicTranslate")

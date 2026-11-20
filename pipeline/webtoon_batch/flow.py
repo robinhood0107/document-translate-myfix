@@ -519,6 +519,9 @@ class FlowMixin:
     ):
         try:
             timestamp = build_export_timestamp()
+            project_glossary_snapshot = list(
+                getattr(self.main_page, "project_glossary", []) or []
+            )
             self._export_run_tokens = {}
             image_list = selected_paths if selected_paths is not None else self.main_page.image_files
             total_images = len(image_list)
@@ -804,6 +807,7 @@ class FlowMixin:
                     source_lang=source_lang,
                     target_lang=target_lang,
                     image_path=current_record["path"],
+                    project_glossary_snapshot=project_glossary_snapshot,
                 )
                 self._record_webtoon_source_unit_outcomes(
                     current_record["path"],

@@ -804,8 +804,15 @@ class ConsecutiveStageBatchedOutputTests(unittest.TestCase):
 
             processor._render_all = render
 
-            def open_child(item_id: str, *, push_history: bool, after_loaded) -> None:
+            def open_child(
+                item_id: str,
+                *,
+                push_history: bool,
+                after_loaded,
+                draft_guard_passed: bool = False,
+            ) -> None:
                 self.assertFalse(push_history)
+                self.assertTrue(draft_guard_passed)
                 controller.active_child_item_id = item_id
                 controller.active_child_project_path = str(output_root / f"{item_id}.ctpr")
                 after_loaded()

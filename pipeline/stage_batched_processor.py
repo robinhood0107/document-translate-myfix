@@ -73,6 +73,9 @@ from modules.ocr.common.result_contract import (
     finalize_ocr_processing_contracts,
     select_translate_inpaint_blocks,
 )
+from modules.utils.project_glossary import (
+    project_glossary_sha256,
+)
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
     resolve_stage_batched_ocr_policy,
@@ -4113,6 +4116,7 @@ class StageBatchedProcessor(BatchProcessor):
         translator: Translator,
         *,
         extra_context: str,
+        project_glossary: list[dict[str, str]],
         runtime_manager: Any,
     ) -> dict[str, Any] | None:
         checkpoint_store = getattr(self, "_project_checkpoint_store", None)
@@ -4219,6 +4223,11 @@ class StageBatchedProcessor(BatchProcessor):
                     settings_page.get_translation_result_dictionary_rules()
                     or []
                 ),
+                project_glossary_sha256=(
+                    project_glossary_sha256(project_glossary)
+                    if project_glossary
+                    else ""
+                ),
             )
         except Exception:
             logger.warning(
@@ -4253,6 +4262,9 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         extra_context = settings_page.get_llm_settings()["extra_context"]
+        raw_project_glossary = list(
+            getattr(self.main_page, "project_glossary", []) or []
+        )
         translator_key = settings_page.get_tool_selection("translator")
         runtime_manager = getattr(
             self.main_page,
@@ -4313,12 +4325,14 @@ class StageBatchedProcessor(BatchProcessor):
                 self.main_page,
                 ctx.source_lang,
                 ctx.target_lang,
+                project_glossary=raw_project_glossary,
             )
             prepared_translators[id(ctx)] = translator
             identity = self._build_project_translation_identity(
                 ctx,
                 translator,
                 extra_context=extra_context,
+                project_glossary=raw_project_glossary,
                 runtime_manager=runtime_manager,
             )
             if identity is not None:
@@ -4363,6 +4377,7 @@ class StageBatchedProcessor(BatchProcessor):
                     translator.prepare_translation(
                         ctx.translation_blocks,
                         extra_context,
+                        project_glossary=raw_project_glossary,
                     )
                     or gemma_runtime_required
                 )
@@ -4537,6 +4552,7 @@ class StageBatchedProcessor(BatchProcessor):
                     runtime_required_now = translator.prepare_translation(
                         ctx.translation_blocks,
                         extra_context,
+                        project_glossary=raw_project_glossary,
                     )
                 if runtime_required_now and not gemma_runtime_started:
                     gate = dict(getattr(self, "_inpainter_release_gate", {}) or {})
@@ -4571,6 +4587,7 @@ class StageBatchedProcessor(BatchProcessor):
                             source_image,
                             extra_context,
                             self.cache_manager,
+                            project_glossary=raw_project_glossary,
                         )
                 finally:
                     self._release_source_image(ctx)

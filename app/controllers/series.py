@@ -487,6 +487,7 @@ class SeriesController(QtCore.QObject):
     def _apply_workspace_state(self) -> None:
         if not self.series_file:
             return
+        self._sync_project_glossary_editor()
         queue_runtime = self.active_queue_runtime()
         self.main.series_workspace.configure_options(**self._series_workspace_options())
         self.main.series_workspace.set_global_settings(
@@ -502,6 +503,15 @@ class SeriesController(QtCore.QObject):
             recovery_loaded=self._recovery_loaded,
         )
         self._refresh_workspace_navigation()
+
+    def _sync_project_glossary_editor(self) -> None:
+        setter = getattr(
+            self.main.settings_page,
+            "set_project_glossary_editor_enabled",
+            None,
+        )
+        if callable(setter):
+            setter(self.is_child_project_active() and not self._queue_active)
 
     def _queue_change_locked(self) -> bool:
         return bool(self._queue_active and self.series_file)
@@ -1081,7 +1091,11 @@ class SeriesController(QtCore.QObject):
             self._show_queue_locked_message()
             return
         self.main._run_guarded_project_transition(
-            lambda: self._open_item(item_id, push_history=True)
+            lambda: self._open_item(
+                item_id,
+                push_history=True,
+                draft_guard_passed=True,
+            )
         )
 
     def _open_item(
@@ -1090,11 +1104,26 @@ class SeriesController(QtCore.QObject):
         *,
         push_history: bool,
         after_loaded: Callable[[], None] | None = None,
+        draft_guard_passed: bool = False,
     ) -> None:
         if not self.series_file:
             return
         item = self._find_item(item_id)
         if item is None:
+            return
+        draft_pending = bool(
+            getattr(self.main, "_has_project_glossary_draft", lambda: False)()
+        )
+        confirm_draft = getattr(
+            self.main,
+            "_confirm_project_glossary_draft_discard",
+            None,
+        )
+        if (
+            not draft_guard_passed
+            and draft_pending
+            and (not callable(confirm_draft) or not confirm_draft())
+        ):
             return
         work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
         coordinator = self.main.open_workspace_ctrl
@@ -1120,6 +1149,7 @@ class SeriesController(QtCore.QObject):
             self.active_child_temp_dir = work_dir
             self.main.project_file = self.series_file
             self.main.project_kind = PROJECT_KIND_SERIES
+            self._sync_project_glossary_editor()
             self.main.show_main_page()
             self.main.project_ctrl.update_ui_from_project()
             self._set_series_window_title(str(item.get("display_name") or ""))
@@ -1137,11 +1167,33 @@ class SeriesController(QtCore.QObject):
             self._show_queue_locked_message()
             return
         self.main._run_guarded_project_transition(
-            lambda: self._show_board(push_history=True)
+            lambda: self._show_board(
+                push_history=True,
+                draft_guard_passed=True,
+            )
         )
 
-    def _show_board(self, *, push_history: bool) -> None:
+    def _show_board(
+        self,
+        *,
+        push_history: bool,
+        draft_guard_passed: bool = False,
+    ) -> None:
         if not self.series_file:
+            return
+        draft_pending = bool(
+            getattr(self.main, "_has_project_glossary_draft", lambda: False)()
+        )
+        confirm_draft = getattr(
+            self.main,
+            "_confirm_project_glossary_draft_discard",
+            None,
+        )
+        if (
+            draft_pending
+            and not draft_guard_passed
+            and (not callable(confirm_draft) or not confirm_draft())
+        ):
             return
         if push_history:
             self._push_history()
@@ -1150,6 +1202,9 @@ class SeriesController(QtCore.QObject):
         # dirty 표시까지 지우기 때문에, 여기서 놓치면 조용히 사라진다.
         stale_work_dir = self.active_child_temp_dir
         sync_ok = self._sync_active_child_before_teardown()
+        if not sync_ok and draft_pending:
+            self._warn_child_sync_failed(stale_work_dir)
+            return
         self.main.image_ctrl.clear_state()
         self._clear_active_child_materialization(preserve_workdir=not sync_ok)
         if not sync_ok:
@@ -1216,9 +1271,13 @@ class SeriesController(QtCore.QObject):
         if push_history:
             self._push_history()
         if kind == "child" and state.get("item_id"):
-            self._open_item(str(state["item_id"]), push_history=False)
+            self._open_item(
+                str(state["item_id"]),
+                push_history=False,
+                draft_guard_passed=True,
+            )
             return
-        self._show_board(push_history=False)
+        self._show_board(push_history=False, draft_guard_passed=True)
 
     def request_remove_item(self, item_id: str) -> None:
         if self._queue_change_locked():
@@ -1699,11 +1758,22 @@ class SeriesController(QtCore.QObject):
             request_batch_pause()
         self._apply_workspace_state()
 
-    def resume_queue_translation(self) -> None:
+    def resume_queue_translation(
+        self,
+        *,
+        transition_guard_passed: bool = False,
+    ) -> None:
         if not self.series_file or self._queue_active:
             return
         queue_runtime = self.active_queue_runtime()
         if queue_runtime.get("queue_state") != "paused":
+            return
+        if not transition_guard_passed:
+            self.main._run_guarded_project_transition(
+                lambda: self.resume_queue_translation(
+                    transition_guard_passed=True
+                )
+            )
             return
         self._pause_requested = False
         self._queue_active = True
@@ -1747,7 +1817,7 @@ class SeriesController(QtCore.QObject):
             return
         self.request_open_item(failed_item_id)
 
-    def open_active_queue_item(self) -> None:
+    def open_active_queue_item(self, *, transition_guard_passed: bool = False) -> None:
         if not self.series_file:
             return
         active_item_id = str(self.active_queue_runtime().get("active_item_id") or "").strip()
@@ -1757,7 +1827,23 @@ class SeriesController(QtCore.QObject):
             self.main.show_main_page()
             self._set_series_window_title(self._active_child_display_name())
             return
-        self._open_item(active_item_id, push_history=False)
+        if not transition_guard_passed and (
+            bool(getattr(self.main, "has_unsaved_changes", lambda: False)())
+            or bool(
+                getattr(self.main, "_has_project_glossary_draft", lambda: False)()
+            )
+        ):
+            self.main._run_guarded_project_transition(
+                lambda: self.open_active_queue_item(
+                    transition_guard_passed=True
+                )
+            )
+            return
+        self._open_item(
+            active_item_id,
+            push_history=False,
+            draft_guard_passed=True,
+        )
 
     def show_board_during_queue(self) -> None:
         if not self.series_file:
@@ -2017,7 +2103,11 @@ class SeriesController(QtCore.QObject):
         )
         QtCore.QTimer.singleShot(0, self.main, self._run_next_queue_item)
 
-    def start_queue_translation(self) -> None:
+    def start_queue_translation(
+        self,
+        *,
+        transition_guard_passed: bool = False,
+    ) -> None:
         if not self.series_file or self._queue_active or self.is_queue_paused():
             return
         series_settings = normalize_series_settings(self.series_manifest.get("series_settings"))
@@ -2036,6 +2126,14 @@ class SeriesController(QtCore.QObject):
                 duration=5,
                 closable=True,
                 source="series",
+            )
+            return
+
+        if not transition_guard_passed:
+            self.main._run_guarded_project_transition(
+                lambda: self.start_queue_translation(
+                    transition_guard_passed=True
+                )
             )
             return
 
@@ -2134,6 +2232,7 @@ class SeriesController(QtCore.QObject):
             next_item_id,
             push_history=False,
             after_loaded=self._start_batch_for_active_child,
+            draft_guard_passed=True,
         )
 
     def _start_batch_for_active_child(self) -> None:

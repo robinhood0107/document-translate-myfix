@@ -439,6 +439,9 @@ class ManualWorkflowController:
             target_lang_fallback = self.main.t_combo.currentText()
             settings_page = self.main.settings_page
             extra_context = settings_page.get_llm_settings()["extra_context"]
+            project_glossary = list(
+                getattr(self.main, "project_glossary", []) or []
+            )
             translator_key = settings_page.get_tool_selection("translator")
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 
@@ -454,12 +457,18 @@ class ManualWorkflowController:
                         continue
                     source_lang = state.get("source_lang", source_lang_fallback)
                     target_lang = state.get("target_lang", target_lang_fallback)
-                    translator = Translator(self.main, source_lang, target_lang)
+                    translator = Translator(
+                        self.main,
+                        source_lang,
+                        target_lang,
+                        project_glossary=project_glossary,
+                    )
                     _, cache_status = translator.translate_with_cache_manager(
                         blk_list,
                         image,
                         extra_context,
                         self.main.pipeline.cache_manager,
+                        project_glossary=translator.project_glossary,
                     )
                     apply_translation_result_dictionary(
                         blk_list,

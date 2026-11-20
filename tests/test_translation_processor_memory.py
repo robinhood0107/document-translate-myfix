@@ -32,6 +32,7 @@ from modules.utils.textblock import TextBlock
 from pipeline.cache_manager import CacheManager
 from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 from pipeline.translation_handler import TranslationHandler
+from pipeline.webtoon_batch.chunk import ChunkMixin
 
 
 class _Settings:
@@ -180,6 +181,74 @@ class TranslationProcessorMemoryTests(unittest.TestCase):
             text_bbox=np.array([0, 0, 100, 100]),
             text="source",
         )
+
+    def test_project_glossary_reaches_common_prompt_and_stales_legacy_cache(self) -> None:
+        settings = _CustomServiceSettings(
+            "example-model",
+            "https://example.invalid/v1",
+        )
+        main_page = SimpleNamespace(
+            settings_page=settings,
+            lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+            project_glossary=[],
+        )
+        block = self._block()
+        block.translation = "old"
+        blocks = [block]
+        cache_manager = CacheManager()
+        prompts: list[str] = []
+
+        def mock_provider(_engine, user_prompt, _system_prompt, _image):
+            prompts.append(user_prompt)
+            return '{"block_0":"fresh"}'
+
+        first_glossary = [
+            {"source": "north", "translation": "북쪽"},
+        ]
+        second_glossary = [
+            {"source": "north", "translation": "북부"},
+        ]
+        image = np.zeros((4, 4, 3), dtype=np.uint8)
+        with (
+            mock.patch.object(TranslationFactory, "_engines", {}),
+            mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
+        ):
+            first = Translator(
+                main_page,
+                "Japanese",
+                "Korean",
+                project_glossary=first_glossary,
+            )
+            first_identity = first.translation_cache_identity_for_blocks(blocks)
+            first.translate_with_cache_manager(
+                blocks,
+                image,
+                "context as typed",
+                cache_manager,
+                project_glossary=first_glossary,
+            )
+            second = Translator(
+                main_page,
+                "Japanese",
+                "Korean",
+                project_glossary=second_glossary,
+            )
+            second_identity = second.translation_cache_identity_for_blocks(blocks)
+            second.translate_with_cache_manager(
+                blocks,
+                image,
+                "context as typed",
+                cache_manager,
+                project_glossary=second_glossary,
+            )
+
+        self.assertNotEqual(first_identity, second_identity)
+        self.assertNotIn("북쪽", repr(first_identity))
+        self.assertEqual(len(cache_manager.translation_cache), 2)
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("context as typed", prompts[0])
+        self.assertIn('"source":"north"', prompts[0])
+        self.assertIn('"translation":"북부"', prompts[1])
 
     def test_translator_initialization_is_lazy_but_cache_miss_starts_runtime(self) -> None:
         settings = _Settings(
@@ -955,7 +1024,15 @@ class LLMTranslationResponseContractTests(unittest.TestCase):
         )
         return handler
 
-    def _run_stage(self, blocks: list[TextBlock], response: str):
+    def _run_stage(
+        self,
+        blocks: list[TextBlock],
+        response: str,
+        *,
+        project_glossary: list[dict[str, str]] | None = None,
+        additional_pages: list[StagePageContext] | None = None,
+        provider_side_effect=None,
+    ):
         settings = _CustomServiceSettings(
             "example-model",
             "https://example.invalid/v1",
@@ -968,6 +1045,7 @@ class LLMTranslationResponseContractTests(unittest.TestCase):
         main_page = SimpleNamespace(
             settings_page=settings,
             lang_mapping={"Japanese": "Japanese", "Korean": "Korean"},
+            project_glossary=list(project_glossary or []),
             local_translation_runtime_manager=None,
             image_ctrl=image_ctrl,
             image_skipped=image_skipped,
@@ -1001,14 +1079,91 @@ class LLMTranslationResponseContractTests(unittest.TestCase):
         def mock_provider(_engine, user_prompt, _system_prompt, _image):
             self.assertIsInstance(_engine, CustomServiceTranslation)
             prompts.append(user_prompt)
+            if callable(provider_side_effect):
+                provider_side_effect(main_page, len(prompts))
             return response
 
         with (
             mock.patch.object(TranslationFactory, "_engines", {}),
             mock.patch.object(GPTTranslation, "_perform_translation", mock_provider),
         ):
-            processor._translate_all([page])
+            processor._translate_all([page, *(additional_pages or [])])
         return processor, page, image_ctrl, prompts
+
+    def test_stage_batch_uses_one_glossary_snapshot_for_all_pages(self) -> None:
+        glossary = [{"source": "north", "translation": "blue"}]
+        second_page = StagePageContext(
+            image_path="second_source_page.png",
+            image_name="second_source_page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((4, 4, 3), dtype=np.uint8),
+            blk_list=[self._block("second-source", "old", 1)],
+        )
+
+        def change_live_state(main_page, request_count):
+            if request_count == 1:
+                main_page.project_glossary = [
+                    {"source": "north", "translation": "green"},
+                ]
+
+        _processor, _page, _image_ctrl, prompts = self._run_stage(
+            [self._block("first-source", "old", 0)],
+            '{"block_0":"fresh"}',
+            project_glossary=glossary,
+            additional_pages=[second_page],
+            provider_side_effect=change_live_state,
+        )
+
+        self.assertEqual(len(prompts), 2)
+        for prompt in prompts:
+            self.assertIn('"translation":"blue"', prompt)
+            self.assertNotIn('"translation":"green"', prompt)
+
+    def test_webtoon_batch_forwards_its_glossary_snapshot(self) -> None:
+        settings = _CustomServiceSettings(
+            "example-model",
+            "https://example.invalid/v1",
+        )
+        main_page = SimpleNamespace(settings_page=settings)
+        processor = SimpleNamespace(
+            main_page=main_page,
+            _emit_benchmark_event=mock.Mock(),
+        )
+        blocks = [self._block("webtoon-source", "old", 0)]
+        image = np.zeros((4, 4, 3), dtype=np.uint8)
+        glossary = [{"source": "north", "translation": "blue"}]
+        translator = mock.Mock()
+        translator.project_glossary = glossary
+        translator.engine = SimpleNamespace()
+        translator.translate.return_value = blocks
+
+        with mock.patch(
+            "pipeline.webtoon_batch.chunk.Translator",
+            return_value=translator,
+        ) as translator_factory:
+            ChunkMixin._run_translation_on_blocks(
+                processor,
+                image,
+                blocks,
+                "Japanese",
+                "Korean",
+                "neutral-page.png",
+                project_glossary_snapshot=glossary,
+            )
+
+        translator_factory.assert_called_once_with(
+            main_page,
+            "Japanese",
+            "Korean",
+            project_glossary=glossary,
+        )
+        translator.translate.assert_called_once_with(
+            blocks,
+            image,
+            "",
+            project_glossary=glossary,
+        )
 
     @staticmethod
     def _request_payload(user_prompt: str) -> dict:

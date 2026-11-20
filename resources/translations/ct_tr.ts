@@ -2545,6 +2545,38 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Project Glossary</source>
+        <translation>Proje Sözlüğü</translation>
+    </message>
+    <message>
+        <source>Preferred translations are sent to LLM translators as guidance. They do not replace translated text automatically.</source>
+        <translation>Tercih edilen çeviriler, LLM çevirmenlerine yol gösterici bilgi olarak gönderilir. Çevrilmiş metnin yerini otomatik olarak almaz.</translation>
+    </message>
+    <message>
+        <source>Source term</source>
+        <translation>Kaynak terim</translation>
+    </message>
+    <message>
+        <source>Preferred translation</source>
+        <translation>Tercih edilen çeviri</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Ekle</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Sil</translation>
+    </message>
+    <message>
+        <source>Open a series item to edit its project glossary.</source>
+        <translation>Proje sözlüğünü düzenlemek için bir seri öğesi açın.</translation>
+    </message>
+    <message>
+        <source>The whole glossary table is pending and is not saved until every row is complete. Complete every row to save it; otherwise, saving keeps the last valid table and discards these edits.</source>
+        <translation>Tüm sözlük tablosu beklemededir ve bütün satırlar tamamlanana kadar kaydedilmez. Kaydetmek için tüm satırları tamamlayın; aksi hâlde son geçerli tablo korunur ve bu değişiklikler atılır.</translation>
+    </message>
+    <message>
         <source>Choose Auto-Save Folder</source>
         <translation>Otomatik Kaydetme Klasörünü Seçin</translation>
     </message>

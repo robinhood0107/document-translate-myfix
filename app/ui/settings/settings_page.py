@@ -5,12 +5,12 @@ import json
 from dataclasses import asdict, is_dataclass
 from typing import Mapping
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtWidgets
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 
+from app.projects.project_types import PROJECT_KIND_SERIES
 from modules.ocr.selection import (
-    LEGACY_PAGE_WORKFLOW_MODE,
     OCR_DEFAULT_LABEL,
     OCR_MODE_BEST_LOCAL,
     OCR_MODE_DEFAULT,
@@ -76,6 +76,7 @@ from modules.utils.automatic_output import (
     normalize_project_output_preferences,
     resolve_automatic_output_settings,
 )
+from modules.utils.project_glossary import normalize_project_glossary
 
 
 logger = logging.getLogger(__name__)
@@ -570,6 +571,11 @@ class SettingsPage(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(SettingsPage, self).__init__(parent)
 
+        self.main_window = parent
+        if self.main_window is not None and not hasattr(
+            self.main_window, "project_glossary"
+        ):
+            self.main_window.project_glossary = []
         self.ui = SettingsPageUI(self)
         self._loading_settings = False
         # `load_settings` 밖에서 위젯을 채우는 구간의 깊이. 시작 시퀀스가 대표적이다.
@@ -619,6 +625,9 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.automatic_output_archive_image_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
         self.ui.automatic_output_archive_level_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.project_page.glossary_changed.connect(
+            self._on_project_glossary_changed
+        )
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.series_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
@@ -880,6 +889,49 @@ class SettingsPage(QtWidgets.QWidget):
             "extra_context": self.ui.extra_context.toPlainText(),
             "image_input_enabled": self.ui.image_checkbox.isChecked(),
         }
+
+    def get_project_glossary_settings(self):
+        return normalize_project_glossary(
+            self.ui.project_page.glossary_entries()
+        )
+
+    def set_project_glossary_settings(self, entries) -> None:
+        normalized = normalize_project_glossary(entries)
+        self.ui.project_page.set_glossary_entries(normalized)
+        if self.main_window is not None:
+            self.main_window.project_glossary = normalized
+
+    def set_project_glossary_editor_enabled(self, enabled: bool) -> None:
+        self.ui.project_page.set_glossary_editor_enabled(enabled)
+
+    def has_unpersisted_project_glossary_draft(self) -> bool:
+        return self.ui.project_page.has_unpersisted_glossary_draft()
+
+    def _on_project_glossary_changed(self) -> None:
+        page = self.ui.project_page
+        try:
+            normalized = normalize_project_glossary(page.glossary_entries())
+        except ValueError:
+            page.set_glossary_validation_error(True)
+            return
+        page.set_glossary_validation_error(False)
+        if self.main_window is None:
+            return
+        if getattr(self.main_window, "project_kind", None) == PROJECT_KIND_SERIES:
+            series_controller = getattr(self.main_window, "series_ctrl", None)
+            is_child_active = getattr(
+                series_controller,
+                "is_child_project_active",
+                None,
+            )
+            if not callable(is_child_active) or not is_child_active():
+                return
+        if getattr(self.main_window, "project_glossary", []) == normalized:
+            return
+        self.main_window.project_glossary = normalized
+        mark_dirty = getattr(self.main_window, "mark_project_dirty", None)
+        if callable(mark_dirty):
+            mark_dirty()
 
     def get_paddleocr_vl_settings(self):
         persisted_settings = QSettings("ComicLabs", "ComicTranslate")

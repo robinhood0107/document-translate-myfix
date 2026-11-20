@@ -2545,6 +2545,38 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Project Glossary</source>
+        <translation>Glossaire du projet</translation>
+    </message>
+    <message>
+        <source>Preferred translations are sent to LLM translators as guidance. They do not replace translated text automatically.</source>
+        <translation>Les traductions préférées sont transmises aux traducteurs LLM à titre indicatif. Elles ne remplacent pas automatiquement le texte traduit.</translation>
+    </message>
+    <message>
+        <source>Source term</source>
+        <translation>Terme source</translation>
+    </message>
+    <message>
+        <source>Preferred translation</source>
+        <translation>Traduction préférée</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Ajouter</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Supprimer</translation>
+    </message>
+    <message>
+        <source>Open a series item to edit its project glossary.</source>
+        <translation>Ouvrez un élément de la série pour modifier son glossaire de projet.</translation>
+    </message>
+    <message>
+        <source>The whole glossary table is pending and is not saved until every row is complete. Complete every row to save it; otherwise, saving keeps the last valid table and discards these edits.</source>
+        <translation>L&apos;ensemble du glossaire reste en attente et n&apos;est pas enregistré tant que chaque ligne n&apos;est pas complète. Complétez chaque ligne pour l&apos;enregistrer ; sinon, la dernière version valide sera conservée et ces modifications seront abandonnées.</translation>
+    </message>
+    <message>
         <source>Choose Auto-Save Folder</source>
         <translation>Choisissez le dossier d&apos;enregistrement automatique</translation>
     </message>

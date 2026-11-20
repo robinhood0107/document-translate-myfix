@@ -981,8 +981,9 @@ def build_translation_identity(
     translator_settings: Mapping[str, Any],
     runtime_identity: Mapping[str, Any],
     dictionary_fingerprint: str,
+    project_glossary_sha256: str = "",
 ) -> dict[str, Any]:
-    return {
+    identity = {
         "schema_version": PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION,
         "ocr_fingerprint": str(ocr_fingerprint or ""),
         "source_lang": str(source_lang or ""),
@@ -995,6 +996,9 @@ def build_translation_identity(
         "dictionary_fingerprint": str(dictionary_fingerprint or ""),
         "state_schema": TRANSLATION_STATE_SCHEMA_VERSION,
     }
+    if project_glossary_sha256:
+        identity["project_glossary_sha256"] = str(project_glossary_sha256)
+    return identity
 
 
 def build_translation_fingerprint(identity: Mapping[str, Any]) -> str:

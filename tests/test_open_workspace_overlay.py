@@ -94,6 +94,18 @@ class OpenWorkspaceOverlayTests(unittest.TestCase):
     def _transaction_main(old_handler, old_root: str = ""):
         image = object()
         undo_stack = object()
+        project_glossary_draft = [
+            {"source": "north", "translation": "북쪽"},
+            {"source": "unfinished", "translation": ""},
+        ]
+        project_page = SimpleNamespace(
+            glossary_entries=mock.Mock(return_value=project_glossary_draft),
+            _glossary_validation_error=True,
+            _glossary_editor_enabled=False,
+            set_glossary_entries=mock.Mock(),
+            set_glossary_validation_error=mock.Mock(),
+            set_glossary_editor_enabled=mock.Mock(),
+        )
         main = SimpleNamespace(
             curr_img_idx=0,
             image_files=["old-page.png"],
@@ -109,6 +121,12 @@ class OpenWorkspaceOverlayTests(unittest.TestCase):
             loaded_images=["old-page.png"],
             undo_stacks={"old-page.png": undo_stack},
             file_handler=old_handler,
+            project_glossary=[
+                {"source": "north", "translation": "북쪽"},
+            ],
+            settings_page=SimpleNamespace(
+                ui=SimpleNamespace(project_page=project_page)
+            ),
             _workspace_owned_temp_roots=[old_root] if old_root else [],
             image_ctrl=SimpleNamespace(
                 update_image_cards=mock.Mock(),
@@ -129,12 +147,16 @@ class OpenWorkspaceOverlayTests(unittest.TestCase):
         old_image_data = main.image_data
         old_image_files = main.image_files
         old_undo_stacks = main.undo_stacks
+        old_project_glossary = list(main.project_glossary)
         prepared = PreparedWorkspace(new_handler, ["new-page.png"], None)
         transaction = _WorkspaceCommitTransaction(main, prepared)
 
         transaction.isolate_mutable_state()
         main.image_data["new-page.png"] = object()
         main.image_files = ["new-page.png"]
+        main.project_glossary = [
+            {"source": "south", "translation": "남쪽"},
+        ]
         main.file_handler = new_handler
         transaction.rollback()
 
@@ -144,6 +166,16 @@ class OpenWorkspaceOverlayTests(unittest.TestCase):
         self.assertIs(main.undo_stacks, old_undo_stacks)
         self.assertEqual(list(main.undo_stacks), ["old-page.png"])
         self.assertEqual(main.image_files, ["old-page.png"])
+        self.assertEqual(main.project_glossary, old_project_glossary)
+        project_page = main.settings_page.ui.project_page
+        project_page.set_glossary_entries.assert_called_once_with(
+            [
+                {"source": "north", "translation": "북쪽"},
+                {"source": "unfinished", "translation": ""},
+            ]
+        )
+        project_page.set_glossary_validation_error.assert_called_once_with(True)
+        project_page.set_glossary_editor_enabled.assert_called_once_with(False)
         old_handler.cleanup.assert_not_called()
         new_handler.cleanup.assert_called_once_with()
 

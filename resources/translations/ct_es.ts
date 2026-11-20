@@ -2545,6 +2545,38 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Project Glossary</source>
+        <translation>Glosario del proyecto</translation>
+    </message>
+    <message>
+        <source>Preferred translations are sent to LLM translators as guidance. They do not replace translated text automatically.</source>
+        <translation>Las traducciones preferidas se envían a los traductores LLM como orientación. No sustituyen automáticamente el texto traducido.</translation>
+    </message>
+    <message>
+        <source>Source term</source>
+        <translation>Término de origen</translation>
+    </message>
+    <message>
+        <source>Preferred translation</source>
+        <translation>Traducción preferida</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Añadir</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Eliminar</translation>
+    </message>
+    <message>
+        <source>Open a series item to edit its project glossary.</source>
+        <translation>Abre un elemento de la serie para editar su glosario.</translation>
+    </message>
+    <message>
+        <source>The whole glossary table is pending and is not saved until every row is complete. Complete every row to save it; otherwise, saving keeps the last valid table and discards these edits.</source>
+        <translation>Toda la tabla del glosario queda pendiente y no se guarda hasta que todas las filas estén completas. Completa todas las filas para guardarla; de lo contrario, se conservará la última tabla válida y se descartarán estos cambios.</translation>
+    </message>
+    <message>
         <source>Choose Auto-Save Folder</source>
         <translation>Elija la carpeta de guardado automático</translation>
     </message>

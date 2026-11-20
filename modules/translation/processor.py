@@ -14,6 +14,10 @@ from .translation_memory import (
     DEFAULT_TM_CANDIDATE_LIMIT,
     TranslationMemoryStore,
 )
+from ..utils.project_glossary import (
+    normalize_project_glossary,
+    project_glossary_sha256,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +31,14 @@ class Translator:
     - LLM-based translators (e.g GPT, Claude, Gemini, Deepseek, Custom Service, Custom Local Server(Gemma))
     """
     
-    def __init__(self, main_page, source_lang: str = "", target_lang: str = ""):
+    def __init__(
+        self,
+        main_page,
+        source_lang: str = "",
+        target_lang: str = "",
+        *,
+        project_glossary: list[dict[str, str]] | None = None,
+    ):
         """
         Initialize translator with settings and languages.
         
@@ -69,6 +80,16 @@ class Translator:
         
         # Track engine type for method dispatching
         self.is_llm_engine = isinstance(self.engine, LLMTranslation)
+        raw_glossary = (
+            getattr(main_page, "project_glossary", [])
+            if project_glossary is None
+            else project_glossary
+        )
+        self.project_glossary = (
+            normalize_project_glossary(raw_glossary)
+            if self.is_llm_engine
+            else []
+        )
         self._configure_local_gemma_engine()
 
     def _translation_memory_settings(self) -> dict:
@@ -182,17 +203,29 @@ class Translator:
         extra_context: str = "",
         *,
         requested_indices: Iterable[int] | None = None,
+        project_glossary: list[dict[str, str]] | None = None,
     ) -> bool:
         """Resolve persistent hits and report whether local Gemma is still needed."""
 
         prepare = getattr(self.engine, "prepare_translation", None)
         if self._local_gemma_runtime_manager is None or not callable(prepare):
             return False
+        glossary = (
+            self.project_glossary
+            if project_glossary is None
+            else normalize_project_glossary(project_glossary)
+        )
+        prepare_kwargs = (
+            {"project_glossary": glossary}
+            if glossary or (project_glossary is not None and self.project_glossary)
+            else {}
+        )
         return bool(
             prepare(
                 blk_list,
                 extra_context,
                 requested_indices=requested_indices,
+                **prepare_kwargs,
             )
         )
 
@@ -211,6 +244,7 @@ class Translator:
         self,
         blk_list: list[TextBlock],
         prepared_request: tuple[str, tuple[int, ...], str] | None = None,
+        project_glossary: list[dict[str, str]] | None = None,
     ):
         identity = getattr(self, "translation_cache_identity", None)
         if not self.is_llm_engine:
@@ -221,6 +255,13 @@ class Translator:
                 include_blank=False,
             )
         request_scope = hashlib.sha256(prepared_request[0].encode("utf-8")).hexdigest()
+        glossary = (
+            getattr(self, "project_glossary", [])
+            if project_glossary is None
+            else normalize_project_glossary(project_glossary)
+        )
+        if glossary:
+            return identity, request_scope, project_glossary_sha256(glossary)
         return identity, request_scope
 
     def translate_with_cache_manager(
@@ -229,11 +270,27 @@ class Translator:
         image: np.ndarray,
         extra_context: str,
         cache_manager,
+        *,
+        project_glossary: list[dict[str, str]] | None = None,
     ) -> tuple[list[TextBlock], str]:
         """Translate a full block list while preserving the legacy non-Gemma cache."""
 
+        glossary_kwargs = (
+            {"project_glossary": project_glossary}
+            if project_glossary
+            or (
+                project_glossary is not None
+                and getattr(self, "project_glossary", [])
+            )
+            else {}
+        )
         if self.uses_persistent_translation_memory or cache_manager is None:
-            translated = self.translate(blk_list, image, extra_context)
+            translated = self.translate(
+                blk_list,
+                image,
+                extra_context,
+                **glossary_kwargs,
+            )
             return translated, self.translation_cache_status
 
         prepared_request = None
@@ -261,6 +318,7 @@ class Translator:
             self.translation_cache_identity_for_blocks(
                 blk_list,
                 prepared_request,
+                project_glossary,
             ),
         )
         if cache_manager._can_serve_all_blocks_from_translation_cache(
@@ -274,13 +332,19 @@ class Translator:
             return blk_list, "hit"
 
         if prepared_request is None:
-            translated = self.translate(blk_list, image, extra_context)
+            translated = self.translate(
+                blk_list,
+                image,
+                extra_context,
+                **glossary_kwargs,
+            )
         else:
             translated = self.translate(
                 blk_list,
                 image,
                 extra_context,
                 _prepared_translation_request=prepared_request,
+                **glossary_kwargs,
             )
         # Keep the legacy cache useful for remote/traditional translators, but
         # store the raw translation before user dictionary substitution so both
@@ -340,6 +404,7 @@ class Translator:
         *,
         requested_indices: Iterable[int] | None = None,
         _prepared_translation_request: tuple[str, tuple[int, ...], str] | None = None,
+        project_glossary: list[dict[str, str]] | None = None,
     ) -> list[TextBlock]:
         """
         Translate text in text blocks using the configured translation engine.
@@ -367,6 +432,14 @@ class Translator:
         )
 
         if self.is_llm_engine:
+            glossary = (
+                getattr(self, "project_glossary", [])
+                if project_glossary is None
+                else normalize_project_glossary(project_glossary)
+            )
+            glossary_kwargs = (
+                {"project_glossary": glossary} if glossary else {}
+            )
             # LLM translators need image and extra context
             if self._local_gemma_runtime_manager is not None:
                 try:
@@ -375,6 +448,7 @@ class Translator:
                         image,
                         extra_context,
                         requested_indices=requested_indices,
+                        **glossary_kwargs,
                     )
                 finally:
                     self._report_translation_memory_warning()
@@ -392,12 +466,18 @@ class Translator:
                     )
                 requested_blocks = [blk_list[index] for index in requested]
             if _prepared_translation_request is None:
-                return self.engine.translate(requested_blocks, image, extra_context)
+                return self.engine.translate(
+                    requested_blocks,
+                    image,
+                    extra_context,
+                    **glossary_kwargs,
+                )
             return self.engine.translate(
                 requested_blocks,
                 image,
                 extra_context,
                 prepared_translation_request=_prepared_translation_request,
+                **glossary_kwargs,
             )
         else:
             # Text-based translators only need the text blocks
