@@ -87,6 +87,117 @@ class TaskRunnerQueueRecoveryTests(unittest.TestCase):
             "operation queued after clear_operation_queue never started",
         )
 
+    def test_cancelled_operation_cannot_advance_the_replacement_queue(self) -> None:
+        old_started = Event()
+        release_old = Event()
+        old_finished = Event()
+        new_started = Event()
+        release_new = Event()
+        third_started = Event()
+
+        def old_task() -> None:
+            old_started.set()
+            release_old.wait()
+
+        def new_task() -> None:
+            new_started.set()
+            release_new.wait()
+
+        try:
+            self.runner.run_threaded(old_task, finished_callback=old_finished.set)
+            self.assertTrue(self._drain(old_started.is_set), "old task never started")
+
+            self.runner.cancel_current_task()
+            self.runner.run_threaded(new_task)
+            self.runner.run_threaded(lambda: third_started.set())
+            self.assertTrue(self._drain(new_started.is_set), "new task never started")
+            self.assertEqual(len(self.runner.operation_queue), 1)
+            new_worker = self.main.current_worker
+
+            release_old.set()
+            self.assertTrue(self._drain(old_finished.is_set), "old finish callback was lost")
+            self.assertFalse(
+                self._drain(third_started.is_set, timeout_ms=150),
+                "old task advanced the replacement queue while its owner was running",
+            )
+            self.assertIs(self.main.current_worker, new_worker)
+        finally:
+            release_old.set()
+            release_new.set()
+
+        self.assertTrue(
+            self._drain(lambda: third_started.is_set() and not self.runner.is_processing_queue),
+            "replacement queue did not drain after its owner finished",
+        )
+
+    def test_posted_terminal_callback_cannot_advance_a_replacement_queue(self) -> None:
+        old_finished = Event()
+        new_started = Event()
+        release_new = Event()
+        third_started = Event()
+
+        self.runner.run_threaded(lambda: None, finished_callback=old_finished.set)
+        self.assertTrue(
+            self.main.threadpool.waitForDone(4000), "old task did not finish in the pool"
+        )
+        self.assertFalse(old_finished.is_set())
+
+        try:
+            self.runner.cancel_current_task()
+            self.runner.run_threaded(lambda: (new_started.set(), release_new.wait()))
+            self.runner.run_threaded(lambda: third_started.set())
+            self.assertTrue(self._drain(new_started.is_set), "new task never started")
+            new_worker = self.main.current_worker
+
+            self.assertTrue(self._drain(old_finished.is_set), "posted old finish callback was lost")
+            self.assertFalse(
+                self._drain(third_started.is_set, timeout_ms=150),
+                "a terminal callback posted before cancellation advanced the replacement queue",
+            )
+            self.assertIs(self.main.current_worker, new_worker)
+        finally:
+            release_new.set()
+
+        self.assertTrue(
+            self._drain(lambda: third_started.is_set() and not self.runner.is_processing_queue),
+            "replacement queue did not drain after its owner finished",
+        )
+
+    def test_posted_dequeue_callback_cannot_change_replacement_owner_state(self) -> None:
+        new_started = Event()
+        release_new = Event()
+        third_started = Event()
+        replacement_started = Event()
+
+        def replace_queue() -> None:
+            self.runner.cancel_current_task()
+            self.runner.run_threaded(lambda: (new_started.set(), release_new.wait()))
+            self.runner.run_threaded(lambda: third_started.set())
+            replacement_started.set()
+
+        def old_finished() -> None:
+            QtCore.QTimer.singleShot(0, self.main, replace_queue)
+
+        self.runner.run_threaded(lambda: None, finished_callback=old_finished)
+
+        try:
+            self.assertTrue(
+                self._drain(replacement_started.is_set), "replacement queue never started"
+            )
+            self.assertTrue(self._drain(new_started.is_set), "new task never started")
+            self.assertFalse(
+                self._drain(third_started.is_set, timeout_ms=150),
+                "an already-posted dequeue callback advanced the replacement queue",
+            )
+            self.assertTrue(self.runner.is_processing_queue)
+        finally:
+            release_new.set()
+
+        self.assertTrue(
+            self._drain(lambda: third_started.is_set() and not self.runner.is_processing_queue),
+            "replacement queue did not drain after its owner finished",
+        )
+
     def test_error_callback_failure_still_advances_the_queue(self) -> None:
         done: list[str] = []
 

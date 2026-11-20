@@ -20,6 +20,7 @@ class TaskRunnerController:
         self.main = main
         self.operation_queue = deque()
         self.is_processing_queue = False
+        self._queue_generation = 0
 
     def run_threaded(
         self,
@@ -61,7 +62,7 @@ class TaskRunnerController:
         }
         self.operation_queue.append(operation)
         if not self.is_processing_queue:
-            self._process_next_operation()
+            self._process_next_operation(self._queue_generation)
 
     def _queue_operation(
         self,
@@ -85,9 +86,12 @@ class TaskRunnerController:
 
         self.operation_queue.append(operation)
         if not self.is_processing_queue:
-            self._process_next_operation()
+            self._process_next_operation(self._queue_generation)
 
-    def _process_next_operation(self):
+    def _process_next_operation(self, queue_generation: int):
+        if queue_generation != self._queue_generation:
+            return
+
         if not self.operation_queue:
             self.is_processing_queue = False
             return
@@ -106,7 +110,11 @@ class TaskRunnerController:
             except Exception:
                 logger.exception("Finished callback failed for a queued operation.")
             finally:
-                QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
+                QtCore.QTimer.singleShot(
+                    0,
+                    self.main,
+                    lambda: self._process_next_operation(queue_generation),
+                )
 
         def enhanced_error_callback(error_tuple):
             try:
@@ -205,6 +213,7 @@ class TaskRunnerController:
         )
 
     def clear_operation_queue(self):
+        self._queue_generation += 1
         self.operation_queue.clear()
         # 비운 큐에는 처리할 것이 남아 있지 않으므로 busy 플래그가 살아남으면 안
         # 된다. 남은 플래그는 이후 모든 작업을 큐에 가둔다.
