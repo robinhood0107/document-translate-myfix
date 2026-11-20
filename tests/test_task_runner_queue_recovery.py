@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 import unittest
+from threading import Event
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -103,6 +104,55 @@ class TaskRunnerQueueRecoveryTests(unittest.TestCase):
             self._drain(lambda: "after" in done),
             "queue stayed blocked after an error callback raised",
         )
+
+    def test_error_handoff_waits_for_the_successor_to_finish(self) -> None:
+        error_calls: list[tuple] = []
+        finished_calls: list[str] = []
+        started: list[str] = []
+        successor_started = Event()
+        release_successor = Event()
+        third_started = Event()
+
+        def failing_task() -> None:
+            raise ValueError("task failed")
+
+        def blocking_successor() -> None:
+            started.append("successor")
+            successor_started.set()
+            release_successor.wait()
+
+        def third_task() -> None:
+            started.append("third")
+            third_started.set()
+
+        try:
+            self.runner.run_threaded(
+                failing_task,
+                None,
+                error_calls.append,
+                lambda: finished_calls.append("finished"),
+            )
+            self.runner.run_threaded(blocking_successor)
+            self.runner.run_threaded(third_task)
+
+            callbacks_delivered = self._drain(
+                lambda: successor_started.is_set()
+                and error_calls
+                and finished_calls
+            )
+            third_started_before_release = third_started.is_set()
+        finally:
+            release_successor.set()
+
+        self.assertTrue(callbacks_delivered, "error or finished callback was not delivered")
+        self.assertTrue(
+            self._drain(
+                lambda: third_started.is_set() and not self.runner.is_processing_queue
+            ),
+            "queue did not finish after the successor was released",
+        )
+        self.assertEqual(started, ["successor", "third"])
+        self.assertFalse(third_started_before_release)
 
     def test_progress_worker_delivers_events_and_result_on_ui_thread(self) -> None:
         progress: list[dict] = []

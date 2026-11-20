@@ -114,8 +114,6 @@ class TaskRunnerController:
                     operation["error_callback"](error_tuple)
             except Exception:
                 logger.exception("Error callback failed for a queued operation.")
-            finally:
-                QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_result_callback(result):
             if operation["result_callback"]:
